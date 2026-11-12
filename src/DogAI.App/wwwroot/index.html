@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Nothing may load from, or connect to, anywhere but the app itself. -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self'; connect-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'" />
+    <title>DOG AI</title>
+    <base href="/" />
+</head>
+<body>
+    <div id="app">Loading…</div>
+    <script src="_framework/blazor.webview.js"></script>
+</body>
+</html>
