@@ -10,6 +10,7 @@
     <AssemblyName>DogAI</AssemblyName>
     <Product>DOG AI</Product>
     <Version>0.1.0</Version>
+    <ApplicationIcon>Assets\dogai.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

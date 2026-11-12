@@ -118,7 +118,7 @@ html, body { margin: 0; height: 100%; background: #16181c; }
 
 /* ───────── 3a. Workbench ───────── */
 .skin-workbench { display: flex; }
-.skin-workbench .rail { flex: none; width: 64px; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 14px; }
+.skin-workbench .rail { --logo-cut: var(--surface); flex: none; width: 64px; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 14px; }
 .skin-workbench .nav { flex-direction: column; gap: 6px; }
 .skin-workbench .nav-btn { flex-direction: column; gap: 3px; font-size: 10px; width: 54px; padding: 8px 0; }
 .skin-workbench .nav-btn.active { background: var(--surface2); box-shadow: inset 2px 0 0 var(--accent); }
