@@ -401,6 +401,7 @@ button.cite:hover { border-color: var(--accent); }
 .hit-head b { color: var(--accent); margin-right: 4px; }
 .hit-text { color: var(--muted); font-size: .9em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .center-row { justify-content: center; }
+.empty-action { display: flex; margin-top: 14px; }
 .li-link { color: var(--muted); margin-bottom: 6px; }
 .li-link:hover { color: var(--text); }
 

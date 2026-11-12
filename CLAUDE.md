@@ -82,6 +82,15 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - The opening passage has no parent; `PromptLayout.OpeningTurn` supplies the user turn chat templates need before it.
 - In UI code the name `Story` is the page class inside `Pages/Story.razor`; the pages alias the model as `StoryInfo`. Components are in `Components/Stories/`. Selecting text for a rewrite is reported by `wwwroot/js/story.js` and matched back to the markdown source with `TextSpan.Find`.
 
+## How documents work
+
+- Core: `DogAI.Core/Documents`. `TextExtractor` reads PDF (PdfPig), .docx (zip + XML, DTDs refused) and text/code; `Chunker` cuts passages (~800 chars, page and heading kept); `Retriever` merges vector and BM25 rankings; `DocumentLibrary` adds files, indexes in the background, searches, and recalls messages. Storage is `ICollectionStore` (`SqliteCollectionStore`).
+- Every document belongs to a collection. A chat's own files are a collection with `ConversationId` set (hidden from lists, deleted with the chat); shared ones are attached through `ChatCollections`.
+- The search model is `IEmbedder`, implemented by `EmbeddingServer` (Engine): a second llama-server with `--embedding`, started on demand. Its model is `DefaultModels["embedding"]`, else the first embedding model found (`GgufInfo.IsEmbedding`). Query and document wording per model family is `EmbeddingFormat`. Vectors are normalised floats tagged with the model id; never compare across models.
+- In `ChatService.Documents.cs`, passages (`PromptPartKind.Documents`) and recalled messages (`Recall`) are parts that `PromptLayout` places in the newest user turn (`PromptPart.InUserTurn`), never the system message, to keep llama-server's prompt cache. What a reply was given is `ReplySources` JSON in `ChatMessage.SourcesJson`.
+- Citations: `MarkdownRenderer.Render(text, citations)` turns `[n]` into `button.cite`; `chat.js` `watchCitations` passes clicks to `ChatThread.OpenCitation`. `PassageViewer` shows the passage in its document as plain text.
+- `dotnet test` does not rebuild the app. Run `dotnet build DogAI.sln` before `tools/walkthrough.ps1`, or it runs old code.
+
 Check every new screen in all three skins, dark and light. Say plainly what was and was not looked at. Never point a test run at the real data folder (`%LOCALAPPDATA%\DOG-AI`).
 
 ## Machine
