@@ -6,6 +6,12 @@
 <div class="panel">
     <h4>Memory</h4>
     <label class="check"><input type="checkbox" checked="@Conversation.MemoryEnabled" @onchange="SetMemoryAsync" /> @Label</label>
+    @if (Conversation.MemoryEnabled)
+    {
+        <label class="check" title="Uses the document search model. Messages left out of the prompt that match the newest one are sent along with it.">
+            <input type="checkbox" checked="@Conversation.RecallEnabled" @onchange="SetRecallAsync" /> @RecallLabel
+        </label>
+    }
     @if (SummaryState is { } summary)
     {
         <p class="small">@summary</p>
@@ -26,6 +32,8 @@
 
     [Parameter] public string Label { get; set; } = "Summarise older messages when the chat outgrows the model's context";
 
+    [Parameter] public string RecallLabel { get; set; } = "Also find older messages that matter to the newest one";
+
     /// <summary>A line saying what the summary covers, or why there is none. Null while memory is off.</summary>
     private string? SummaryState
     {
@@ -44,6 +52,12 @@
     private async Task SetMemoryAsync(ChangeEventArgs e)
     {
         Conversation.MemoryEnabled = e.Value is true;
+        await Store.UpdateAsync(Conversation);
+    }
+
+    private async Task SetRecallAsync(ChangeEventArgs e)
+    {
+        Conversation.RecallEnabled = e.Value is true;
         await Store.UpdateAsync(Conversation);
     }
 

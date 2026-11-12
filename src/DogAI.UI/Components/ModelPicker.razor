@@ -125,7 +125,8 @@
         _engineMissing = Engine.FindExecutable() is null;
         _refused = null;
         var folders = new[] { _settings.ModelsDirectory }.Concat(_settings.ExtraModelFolders);
-        var models = await Task.Run(() => ModelLibrary.ScanAll(folders).ToList());
+        // Document search models cannot chat, so they are not offered here.
+        var models = await Task.Run(() => ModelLibrary.ScanAll(folders).Where(f => GgufReader.TryRead(f.Path)?.IsEmbedding(f.Path) != true).ToList());
 
         // A model picked from elsewhere last time stays on offer.
         if (_settings.LastModelPath is { } last && models.All(m => !SamePath(m.Path, last)) && File.Exists(last))

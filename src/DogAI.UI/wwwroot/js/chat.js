@@ -33,6 +33,26 @@ function scroller() {
   return el;
 }
 
+// Citation buttons ([2]) are drawn inside model text, where Blazor cannot attach handlers, so one listener on the page
+// passes clicks to the thread on screen: the reply's id (data-msg) and the source number (data-cite).
+let citeTarget = null;
+export function watchCitations(dotnet) {
+  citeTarget = dotnet;
+  if (document._dogCites) return;
+  document._dogCites = true;
+  document.addEventListener('click', e => {
+    const button = e.target instanceof Element ? e.target.closest('button.cite') : null;
+    const message = button ? button.closest('[data-msg]') : null;
+    if (!message || !citeTarget) return;
+    e.preventDefault();
+    citeTarget.invokeMethodAsync('OpenCitation', Number(message.dataset.msg), Number(button.dataset.cite));
+  });
+}
+
+export function unwatchCitations(dotnet) {
+  if (citeTarget === dotnet) citeTarget = null;
+}
+
 // Scrolls to the end if the reader is already there (or always, when forced).
 export function followThread(force) {
   const el = scroller();

@@ -1,0 +1,166 @@
+@* The "Documents" side panel of a chat or story: files added to this chat only, and shared collections it searches.
+   General chats cite what they use; character chats and stories use documents as background. *@
+@implements IDisposable
+@inject DocumentLibrary Library
+@inject IDesktopShell Desktop
+
+<div class="panel docs-panel">
+    <h4>@(Kind == "general" ? "Documents" : "Reference documents")</h4>
+    <p class="small">@Explain</p>
+    @if (_files.Count > 0)
+    {
+        <ul class="doc-list">
+            @foreach (var file in _files)
+            {
+                var f = file;
+                <li>
+                    <span class="li-text">
+                        <span class="doc-name" title="@f.FileName">@f.FileName</span>
+                        <span class="li-sub @(f.Status == DocumentStatus.Failed ? "bad-text" : "")">@DocumentText.Status(f, Library.Progress)</span>
+                    </span>
+                    <button class="icon-btn" title="Remove from this chat" aria-label="Remove @f.FileName" @onclick="() => RemoveAsync(f)">×</button>
+                </li>
+            }
+        </ul>
+    }
+    <div class="row"><button class="btn" disabled="@_adding" @onclick="AddFilesAsync">@(_adding ? "Adding…" : "Add files…")</button></div>
+    @foreach (var problem in _problems)
+    {
+        <p class="small bad-text">@problem</p>
+    }
+
+    @if (_collections.Count > 0)
+    {
+        <p class="small field-label">Collections to search</p>
+        @foreach (var collection in _collections)
+        {
+            var c = collection;
+            <label class="check"><input type="checkbox" checked="@_attached.Contains(c.Id)" @onchange="e => ToggleAsync(c.Id, e.Value is true)" /> @c.Name <span class="small">(@Count(c.Id))</span></label>
+        }
+    }
+    <p class="small"><a class="link-text" href="general/documents">@(_collections.Count > 0 ? "Manage collections" : "Make a collection")</a> to use the same documents in several chats.</p>
+
+    @if (HasDocuments && _model is null)
+    {
+        <div class="notice"><span>Documents cannot be searched until there is a document search model. <a class="link-text" href="models">Get one in Models</a> (Recommended → Document search).</span></div>
+    }
+    else if (HasDocuments && Library.Problem is { } trouble)
+    {
+        <div class="notice bad"><span>@trouble</span></div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();
+
+    /// <summary>"general", "roleplay" or "story": changes the wording.</summary>
+    [Parameter] public string Kind { get; set; } = "general";
+
+    /// <summary>Makes sure the chat exists (General's new-chat screen), returning its id. Without it, adding needs a saved chat.</summary>
+    [Parameter] public Func<Task<long>>? EnsureConversation { get; set; }
+
+    private List<DocumentSummary> _files = [];
+    private List<DocumentCollection> _collections = [];
+    private IReadOnlyDictionary<long, int> _counts = new Dictionary<long, int>();
+    private HashSet<long> _attached = [];
+    private List<string> _problems = [];
+    private string? _model;
+    private bool _adding;
+    private long _loadedFor = -1;
+
+    private bool HasDocuments => _files.Count > 0 || _attached.Count > 0;
+
+    private string Explain => Kind switch
+    {
+        "general" => "Add files and the model answers from them, citing what it uses. PDF, Word, text and code files.",
+        "story" => "Notes on the world, characters or history. Passages that fit what is happening are given to the narrator.",
+        _ => "Background facts the character can draw on. Passages that fit the conversation are sent with each reply.",
+    };
+
+    protected override void OnInitialized() => Library.Changed += OnLibraryChanged;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Conversation.Id == _loadedFor) return;
+        _problems = [];
+        await LoadAsync();
+    }
+
+    private void OnLibraryChanged() => InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    private async Task LoadAsync()
+    {
+        _loadedFor = Conversation.Id;
+        var store = Library.Store;
+        _collections = (await store.ListAsync()).ToList();
+        _counts = await store.CountsAsync();
+        _model = await Library.ModelIdAsync();
+        if (Conversation.Id == 0)
+        {
+            _files = [];
+            _attached = [];
+            return;
+        }
+        var own = await store.ForConversationAsync(Conversation.Id, create: false);
+        _files = own is null ? [] : (await store.DocumentsAsync(own.Id)).ToList();
+        _attached = (await store.AttachedAsync(Conversation.Id)).ToHashSet();
+    }
+
+    private int Count(long collectionId) => _counts.TryGetValue(collectionId, out var n) ? n : 0;
+
+    private async Task<long?> ConversationIdAsync()
+    {
+        if (Conversation.Id != 0) return Conversation.Id;
+        return EnsureConversation is null ? null : await EnsureConversation();
+    }
+
+    private async Task AddFilesAsync()
+    {
+        var paths = await Desktop.PickDocumentFilesAsync();
+        if (paths.Count == 0 || await ConversationIdAsync() is not { } id) return;
+        _adding = true;
+        _problems = [];
+        StateHasChanged();
+        try
+        {
+            var own = await Library.Store.ForConversationAsync(id, create: true);
+            foreach (var path in paths)
+            {
+                try
+                {
+                    if (await Library.AddFileAsync(own!.Id, path) is null) _problems.Add($"{Path.GetFileName(path)} is already in this chat.");
+                }
+                catch (DocumentReadException e)
+                {
+                    _problems.Add($"{Path.GetFileName(path)}: {e.Message}");
+                }
+            }
+        }
+        finally
+        {
+            _adding = false;
+        }
+        _loadedFor = -1;
+        await LoadAsync();
+    }
+
+    private async Task RemoveAsync(DocumentSummary file)
+    {
+        await Library.DeleteDocumentAsync(file.Id);
+        await LoadAsync();
+    }
+
+    private async Task ToggleAsync(long collectionId, bool on)
+    {
+        if (await ConversationIdAsync() is not { } id) return;
+        if (on) _attached.Add(collectionId);
+        else _attached.Remove(collectionId);
+        await Library.Store.SetAttachedAsync(id, _attached.ToList());
+    }
+
+    public void Dispose() => Library.Changed -= OnLibraryChanged;
+}

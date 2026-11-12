@@ -18,6 +18,6 @@
     { "useCase": "story", "repo": "unsloth/gemma-4-26B-A4B-it-GGUF", "title": "Gemma 4 26B-A4B", "params": 25.2, "experts": true, "blurb": "Fast storytelling with a large context." },
     { "useCase": "story", "repo": "unsloth/gemma-4-12b-it-GGUF", "title": "Gemma 4 12B", "params": 11.9, "blurb": "Story writing on mid-range cards." },
 
-    { "useCase": "embedding", "repo": "Qwen/Qwen3-Embedding-0.6B-GGUF", "title": "Qwen3 Embedding 0.6B", "params": 0.6, "blurb": "Finds relevant passages for chat with documents (milestone 5). Small, multilingual, Apache 2.0." }
+    { "useCase": "embedding", "repo": "Qwen/Qwen3-Embedding-0.6B-GGUF", "title": "Qwen3 Embedding 0.6B", "params": 0.6, "blurb": "Finds the passages in your documents that answer a question, and earlier messages in long chats. Small, multilingual, Apache 2.0." }
   ]
 }

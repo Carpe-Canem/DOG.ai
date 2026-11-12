@@ -137,7 +137,9 @@ else
             </div>
         }
         <StylePanel Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />
-        <MemoryPanel Conversation="@_conversation" Path="@_path" Streaming="@Streaming" Label="Summarise earlier passages when the story outgrows the model's context" />
+        <MemoryPanel Conversation="@_conversation" Path="@_path" Streaming="@Streaming" Label="Summarise earlier passages when the story outgrows the model's context"
+                     RecallLabel="Also find earlier passages that matter to what happens next" />
+        <DocumentsPanel Conversation="@_conversation" Kind="story" />
         <div class="panel">
             <h4>Save a copy</h4>
             <p class="small">The branch on screen, as a file for reading elsewhere.</p>

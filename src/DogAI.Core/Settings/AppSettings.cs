@@ -1,4 +1,4 @@
-namespace DogAI.Core.Settings;
+﻿namespace DogAI.Core.Settings;
 
 /// <summary>User-level settings. Add properties with defaults; older saved settings keep loading.</summary>
 public sealed record AppSettings
@@ -72,6 +72,12 @@ public interface IDesktopShell
 
     /// <summary>Cuts the given square out of a picture and returns it as a small avatar PNG.</summary>
     Task<byte[]> CropAvatarAsync(byte[] picture, Core.Characters.AvatarCrop crop);
+
+    /// <summary>Shows the "open file" dialog for documents (several may be picked). Empty if cancelled.</summary>
+    Task<IReadOnlyList<string>> PickDocumentFilesAsync();
+
+    /// <summary>Opens a file on this PC in the program Windows uses for it. False if it is not there any more.</summary>
+    bool OpenFile(string path);
 }
 
 public interface ISettingsStore

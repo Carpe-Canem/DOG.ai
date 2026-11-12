@@ -24,15 +24,20 @@
 @code {
     [Parameter, EditorRequired] public string Text { get; set; } = "";
 
+    /// <summary>How many numbered sources the text may cite; "[n]" for those becomes a button (see MarkdownRenderer).</summary>
+    [Parameter] public int Citations { get; set; }
+
     private string? _rendered;
+    private int _renderedCitations;
     private IReadOnlyList<MarkdownSegment> _segments = [];
     private int _copied = -1;
 
     protected override void OnParametersSet()
     {
-        if (Text == _rendered) return;
+        if (Text == _rendered && Citations == _renderedCitations) return;
         _rendered = Text;
-        _segments = MarkdownRenderer.Render(Text);
+        _renderedCitations = Citations;
+        _segments = MarkdownRenderer.Render(Text, Citations);
     }
 
     private async Task CopyAsync(int index, string code)

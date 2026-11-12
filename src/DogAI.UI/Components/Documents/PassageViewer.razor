@@ -1,0 +1,86 @@
+@* A cited passage in its document: the text around it, with the passage marked. Document text is untrusted and shown
+   only as plain text. *@
+@inject ICollectionStore Collections
+@inject IDesktopShell Desktop
+
+<Modal Title="@Title" Class="wide" OnClose="OnClose">
+    @if (_missing)
+    {
+        <p>This passage is no longer here: its document was removed after the reply was written.</p>
+    }
+    else if (_document is { } doc && _chunk is { } chunk)
+    {
+        <div class="about">
+            <div class="kv"><span>Document</span><span>@doc.FileName</span></div>
+            @if (chunk.Page is { } pageNumber)
+            {
+                <div class="kv"><span>Page</span><span>@pageNumber of @doc.PageCount</span></div>
+            }
+            @if (chunk.Heading is { Length: > 0 } heading)
+            {
+                <div class="kv"><span>Section</span><span>@heading</span></div>
+            }
+            @if (Similarity is { } similarity)
+            {
+                <div class="kv"><span>Match</span><span>@MatchWords(similarity)</span></div>
+            }
+        </div>
+        <div class="passage-view">@_before<mark>@_passage</mark>@_after</div>
+        <div class="modal-foot">
+            <span class="small">@(doc.SourcePath is { } p && File.Exists(p) ? p : "The original file has moved or been deleted; DOG AI keeps its text.")</span>
+            <div class="row">
+                @if (doc.SourcePath is { } path && File.Exists(path))
+                {
+                    <button class="btn" @onclick="() => Desktop.OpenFile(path)">Open the file</button>
+                }
+                <button class="btn" @onclick="() => Desktop.CopyText(chunk.Text)">Copy passage</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <p class="note">Loading…</p>
+    }
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public long ChunkId { get; set; }
+
+    /// <summary>The number the reply used for it, shown in the title.</summary>
+    [Parameter] public int? Number { get; set; }
+
+    [Parameter] public float? Similarity { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private const int Context = 700;
+
+    private SourceDocument? _document;
+    private DocumentChunk? _chunk;
+    private bool _missing;
+    private string _before = "", _passage = "", _after = "";
+
+    private string Title => Number is { } n ? $"Source {n}" : "Passage";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _chunk = (await Collections.ChunksAsync([ChunkId])).FirstOrDefault();
+        _document = _chunk is null ? null : await Collections.GetDocumentAsync(_chunk.DocumentId);
+        _missing = _chunk is null || _document is null;
+        if (_missing) return;
+        var text = _document!.Text;
+        var start = Math.Clamp(_chunk!.Start, 0, text.Length);
+        var end = Math.Clamp(_chunk.Start + _chunk.Length, start, text.Length);
+        var from = Math.Max(0, start - Context);
+        var to = Math.Min(text.Length, end + Context);
+        _before = (from > 0 ? "…" : "") + text[from..start];
+        _passage = text[start..end];
+        _after = text[end..to] + (to < text.Length ? "…" : "");
+    }
+
+    private static string MatchWords(float similarity) => similarity switch
+    {
+        >= 0.65f => "Close match",
+        >= 0.5f => "Good match",
+        _ => "Partial match",
+    };
+}

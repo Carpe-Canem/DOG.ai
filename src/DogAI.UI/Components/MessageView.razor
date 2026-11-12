@@ -27,14 +27,15 @@
         }
         else
         {
-            <div class="msg-body">
-                <MarkdownView Text="@Content" />
+            <div class="msg-body" data-msg="@MessageId">
+                <MarkdownView Text="@Content" Citations="@Citations" />
                 @if (Streaming)
                 {
                     <span class="caret" aria-label="Writing"></span>
                 }
             </div>
         }
+        @Below
         <div class="msg-actions">@Actions</div>
     </div>
 </div>
@@ -47,6 +48,15 @@
     [Parameter] public bool Streaming { get; set; }
     [Parameter] public RenderFragment? Editor { get; set; }
     [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>Shown under the text, above the buttons (a reply's sources).</summary>
+    [Parameter] public RenderFragment? Below { get; set; }
+
+    /// <summary>The saved message's id, so a citation button inside the text can say which reply it belongs to.</summary>
+    [Parameter] public long? MessageId { get; set; }
+
+    /// <summary>How many sources the reply may cite as [n].</summary>
+    [Parameter] public int Citations { get; set; }
 
     /// <summary>A picture for the speaker (a data: URL). Without one, a letter is shown.</summary>
     [Parameter] public string? AvatarUrl { get; set; }

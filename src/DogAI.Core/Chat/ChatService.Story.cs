@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using DogAI.Core.Stories;
 
 namespace DogAI.Core.Chat;
@@ -279,12 +279,12 @@ public sealed partial class ChatService
     }
 
     private async Task<(PromptLayout Layout, Names Names)> PrepareStoryAsync(Conversation conversation, Story story, IReadOnlyList<ChatMessage> path,
-        ActiveReply active, CancellationToken ct)
+        ActiveReply active, CancellationToken ct, Action<PromptLayout>? extra = null)
     {
         var names = story.Kind == StoryKind.Interactive
             ? new Names("Narrator", "Player", "Narrator", SummaryTask: StoryPrompt.SummaryTask)
             : new Names("Story", "Direction", "Story", SummaryTask: StoryPrompt.SummaryTask);
         var state = StoryTurn.LatestState(path);
-        return await WithMemoryAsync(conversation, path, active, names, memory => StoryPrompt.Layout(story, memory, state, path.Count == 0), ct);
+        return await WithMemoryAsync(conversation, path, active, names, memory => StoryPrompt.Layout(story, memory, state, path.Count == 0), ct, extra);
     }
 }

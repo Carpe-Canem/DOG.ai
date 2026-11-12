@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using DogAI.Core.Models;
 
 namespace DogAI.Engine;
@@ -24,6 +24,19 @@ public sealed record GgufInfo
     public int? ValueLength { get; init; }
     public int? ExpertCount { get; init; }
     public int? ExpertUsedCount { get; init; }
+
+    /// <summary>How the model pools token vectors into one; set only by embedding models.</summary>
+    public int? PoolingType { get; init; }
+
+    /// <summary>
+    /// A document search (embedding) model rather than one that writes: it says how it pools, or its name or architecture
+    /// says so (BERT-family models only make embeddings).
+    /// </summary>
+    public bool IsEmbedding(string path) =>
+        PoolingType is > 0
+        || Architecture is { } a && (a.Contains("bert", StringComparison.OrdinalIgnoreCase) || a.Equals("t5encoder", StringComparison.OrdinalIgnoreCase))
+        || DisplayName(path).Contains("embed", StringComparison.OrdinalIgnoreCase)
+        || System.IO.Path.GetFileName(path).Contains("embed", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The model's own name, or the file name when the header has none or only punctuation.</summary>
     public string DisplayName(string path) =>
@@ -106,6 +119,7 @@ public static class GgufReader
                 ValueLength = ToInt(values.GetValueOrDefault($"{arch}.attention.value_length")),
                 ExpertCount = ToInt(values.GetValueOrDefault($"{arch}.expert_count")),
                 ExpertUsedCount = ToInt(values.GetValueOrDefault($"{arch}.expert_used_count")),
+                PoolingType = ToInt(values.GetValueOrDefault($"{arch}.pooling_type")),
             };
         }
         catch (EndOfStreamException)
@@ -125,7 +139,8 @@ public static class GgufReader
         key.EndsWith(".attention.key_length", StringComparison.Ordinal) ||
         key.EndsWith(".attention.value_length", StringComparison.Ordinal) ||
         key.EndsWith(".expert_count", StringComparison.Ordinal) ||
-        key.EndsWith(".expert_used_count", StringComparison.Ordinal);
+        key.EndsWith(".expert_used_count", StringComparison.Ordinal) ||
+        key.EndsWith(".pooling_type", StringComparison.Ordinal);
 
     private static int? ToInt(object? value) => value switch
     {

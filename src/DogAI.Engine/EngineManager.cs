@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using DogAI.Core.Chat;
@@ -325,7 +325,7 @@ public sealed class EngineManager : IChatEngine, IDisposable
         Changed?.Invoke();
     }
 
-    private static int FreePort()
+    internal static int FreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();

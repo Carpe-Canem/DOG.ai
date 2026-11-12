@@ -6,6 +6,8 @@
 @inject ModelLauncher Launcher
 @inject ModelBenchmark Bench
 @inject IDesktopShell Desktop
+@inject EmbeddingServer Search
+@inject DocumentLibrary Documents
 
 <section class="group">
     <h3 class="group-title">Folders</h3>
@@ -50,9 +52,10 @@
             var m = item;
             var record = Record(m.File.Path);
             var loaded = Same(Engine.ModelPath, m.File.Path) && Engine.State is EngineState.Ready or EngineState.Loading;
+            var search = m.Info?.IsEmbedding(m.File.Path) == true;
             <div class="model has-fit lib">
                 <div class="li-text">
-                    <div class="model-name">@(m.Info?.DisplayName(m.File.Path) ?? m.File.Name)@if (loaded) {<span class="rec">Loaded</span>}</div>
+                    <div class="model-name">@(m.Info?.DisplayName(m.File.Path) ?? m.File.Name)@if (loaded) {<span class="rec">Loaded</span>}@if (Same(_searchModel, m.File.Path)) {<span class="rec">Used for document search</span>}</div>
                     <div class="model-meta">@Describe(m)</div>
                     <div class="model-meta path">@m.File.Path</div>
                     @if (record?.BenchTokensPerSecond is > 0 and var tps)
@@ -63,14 +66,21 @@
                     {
                         <div class="chips">@foreach (var d in defaults) {<span class="chip">Default for @CuratedPicks.Label(d)</span>}</div>
                     }
+                    @if (search)
+                    {
+                        <div class="model-meta">A document search model: it finds passages in documents and does not write, so it is not loaded for chat.</div>
+                    }
                 </div>
                 <FitBadge Fit="m.Fit" MeasuredTokensPerSecond="record?.BenchTokensPerSecond" />
                 <div class="actions">
-                    <button class="btn" disabled="@(Busy || loaded)" @onclick="() => LoadAsync(m.File)">Load</button>
-                    <button class="btn" disabled="@Busy" @onclick="() => BenchmarkAsync(m.File)">Benchmark</button>
+                    @if (!search)
+                    {
+                        <button class="btn" disabled="@(Busy || loaded)" @onclick="() => LoadAsync(m.File)">Load</button>
+                        <button class="btn" disabled="@Busy" @onclick="() => BenchmarkAsync(m.File)">Benchmark</button>
+                    }
                     <select class="field" aria-label="Make default for" value="" @onchange="e => SetDefaultAsync(m.File.Path, e.Value?.ToString())">
                         <option value="">Default for…</option>
-                        @foreach (var mode in new[] { "general", "characters", "story" })
+                        @foreach (var mode in search ? new[] { EmbeddingServer.UseCase } : new[] { "general", "characters", "story" })
                         {
                             <option value="@mode">@CuratedPicks.Label(mode)</option>
                         }
@@ -112,6 +122,9 @@
 
     private bool Busy => _working || Bench.IsRunning || Engine.State == EngineState.Loading;
 
+    /// <summary>The model document search uses now (chosen, or found automatically).</summary>
+    private string? _searchModel;
+
     private IEnumerable<string> Folders =>
         new[] { _settings.ModelsDirectory }.Concat(_settings.ExtraModelFolders).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase);
 
@@ -129,6 +142,7 @@
     {
         _settings = await SettingsStore.LoadAsync();
         _records = await Records.AllAsync();
+        _searchModel = await Search.ModelPathAsync();
         var folders = Folders.ToList();
         var budget = Ctx;
         _models = await Task.Run(() => ModelLibrary.ScanAll(folders).Select(f =>
@@ -180,6 +194,15 @@
         var defaults = new Dictionary<string, string>(_settings.DefaultModels) { [mode] = path };
         _settings = _settings with { DefaultModels = defaults };
         await SettingsStore.SaveAsync(_settings);
+        if (mode == EmbeddingServer.UseCase)
+        {
+            // Documents indexed with another model are indexed again with this one, in the background.
+            Search.ChoiceChanged();
+            _searchModel = await Search.ModelPathAsync();
+            Documents.StartIndexing();
+            Say($"{Path.GetFileNameWithoutExtension(path)} is now used for document search. Documents are indexed again with it in the background.");
+            return;
+        }
         Say($"{Path.GetFileNameWithoutExtension(path)} is now the default model for {CuratedPicks.Label(mode)}.");
     }
 
@@ -248,6 +271,11 @@
             {
                 _settings = _settings with { DefaultModels = _settings.DefaultModels.Where(kv => !Same(kv.Value, file.Path)).ToDictionary() };
                 await SettingsStore.SaveAsync(_settings);
+            }
+            if (Same(_searchModel, file.Path))
+            {
+                await Search.StopAsync();
+                Search.ChoiceChanged();
             }
             Say($"Deleted {file.Name}.");
         }

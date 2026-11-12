@@ -63,6 +63,13 @@ public partial class App : Application
                 else log.LogInformation("Engine {State} {Model}", engine.State, engine.ModelPath);
             };
 
+            var search = _services.GetRequiredService<EmbeddingServer>();
+            search.Output += line => log.LogDebug("search engine: {Line}", line);
+            search.Changed += () =>
+            {
+                if (search.Error is { } error) log.LogWarning("Document search model problem: {Error}", error);
+            };
+
             await _services.MigrateDogDatabaseAsync();
             await EnsureFirstRunDefaultsAsync(_services, paths);
             await StartModelServicesAsync(_services, log);
@@ -103,6 +110,9 @@ public partial class App : Application
         services.AddSingleton<LlamaServerLocator>();
         services.AddSingleton<EngineManager>();
         services.AddSingleton<IChatEngine>(sp => sp.GetRequiredService<EngineManager>());
+        services.AddSingleton<EmbeddingServer>();
+        services.AddSingleton<DogAI.Core.Documents.IEmbedder>(sp => sp.GetRequiredService<EmbeddingServer>());
+        services.AddSingleton<DogAI.Core.Documents.DocumentLibrary>();
         services.AddSingleton<PresetCatalog>();
         services.AddSingleton<ChatService>();
         services.AddSingleton<DogAI.Core.Characters.CardBuilder>();
@@ -131,6 +141,10 @@ public partial class App : Application
             _ = records.SaveAsync(new ModelRecord { Path = job.MainPath, Repo = job.Repo, Quant = job.Quant, UseCase = job.UseCase });
         };
         await downloads.LoadAsync();
+
+        // Documents added while no search model was set up, or before the model changed, are indexed now.
+        // Nothing starts if every document is already indexed.
+        services.GetRequiredService<DogAI.Core.Documents.DocumentLibrary>().StartIndexing();
     }
 
     private static async Task EnsureFirstRunDefaultsAsync(IServiceProvider services, AppPaths paths)

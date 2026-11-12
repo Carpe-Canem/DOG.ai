@@ -408,3 +408,18 @@ public sealed class DocumentTests : IDisposable
         try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
     }
 }
+
+public sealed class CitationRenderingTests
+{
+    [Fact]
+    public void Cited_numbers_become_buttons_only_for_real_sources_and_never_inside_code()
+    {
+        var html = string.Concat(DogAI.Core.Text.MarkdownRenderer.Render("Pressure is 1.5 bar [1]. Both say so [1, 2]. Not [7]. Code: `a[1]`", citations: 2)
+            .Select(s => s.Html));
+        Assert.Contains("bar <button type=\"button\" class=\"cite\" data-cite=\"1\"", html);
+        Assert.Contains("data-cite=\"2\"", html);
+        Assert.Contains("Not [7].", html);
+        Assert.Contains("<code>a[1]</code>", html);
+        Assert.DoesNotContain("cite", string.Concat(DogAI.Core.Text.MarkdownRenderer.Render("Plain [1]").Select(s => s.Html)));
+    }
+}

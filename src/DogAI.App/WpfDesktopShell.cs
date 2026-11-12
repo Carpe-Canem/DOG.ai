@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -37,6 +37,34 @@ public sealed class WpfDesktopShell : IDesktopShell
 
     public Task<string?> PickImageFileAsync() => PickFileAsync("Choose a picture",
         "Pictures (*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp)|*.png;*.jpg;*.jpeg;*.webp;*.gif;*.bmp|All files (*.*)|*.*");
+
+    public Task<IReadOnlyList<string>> PickDocumentFilesAsync() =>
+        Application.Current.Dispatcher.InvokeAsync<IReadOnlyList<string>>(() =>
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = "Add documents",
+                Filter = DogAI.Core.Documents.TextExtractor.DialogFilter,
+                CheckFileExists = true,
+                Multiselect = true,
+            };
+            return dialog.ShowDialog(Application.Current.MainWindow) == true ? dialog.FileNames : [];
+        }).Task;
+
+    private static readonly HashSet<string> ViewableTypes = new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".docx", ".txt", ".md", ".markdown", ".csv", ".log" };
+
+    public bool OpenFile(string path)
+    {
+        if (!File.Exists(path)) return false;
+        var full = Path.GetFullPath(path);
+        // Documents open in the program Windows has for them. Anything else (code, scripts, web pages) opens in Notepad,
+        // so "opening" a .bat, .ps1 or .js file shows it instead of running it.
+        var start = ViewableTypes.Contains(Path.GetExtension(full))
+            ? new System.Diagnostics.ProcessStartInfo(full) { UseShellExecute = true }
+            : new System.Diagnostics.ProcessStartInfo("notepad.exe") { ArgumentList = { full }, UseShellExecute = false };
+        System.Diagnostics.Process.Start(start)?.Dispose();
+        return true;
+    }
 
     private static Task<string?> PickFileAsync(string title, string filter) =>
         Application.Current.Dispatcher.InvokeAsync(() =>

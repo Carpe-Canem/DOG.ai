@@ -1,6 +1,7 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using DogAI.Core.Characters;
+using DogAI.Core.Documents;
 using DogAI.Core.Stories;
 
 namespace DogAI.Core.Chat;
@@ -68,7 +69,7 @@ public sealed class ActiveReply(long conversationId, long? parentId, long? conti
 /// a story its bible (the story-only parts are in ChatService.Story.cs).
 /// </summary>
 public sealed partial class ChatService(IChatStore store, IChatEngine engine, PresetCatalog? presets = null, ICharacterStore? characters = null,
-    IStoryStore? stories = null)
+    IStoryStore? stories = null, DocumentLibrary? documents = null)
 {
     public const string UntitledChat = "New chat";
     private static readonly TimeSpan UiInterval = TimeSpan.FromMilliseconds(50);
@@ -462,20 +463,28 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         {
             var ct = cts.Token;
             var conversation = await store.GetAsync(conversationId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
-            var path = new MessageTree(await store.GetMessagesAsync(conversationId, ct)).PathTo(continuing?.Id ?? questionId);
+            var rawPath = new MessageTree(await store.GetMessagesAsync(conversationId, ct)).PathTo(continuing?.Id ?? questionId);
+            var path = rawPath;
             // A story's user turns are sent as requests to the narrator, not as they were typed.
             if (await StoryOfAsync(conversation, ct) is { } story) path = StoryPrompt.ForPrompt(story, path);
             var preset = _presets.Get(conversation.PresetId);
             reply.PresetId = preset.Id;
             reply.ModelName = engine.ModelName;
 
-            var (layout, names) = await PrepareAsync(conversation, path, active, speakerId, ct);
+            var sources = new ReplySources();
+            var passages = await FindPassagesAsync(conversation, rawPath, active, sources, ct);
+            var (layout, names) = await PrepareAsync(conversation, path, active, speakerId, ct, passages);
+            await AddRecallAsync(conversation, path, rawPath, layout, names, active, sources, ct);
             var built = await BuildPromptAsync(layout, path, continuing is not null ? PromptEnd.Continue : PromptEnd.Reply, names, ct);
             reply.PromptText = built.Text;
             reply.PromptTokens = built.Tokens;
             reply.TrimmedMessages = built.Trimmed;
             reply.LoreUsed = built.Has(PromptPartKind.LoreBefore) || built.Has(PromptPartKind.LoreAfter) ? string.Join("\n", layout.LoreNames) : null;
             reply.MemoryUsed = built.Has(PromptPartKind.Memory) ? layout.MemoryCovers : null;
+            // Parts left out to fit were not seen by the model, so they are not listed as sources either.
+            if (!built.Has(PromptPartKind.Documents)) sources.Passages.Clear();
+            if (!built.Has(PromptPartKind.Recall)) sources.Recalled.Clear();
+            reply.SourcesJson = sources.ToJson();
 
             // In a group, stop if the model starts writing someone else's line.
             if (names.Group) preset = preset with { Stop = names.StopsFor(names.Character) };
@@ -580,23 +589,28 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     /// summary, which is brought up to date first if it has fallen behind. Group chats get the speaker's card, a note
     /// on each other member, and lore from every member's book.
     /// </summary>
+    /// <param name="extra">Adds parts every version of the layout must have (found passages), so the memory summary allows for their size.</param>
     private async Task<(PromptLayout Layout, Names Names)> PrepareAsync(Conversation conversation, IReadOnlyList<ChatMessage> path, ActiveReply active,
-        long? speakerId, CancellationToken ct)
+        long? speakerId, CancellationToken ct, Action<PromptLayout>? extra = null)
     {
-        if (await StoryOfAsync(conversation, ct) is { } story) return await PrepareStoryAsync(conversation, story, path, active, ct);
-        if (conversation.IsGroup && characters is not null) return await PrepareGroupAsync(conversation, path, active, speakerId, ct);
+        if (await StoryOfAsync(conversation, ct) is { } story) return await PrepareStoryAsync(conversation, story, path, active, ct, extra);
+        if (conversation.IsGroup && characters is not null) return await PrepareGroupAsync(conversation, path, active, speakerId, ct, extra);
         if (conversation.CharacterId is not { } characterId || characters is null || await characters.GetAsync(characterId, ct) is not { } character)
-            return (PromptLayout.Plain(conversation.SystemPrompt), new Names("Assistant", "User", "Assistant"));
+        {
+            var plain = PromptLayout.Plain(conversation.SystemPrompt);
+            extra?.Invoke(plain);
+            return (plain, new Names("Assistant", "User", "Assistant"));
+        }
 
         var persona = await characters.PersonaForAsync(conversation.PersonaId, ct);
         var names = new Names(character.Name, persona?.Name is { Length: > 0 } n ? n : "User", character.Name);
         var lore = await PickLoreAsync([Lorebook.For(character)], path, ct);
         return await WithMemoryAsync(conversation, path, active, names, memory => CharacterPrompt.Layout(character, persona, conversation.SystemPrompt, lore,
-            conversation.AuthorsNote, conversation.AuthorsNoteDepth, memory), ct);
+            conversation.AuthorsNote, conversation.AuthorsNoteDepth, memory), ct, extra);
     }
 
     private async Task<(PromptLayout Layout, Names Names)> PrepareGroupAsync(Conversation conversation, IReadOnlyList<ChatMessage> path, ActiveReply active,
-        long? speakerId, CancellationToken ct)
+        long? speakerId, CancellationToken ct, Action<PromptLayout>? extra = null)
     {
         var members = new List<Character>();
         foreach (var member in await store.GetMembersAsync(conversation.Id, ct))
@@ -618,7 +632,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         var names = new Names(speaker.Name, persona?.Name is { Length: > 0 } n ? n : "User", everyone, speakers);
         var lore = await PickLoreAsync(members.Append(speaker).DistinctBy(c => c.Id).Select(Lorebook.For).ToList(), path, ct);
         return await WithMemoryAsync(conversation, path, active, names, memory => CharacterPrompt.GroupLayout(speaker, others, persona,
-            conversation.SystemPrompt, lore, conversation.AuthorsNote, conversation.AuthorsNoteDepth, memory), ct);
+            conversation.SystemPrompt, lore, conversation.AuthorsNote, conversation.AuthorsNoteDepth, memory), ct, extra);
     }
 
     /// <summary>
@@ -626,8 +640,15 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     /// (bringing the summary up to date first if it has fallen behind).
     /// </summary>
     private async Task<(PromptLayout Layout, Names Names)> WithMemoryAsync(Conversation conversation, IReadOnlyList<ChatMessage> path, ActiveReply active,
-        Names names, Func<string, PromptLayout> make, CancellationToken ct)
+        Names names, Func<string, PromptLayout> makeBase, CancellationToken ct, Action<PromptLayout>? extra = null)
     {
+        PromptLayout make(string memory)
+        {
+            var made = makeBase(memory);
+            extra?.Invoke(made);
+            return made;
+        }
+
         var layout = make("");
         if (!conversation.MemoryEnabled) return (layout, names);
 
@@ -855,7 +876,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             IReadOnlyList<string> turnEnds = [];
             if (end == PromptEnd.UserTurn && (history.Count == 0 || history[^1].Role == "assistant"))
             {
-                prompt = layout.Arrange(system, history, directive: false);
+                prompt = layout.Arrange(system, history, directive: false, parts: parts);
                 var rendered = await engine.RenderPromptAsync([.. prompt, new PromptMessage("user", UserTurnMark)], ct);
                 var cut = rendered.IndexOf(UserTurnMark, StringComparison.Ordinal);
                 open = cut >= 0;
@@ -869,7 +890,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             }
             if (!open)
             {
-                prompt = layout.Arrange(system, history);
+                prompt = layout.Arrange(system, history, parts: parts);
                 text = await engine.RenderPromptAsync(prompt, ct);
                 if (continuation) text += (names.Group ? names.Label(included[^1]) + ": " : "") + included[^1].Content;
             }

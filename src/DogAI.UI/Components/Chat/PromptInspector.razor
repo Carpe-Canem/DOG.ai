@@ -23,6 +23,21 @@
         {
             <div class="kv"><span>Lore entries included</span><span>@lore.ReplaceLineEndings(", ")</span></div>
         }
+        @if (ReplySources.Of(Message) is { } sources)
+        {
+            @if (sources.Passages.Count > 0)
+            {
+                <div class="kv"><span>Document passages included</span><span>@string.Join(", ", sources.Passages.Select(p => $"[{p.Number}] {p.Label}"))</span></div>
+            }
+            @if (sources.Recalled.Count > 0)
+            {
+                <div class="kv"><span>Earlier messages recalled</span><span>@sources.Recalled.Count (they are in the text below, before the newest message)</span></div>
+            }
+            @if (sources.Note is { } note)
+            {
+                <div class="kv"><span>Documents</span><span>@note</span></div>
+            }
+        }
     </div>
     <div class="code">
         <div class="code-head"><span>exact prompt text</span><button @onclick="() => Desktop.CopyText(Message.PromptText ?? string.Empty)">Copy</button></div>

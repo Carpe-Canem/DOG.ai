@@ -18,6 +18,7 @@
 
 <SectionContent SectionName="list">
     <div class="list-head"><h3>Chats</h3><a class="btn" href="general">New chat</a></div>
+    <a class="li li-link" href="general/documents"><Icon Name="docs" Size="18" /><span class="li-text"><span class="li-title">Document collections</span></span></a>
     @foreach (var chat in _chats)
     {
         <a class="li @(chat.Id == _conversation.Id ? "active" : "")" href="general/@chat.Id">
@@ -59,6 +60,7 @@ else
 <SectionContent SectionName="composer"><ChatComposer Path="@_path" OnSend="SendAsync" /></SectionContent>
 
 <SectionContent SectionName="aside">
+    <DocumentsPanel Conversation="@_conversation" Kind="general" EnsureConversation="EnsureSavedAsync" />
     <StylePanel Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />
     <div class="panel">
         <h4>Instructions</h4>
@@ -151,17 +153,23 @@ else
         StateHasChanged();
     });
 
-    private async Task SendAsync(string text)
+    /// <summary>Saves the new chat, so files can be added to it before the first message.</summary>
+    private async Task<long> EnsureSavedAsync()
     {
-        if (Chat.IsBusy || !Engine.IsReady) return;
-        _notice = null;
         if (_conversation.Id == 0)
         {
             _conversation = await Store.CreateAsync(_conversation);
             ChatId = _conversation.Id;
             Nav.NavigateTo($"general/{_conversation.Id}");
         }
-        var id = _conversation.Id;
+        return _conversation.Id;
+    }
+
+    private async Task SendAsync(string text)
+    {
+        if (Chat.IsBusy || !Engine.IsReady) return;
+        _notice = null;
+        var id = await EnsureSavedAsync();
         try
         {
             await Chat.SendAsync(id, text);

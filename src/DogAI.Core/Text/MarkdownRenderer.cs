@@ -1,4 +1,4 @@
-using Markdig;
+﻿using Markdig;
 using Markdig.Renderers;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
@@ -28,7 +28,9 @@ public static partial class MarkdownRenderer
         .DisableHtml()
         .Build();
 
-    public static IReadOnlyList<MarkdownSegment> Render(string? markdown)
+    /// <param name="citations">How many numbered sources the text may cite. "[2]" for 1..citations becomes a small button
+    /// (class "cite", data-cite="2") that the chat screen opens; other bracketed numbers stay as text.</param>
+    public static IReadOnlyList<MarkdownSegment> Render(string? markdown, int citations = 0)
     {
         var segments = new List<MarkdownSegment>();
         if (string.IsNullOrEmpty(markdown)) return segments;
@@ -54,6 +56,7 @@ public static partial class MarkdownRenderer
             renderer.Writer.Flush();
             var html = writer.ToString();
             writer.GetStringBuilder().Clear();
+            if (citations > 0) html = MarkCitations(html, citations);
             if (!string.IsNullOrWhiteSpace(html)) segments.Add(new MarkdownSegment(html, null, null));
         }
 
@@ -73,6 +76,32 @@ public static partial class MarkdownRenderer
         Flush();
         return segments;
     }
+
+    /// <summary>
+    /// Turns "[2]" or "[1, 3]" in rendered text into cite buttons. Tags and inline code are left alone, and only numbers
+    /// of real sources change, so the markup added is always our own.
+    /// </summary>
+    internal static string MarkCitations(string html, int citations)
+    {
+        var parts = TagOrCode().Split(html);
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (parts[i].StartsWith('<')) continue;
+            parts[i] = Citation().Replace(parts[i], m =>
+            {
+                var numbers = m.Groups[1].Value.Split(',', StringSplitOptions.TrimEntries).Select(int.Parse).ToList();
+                if (numbers.Any(n => n < 1 || n > citations)) return m.Value;
+                return string.Concat(numbers.Select(n => $"<button type=\"button\" class=\"cite\" data-cite=\"{n}\" title=\"Show source {n}\">{n}</button>"));
+            });
+        }
+        return string.Concat(parts);
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(<code>.*?</code>|<[^>]*>)", System.Text.RegularExpressions.RegexOptions.Singleline)]
+    private static partial System.Text.RegularExpressions.Regex TagOrCode();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]")]
+    private static partial System.Text.RegularExpressions.Regex Citation();
 
     /// <summary>
     /// Removes HTML tags from third-party markdown (model cards), keeping the text between them, so

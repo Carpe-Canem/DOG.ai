@@ -1,0 +1,294 @@
+@page "/general/documents"
+@page "/general/documents/{CollectionId:long}"
+@implements IDisposable
+@inject DocumentLibrary Library
+@inject IDesktopShell Desktop
+@inject NavigationManager Nav
+
+<SectionContent SectionName="title">
+    <div class="head-row">
+        <div class="head-text">
+            <h2>@(_collection?.Name ?? "Documents")</h2>
+            <p>Collections of files that chats and stories can search</p>
+        </div>
+    </div>
+</SectionContent>
+
+<SectionContent SectionName="list">
+    <div class="list-head"><h3>Collections</h3><button class="btn" @onclick="CreateAsync">New collection</button></div>
+    @foreach (var c in _collections)
+    {
+        <a class="li @(c.Id == CollectionId ? "active" : "")" href="general/documents/@c.Id">
+            <span class="li-text">
+                <span class="li-title">@c.Name</span>
+                <span class="li-sub">@Plural(Count(c.Id), "document")</span>
+            </span>
+        </a>
+    }
+    @if (_collections.Count == 0)
+    {
+        <p class="list-note">No collections yet.</p>
+    }
+    <p class="list-note"><a class="link-text" href="general">Back to chats</a></p>
+</SectionContent>
+
+@if (_collection is not { } collection)
+{
+    <EmptyState IconName="general" Title="Collections">
+        A collection is a set of files, such as manuals, notes or a story's world, that any chat or story can search.
+        Make one here, then tick it under Documents in a chat's side panel. For files only one chat needs, use Add files in that chat.
+    </EmptyState>
+    <div class="row center-row"><button class="btn primary" @onclick="CreateAsync">New collection</button></div>
+}
+else
+{
+    <div class="docs-page">
+        <section class="group">
+            <label class="field-block">
+                <span class="field-label">Name</span>
+                <input class="field" aria-label="Collection name" value="@collection.Name" @onchange="RenameAsync" />
+            </label>
+            <label class="field-block">
+                <span class="field-label">Notes</span>
+                <textarea class="field" rows="2" aria-label="Notes about this collection" placeholder="Optional. What is in it, for you."
+                          value="@collection.Description" @onchange="DescribeAsync"></textarea>
+            </label>
+        </section>
+
+        <section class="group">
+            <div class="list-head"><h3 class="group-title">Files</h3><button class="btn primary" disabled="@_adding" @onclick="AddFilesAsync">@(_adding ? "Adding…" : "Add files…")</button></div>
+            @foreach (var problem in _problems)
+            {
+                <div class="notice bad"><span>@problem</span></div>
+            }
+            @if (_documents.Count == 0)
+            {
+                <p class="note">No files yet. PDF, Word (.docx), markdown, text and code files can be added. Their text is copied into DOG AI, so they can be moved or deleted afterwards.</p>
+            }
+            <div class="models">
+                @foreach (var doc in _documents)
+                {
+                    var d = doc;
+                    <div class="model doc-row">
+                        <div class="li-text">
+                            <div class="model-name">@d.FileName</div>
+                            <div class="model-meta @(d.Status == DocumentStatus.Failed ? "bad-text" : "")">@DocumentText.Status(d, Library.Progress)@(d.Status == DocumentStatus.Ready ? "" : " · " + DocumentText.Details(d))</div>
+                            <div class="model-meta path">Added @Format.When(d.AddedAt)@(d.SourcePath is { } p ? " from " + p : "")</div>
+                        </div>
+                        <div class="actions">
+                            @if (d.Status == DocumentStatus.Failed)
+                            {
+                                <button class="btn" @onclick="() => Library.RetryAsync(d.Id)">Try again</button>
+                            }
+                            <button class="btn danger" @onclick="() => RemoveAsync(d)">Remove</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </section>
+
+        <section class="group">
+            <h3 class="group-title">Try a search</h3>
+            <p class="note">See which passages a question would find. This is what chats are given.</p>
+            <div class="search-row">
+                <input class="field" aria-label="Search question" placeholder="Ask something these files answer" @bind="_query" @bind:event="oninput" @onkeydown="SearchKeyAsync" />
+                <button class="btn" disabled="@(_searching || string.IsNullOrWhiteSpace(_query))" @onclick="SearchAsync">@(_searching ? "Searching…" : "Search")</button>
+            </div>
+            @if (_searchProblem is { } why)
+            {
+                <div class="notice bad"><span>@why</span></div>
+            }
+            @if (_results is { } results)
+            {
+                @if (results.Count == 0)
+                {
+                    <p class="note">Nothing close enough was found.</p>
+                }
+                @foreach (var (hit, i) in results.Select((h, i) => (h, i)))
+                {
+                    var h = hit;
+                    <button class="hit" @onclick="() => _open = h">
+                        <span class="hit-head"><b>@(i + 1)</b> @(new SourcePassage(i + 1, h.Chunk.Id, h.Chunk.DocumentId, h.FileName, h.Chunk.Page, h.Chunk.Heading, h.Similarity).Label)<span class="small"> · match @h.Similarity.ToString("0.00")</span></span>
+                        <span class="hit-text">@Snippet(h.Chunk.Text)</span>
+                    </button>
+                }
+            }
+        </section>
+
+        <section class="group">
+            @if (_confirmDelete)
+            {
+                <div class="notice bad">
+                    <span>Delete <b>@collection.Name</b> and its @Plural(_documents.Count, "file")? Chats that search it stop doing so. The original files on your PC are not touched.</span>
+                    <span class="row"><button class="btn danger" @onclick="DeleteAsync">Delete</button><button class="btn" @onclick="() => _confirmDelete = false">Keep</button></span>
+                </div>
+            }
+            else
+            {
+                <button class="btn" @onclick="() => _confirmDelete = true">Delete collection</button>
+            }
+        </section>
+    </div>
+}
+
+@if (_open is { } openHit)
+{
+    <PassageViewer ChunkId="@openHit.Chunk.Id" Similarity="@openHit.Similarity" OnClose="() => _open = null" />
+}
+
+<SectionContent SectionName="aside">
+    <SearchModelPanel />
+    <div class="panel">
+        <h4>How it works</h4>
+        <p class="small">Each file is cut into passages of a few hundred words. The document search model turns every passage into numbers that capture its meaning, once.</p>
+        <p class="small">When you send a message, the passages closest to it in meaning, or sharing its rare words, are sent to the model with your message. General chats cite them as [1], [2]; press a number to see the passage in its file.</p>
+        <p class="small">Everything stays on this PC.</p>
+    </div>
+</SectionContent>
+
+@code {
+    [Parameter] public long? CollectionId { get; set; }
+
+    private List<DocumentCollection> _collections = [];
+    private IReadOnlyDictionary<long, int> _counts = new Dictionary<long, int>();
+    private DocumentCollection? _collection;
+    private List<DocumentSummary> _documents = [];
+    private List<string> _problems = [];
+    private bool _adding, _confirmDelete, _searching;
+    private string _query = "";
+    private string? _searchProblem;
+    private IReadOnlyList<FoundPassage>? _results;
+    private FoundPassage? _open;
+
+    protected override void OnInitialized() => Library.Changed += OnLibraryChanged;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _problems = [];
+        _confirmDelete = false;
+        _results = null;
+        _searchProblem = null;
+        await LoadAsync();
+        if (CollectionId is not null && _collection is null) Nav.NavigateTo("general/documents", replace: true);
+    }
+
+    private void OnLibraryChanged() => InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    private async Task LoadAsync()
+    {
+        _collections = (await Library.Store.ListAsync()).ToList();
+        _counts = await Library.Store.CountsAsync();
+        _collection = CollectionId is { } id ? _collections.FirstOrDefault(c => c.Id == id) : null;
+        _documents = _collection is null ? [] : (await Library.Store.DocumentsAsync(_collection.Id)).ToList();
+    }
+
+    private int Count(long id) => _counts.TryGetValue(id, out var n) ? n : 0;
+
+    private static string Plural(int n, string word) => $"{n} {word}{(n == 1 ? "" : "s")}";
+
+    private static string Snippet(string text) => text.Length <= 320 ? text : text[..320].TrimEnd() + "…";
+
+    private async Task CreateAsync()
+    {
+        var name = "New collection";
+        for (var i = 2; _collections.Any(c => c.Name == name); i++) name = $"New collection {i}";
+        var created = await Library.Store.CreateAsync(new DocumentCollection { Name = name });
+        Nav.NavigateTo($"general/documents/{created.Id}");
+    }
+
+    private async Task RenameAsync(ChangeEventArgs e)
+    {
+        var name = (e.Value?.ToString() ?? "").Trim();
+        if (_collection is null || name.Length == 0) return;
+        _collection.Name = name;
+        await Library.Store.UpdateAsync(_collection);
+        await LoadAsync();
+    }
+
+    private async Task DescribeAsync(ChangeEventArgs e)
+    {
+        if (_collection is null) return;
+        _collection.Description = (e.Value?.ToString() ?? "").Trim();
+        await Library.Store.UpdateAsync(_collection);
+    }
+
+    private async Task AddFilesAsync()
+    {
+        if (_collection is not { } collection) return;
+        var paths = await Desktop.PickDocumentFilesAsync();
+        if (paths.Count == 0) return;
+        _adding = true;
+        _problems = [];
+        StateHasChanged();
+        try
+        {
+            foreach (var path in paths)
+            {
+                try
+                {
+                    if (await Library.AddFileAsync(collection.Id, path) is null) _problems.Add($"{Path.GetFileName(path)} is already in this collection.");
+                }
+                catch (DocumentReadException e)
+                {
+                    _problems.Add($"{Path.GetFileName(path)}: {e.Message}");
+                }
+                await LoadAsync();
+                StateHasChanged();
+            }
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    private async Task RemoveAsync(DocumentSummary doc)
+    {
+        await Library.DeleteDocumentAsync(doc.Id);
+        await LoadAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_collection is null) return;
+        await Library.DeleteCollectionAsync(_collection.Id);
+        Nav.NavigateTo("general/documents");
+    }
+
+    private async Task SearchKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await SearchAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        if (_collection is null || string.IsNullOrWhiteSpace(_query) || _searching) return;
+        _searching = true;
+        _searchProblem = null;
+        StateHasChanged();
+        try
+        {
+            if (await Library.ModelIdAsync() is null)
+            {
+                _searchProblem = "There is no document search model yet. Get one in Models → Recommended → Document search.";
+                _results = null;
+                return;
+            }
+            _results = await Library.SearchAsync([_collection.Id], _query.Trim(), 6);
+        }
+        catch (EmbedderUnavailableException e)
+        {
+            _searchProblem = e.Message;
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    public void Dispose() => Library.Changed -= OnLibraryChanged;
+}

@@ -40,6 +40,7 @@
     </label>
 </div>
 <MemoryPanel Conversation="@Conversation" Path="@Path" Streaming="@Streaming" />
+<DocumentsPanel Conversation="@Conversation" Kind="roleplay" />
 
 @code {
     [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();

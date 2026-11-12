@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -183,6 +183,27 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
 
         if (completionTokens > 0 || promptTokens > 0)
             yield return new ChatDelta(null, null, new GenerationStats(promptTokens, completionTokens, speed));
+    }
+
+    /// <summary>One vector per input, in order, from an engine started with --embedding.</summary>
+    public async Task<IReadOnlyList<float[]>> EmbedAsync(IReadOnlyList<string> inputs, CancellationToken ct)
+    {
+        var body = new JsonObject
+        {
+            ["input"] = new JsonArray(inputs.Select(s => (JsonNode)JsonValue.Create(s)!).ToArray()),
+            ["encoding_format"] = "float",
+        };
+        using var response = await http.SendAsync(Request(HttpMethod.Post, "v1/embeddings", body), ct).ConfigureAwait(false);
+        var json = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        var result = new float[inputs.Count][];
+        foreach (var item in json["data"]?.AsArray() ?? [])
+        {
+            var index = item?["index"]?.GetValue<int>() ?? -1;
+            if (index < 0 || index >= result.Length) continue;
+            result[index] = item!["embedding"]!.AsArray().Select(x => x!.GetValue<float>()).ToArray();
+        }
+        if (result.Any(r => r is null)) throw new EngineException("The document search model did not return a result for every passage.");
+        return result;
     }
 
     /// <summary>A fixed, model-neutral prompt; the reply text itself is thrown away.</summary>

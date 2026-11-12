@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 
 namespace DogAI.Core.Chat;
 
@@ -15,22 +15,38 @@ public enum PromptPartKind
     Examples = 5,
     ChatInstructions = 6,
     Memory = 7,
+
+    /// <summary>Passages found in the chat's documents. Placed with the newest user turn, not in the system message.</summary>
+    Documents = 8,
+
+    /// <summary>Earlier messages of a long chat that match the newest one. Placed with the newest user turn.</summary>
+    Recall = 9,
 }
 
-/// <summary>One piece of the system message, e.g. the card's description or the lore that fired.</summary>
+/// <summary>One piece of standing text, e.g. the card's description or the lore that fired.</summary>
 public sealed record PromptPart(PromptPartKind Kind, string Text)
 {
     /// <summary>
+    /// Text that changes with every message (found passages, recalled messages) goes with the newest user turn rather
+    /// than in the system message: the engine reuses the prompt it processed last time up to the first change, so a
+    /// system message that changed every turn would mean reading the whole chat again for every reply.
+    /// </summary>
+    public bool InUserTurn => Kind is PromptPartKind.Documents or PromptPartKind.Recall;
+
+    /// <summary>
     /// When even the newest message does not fit, parts are left out in this order (lowest first) after all
     /// older turns are gone. Zero means never: the instruction, the card and the chat's own instructions stay.
-    /// The order follows the plan's priority: system &gt; card &gt; others in a group &gt; lore &gt; memory &gt; older turns.
+    /// The order follows the plan's priority: system &gt; card &gt; others in a group &gt; documents &gt; lore &gt; memory &gt;
+    /// recalled messages &gt; older turns.
     /// </summary>
     public int DropOrder => Kind switch
     {
         PromptPartKind.Examples => 1,
-        PromptPartKind.Memory => 2,
-        PromptPartKind.LoreBefore or PromptPartKind.LoreAfter => 3,
-        PromptPartKind.Cast => 4,
+        PromptPartKind.Recall => 2,
+        PromptPartKind.Memory => 3,
+        PromptPartKind.LoreBefore or PromptPartKind.LoreAfter => 4,
+        PromptPartKind.Documents => 5,
+        PromptPartKind.Cast => 6,
         _ => 0,
     };
 }
@@ -88,7 +104,7 @@ public sealed class PromptLayout
 
     /// <summary>The system message made from <paramref name="parts"/> (all parts when null), in standard order.</summary>
     public string SystemText(IEnumerable<PromptPart>? parts = null) =>
-        string.Join("\n\n", (parts ?? Parts).OrderBy(p => p.Kind).Select(p => p.Text));
+        string.Join("\n\n", (parts ?? Parts).Where(p => !p.InUserTurn).OrderBy(p => p.Kind).Select(p => p.Text));
 
     /// <summary>
     /// The full message list: the system message, then the history with the author's note and final instruction
@@ -97,7 +113,8 @@ public sealed class PromptLayout
     /// </summary>
     /// <param name="history">The chat turns, oldest first, already trimmed to fit. Roles are "user" and "assistant".</param>
     /// <param name="directive">False leaves <see cref="Directive"/> out.</param>
-    public List<PromptMessage> Arrange(string system, IReadOnlyList<PromptMessage> history, bool directive = true)
+    /// <param name="parts">The parts still in the prompt (all when null); those placed in user turns go before the newest user turn's text.</param>
+    public List<PromptMessage> Arrange(string system, IReadOnlyList<PromptMessage> history, bool directive = true, IEnumerable<PromptPart>? parts = null)
     {
         var result = new List<PromptMessage>(history.Count + 1);
         if (system.Length > 0) result.Add(new PromptMessage("system", system));
@@ -110,6 +127,11 @@ public sealed class PromptLayout
         var final = FinalInstruction.Trim();
         if (final.Length > 0 && UserTurnAt(history, history.Count - 1) is { } last)
             turns[last] = Join(turns[last], final);
+
+        // Found passages and recalled messages come first in the newest user turn, so the message itself is read last.
+        var reference = string.Join("\n\n", (parts ?? Parts).Where(p => p.InUserTurn).OrderBy(p => p.Kind).Select(p => p.Text));
+        if (reference.Length > 0 && UserTurnAt(history, history.Count - 1) is { } newest)
+            turns[newest] = turns[newest].Trim().Length == 0 ? reference : reference + "\n\n" + turns[newest];
 
         var request = directive ? Directive.Trim() : "";
         if (request.Length > 0 && history.Count > 0 && history[^1].Role == "user")
