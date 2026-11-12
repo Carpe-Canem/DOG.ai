@@ -1,0 +1,81 @@
+@page "/settings"
+@implements IDisposable
+@inject AppearanceState Appearance
+@inject AppPaths Paths
+@inject OnlineGate Gate
+@inject NetworkAudit Audit
+@inject ISettingsStore SettingsStore
+
+<SectionContent SectionName="title">
+    <h2>Settings</h2>
+    <p>Changes apply immediately</p>
+</SectionContent>
+
+<div class="settings">
+    <section>
+        <h3 id="look-label">Look</h3>
+        <div class="choice-grid" role="radiogroup" aria-labelledby="look-label">
+            @foreach (var skin in Skins.All)
+            {
+                var active = skin.Id == Appearance.Skin;
+                <label class="choice-card @(active ? "active" : "")">
+                    <input type="radio" name="skin" value="@skin.Id" checked="@active" @onchange="() => Appearance.SetSkinAsync(skin.Id)" />
+                    <svg viewBox="0 0 120 68" aria-hidden="true" fill="currentColor">@((MarkupString)Sketch[skin.Id])</svg>
+                    <b>@skin.Name @if (skin.Id == Skins.Default) { <span class="chip">Default</span> }</b>
+                    <span class="desc">@skin.Description</span>
+                </label>
+            }
+        </div>
+    </section>
+
+    <section>
+        <h3 id="theme-label">Light or dark</h3>
+        <div class="seg" role="radiogroup" aria-labelledby="theme-label">
+            @foreach (var (id, label) in ThemeChoices)
+            {
+                var active = id == Appearance.Theme;
+                <label class="@(active ? "active" : "")">
+                    <input type="radio" name="theme" value="@id" checked="@active" @onchange="() => Appearance.SetThemeAsync(id)" />@label
+                </label>
+            }
+        </div>
+    </section>
+
+    <section>
+        <h3>About this install</h3>
+        <div class="about">
+            <div class="kv"><span>Version</span><span>@Version</span></div>
+            <div class="kv"><span>Data folder</span><span>@Paths.Root</span></div>
+            <div class="kv"><span>Models folder</span><span>@(_settings?.ModelsDirectory ?? "Not set")</span></div>
+            <div class="kv"><span>Network</span><span>@(Gate.IsOnline ? "Online" : "Offline")</span></div>
+            <div class="kv"><span>Blocked connection attempts this session</span><span>@Audit.Snapshot().Count(e => !e.Allowed)</span></div>
+        </div>
+    </section>
+</div>
+
+@code {
+    private AppSettings? _settings;
+
+    private static readonly (string Id, string Label)[] ThemeChoices =
+        [(Themes.System, "Match Windows"), (Themes.Dark, "Dark"), (Themes.Light, "Light")];
+
+    // Tiny layout diagrams for each skin; "hot" marks where the navigation lives.
+    private static readonly Dictionary<string, string> Sketch = new()
+    {
+        [Skins.Workbench] = "<rect class='hot' x='6' y='6' width='8' height='56' rx='2'/><rect x='18' y='6' width='24' height='56' rx='2' opacity='.5'/><rect x='46' y='6' width='44' height='56' rx='2' opacity='.3'/><rect x='94' y='6' width='20' height='56' rx='2' opacity='.5'/>",
+        [Skins.Fireside] = "<rect class='hot' x='38' y='6' width='44' height='6' rx='3'/><rect x='6' y='18' width='20' height='44' rx='2' opacity='.3'/><rect x='34' y='18' width='52' height='44' rx='2' opacity='.5'/><rect x='94' y='18' width='20' height='44' rx='2' opacity='.3'/>",
+        [Skins.Playhouse] = "<rect class='hot' x='34' y='6' width='52' height='9' rx='4.5'/><rect x='6' y='21' width='24' height='41' rx='7' opacity='.5'/><rect x='34' y='21' width='52' height='41' rx='7' opacity='.4'/><rect x='90' y='21' width='24' height='41' rx='7' opacity='.5'/>",
+    };
+
+    private static string Version =>
+        System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "dev";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Appearance.Changed += Refresh;
+        _settings = await SettingsStore.LoadAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Appearance.Changed -= Refresh;
+}

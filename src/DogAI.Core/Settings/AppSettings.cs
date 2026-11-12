@@ -8,6 +8,9 @@ public sealed record AppSettings
 
     /// <summary>"system", "dark" or "light".</summary>
     public string Theme { get; init; } = "system";
+
+    /// <summary>"workbench", "fireside" or "playhouse".</summary>
+    public string Skin { get; init; } = "workbench";
 }
 
 public interface ISettingsStore

@@ -1,0 +1,10 @@
+@implements IDisposable
+@inject OnlineGate Gate
+
+<span class="offline @(Gate.IsOnline ? "on" : "")"><i class="dot"></i>@(Gate.IsOnline ? "Online" : "Offline")</span>
+
+@code {
+    protected override void OnInitialized() => Gate.Changed += Refresh;
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Gate.Changed -= Refresh;
+}

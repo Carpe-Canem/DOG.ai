@@ -1,34 +1,53 @@
 @page "/"
-@inject AppPaths Paths
-@inject OnlineGate Gate
-@inject NetworkAudit Audit
-@inject ISettingsStore SettingsStore
+@implements IDisposable
+@inject AppearanceState Appearance
+@inject NavigationManager Nav
 
-<h1>DOG AI</h1>
-<p>Skeleton build. This page only proves the plumbing works; the real interface comes after the design is chosen.</p>
-
-<table>
-    <tr><td>Data folder</td><td>@Paths.Root</td></tr>
-    <tr><td>Database</td><td>@(File.Exists(Paths.DatabaseFile) ? "ready" : "missing")</td></tr>
-    <tr><td>Models folder</td><td>@(_settings?.ModelsDirectory ?? "(not set)")</td></tr>
-    <tr><td>Network</td><td>@(Gate.IsOnline ? "ONLINE" : "offline")</td></tr>
-    <tr><td>Blocked requests this session</td><td>@Audit.Snapshot().Count(e => !e.Allowed)</td></tr>
-    <tr><td>Settings saved</td><td>@_saves time(s)</td></tr>
-</table>
-
-<p><button @onclick="SaveAgain">Save settings</button></p>
+@* Only Playhouse has a home screen. The other skins open straight into General. *@
+@if (Appearance.Skin == Skins.Playhouse)
+{
+    <div class="home-inner">
+        <h1>@Greeting</h1>
+        <p class="sub">No model is loaded yet. Get one from Models to begin.</p>
+        <div class="tiles">
+            @foreach (var mode in Modes.All)
+            {
+                <a class="tile" href="@mode.Id" style="--tc:var(--c-@mode.Id)">
+                    <Icon Name="@mode.Id" Size="34" />
+                    <h3>@mode.Headline</h3>
+                    <p>@mode.Blurb</p>
+                </a>
+            }
+        </div>
+    </div>
+}
 
 @code {
-    private AppSettings? _settings;
-    private int _saves;
-
-    protected override async Task OnInitializedAsync() => _settings = await SettingsStore.LoadAsync();
-
-    private async Task SaveAgain()
+    private static string Greeting
     {
-        if (_settings is null) return;
-        await SettingsStore.SaveAsync(_settings);
-        _settings = await SettingsStore.LoadAsync();
-        _saves++;
+        get
+        {
+            var hour = DateTime.Now.Hour;
+            if (hour >= 18) return "Good evening.";
+            if (hour >= 12) return "Good afternoon.";
+            if (hour >= 5) return "Good morning.";
+            return "Up late.";
+        }
     }
+
+    protected override void OnInitialized()
+    {
+        Appearance.Changed += OnAppearanceChanged;
+        RedirectIfNoHome();
+    }
+
+    private void OnAppearanceChanged() => InvokeAsync(RedirectIfNoHome);
+
+    private void RedirectIfNoHome()
+    {
+        if (Appearance.Skin != Skins.Playhouse)
+            Nav.NavigateTo("general", replace: true);
+    }
+
+    public void Dispose() => Appearance.Changed -= OnAppearanceChanged;
 }

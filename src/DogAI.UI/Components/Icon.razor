@@ -1,0 +1,16 @@
+<svg class="icon" viewBox="0 0 24 24" width="@Size" height="@Size" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">@((MarkupString)Paths.GetValueOrDefault(Name, ""))</svg>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public int Size { get; set; } = 20;
+
+    private static readonly Dictionary<string, string> Paths = new()
+    {
+        ["home"] = "<path d='M3 11l9-7 9 7v9h-6v-6H9v6H3z'/>",
+        ["general"] = "<path d='M4 5h16v11H9l-5 4z'/>",
+        ["characters"] = "<circle cx='12' cy='8' r='4'/><path d='M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7'/>",
+        ["story"] = "<path d='M4 5c3-1 6-1 8 1 2-2 5-2 8-1v14c-3-1-6-1-8 1-2-2-5-2-8-1z'/><path d='M12 6v14'/>",
+        ["models"] = "<path d='M12 3v11m0 0l-4-4m4 4l4-4'/><path d='M4 17v3h16v-3'/>",
+        ["settings"] = "<path d='M4 7h9M19 7h1M4 17h1M11 17h9'/><circle cx='16' cy='7' r='2.5'/><circle cx='8' cy='17' r='2.5'/>",
+    };
+}

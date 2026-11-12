@@ -1,5 +1,49 @@
 @inherits LayoutComponentBase
-@* Deliberately unstyled. Navigation, theming and layout are built in M0b from the approved design. *@
-<main>
-    @Body
-</main>
+@implements IDisposable
+@inject AppearanceState Appearance
+@inject NavigationManager Nav
+
+@* Pages fill named regions (title, list, composer, aside) plus the body; the active skin decides where they go. *@
+<div class="shell skin-@Appearance.Skin" data-theme="@Appearance.EffectiveTheme" data-screen="@Screen">
+    <CascadingValue Name="Screen" Value="@Screen">
+        @switch (Appearance.Skin)
+        {
+            case Skins.Fireside:
+                <FiresideShell>@Body</FiresideShell>
+                break;
+            case Skins.Playhouse:
+                <PlayhouseShell>@Body</PlayhouseShell>
+                break;
+            default:
+                <WorkbenchShell>@Body</WorkbenchShell>
+                break;
+        }
+    </CascadingValue>
+</div>
+
+@code {
+    /// <summary>First segment of the current route, or "home" at the root.</summary>
+    private string Screen
+    {
+        get
+        {
+            var first = Nav.ToBaseRelativePath(Nav.Uri).Split('/', '?', '#')[0];
+            return first.Length == 0 ? "home" : first;
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Appearance.Changed += Refresh;
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => Refresh();
+
+    public void Dispose()
+    {
+        Appearance.Changed -= Refresh;
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

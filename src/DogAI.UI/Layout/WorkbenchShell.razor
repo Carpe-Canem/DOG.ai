@@ -1,0 +1,20 @@
+<nav class="rail" aria-label="Main">
+    <Logo />
+    <div class="nav"><NavButtons /></div>
+    <div class="rail-foot">
+        <NavLink class="nav-btn" href="settings"><Icon Name="settings" /><span>Settings</span></NavLink>
+        <OfflineBadge />
+    </div>
+</nav>
+<section class="list"><SectionOutlet SectionName="list" /></section>
+<section class="center">
+    <header class="head"><SectionOutlet SectionName="title" /></header>
+    <div class="main">@ChildContent</div>
+    <div class="composer-wrap"><SectionOutlet SectionName="composer" /></div>
+    <footer class="status"><span>No model loaded</span></footer>
+</section>
+<aside class="aside"><SectionOutlet SectionName="aside" /></aside>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

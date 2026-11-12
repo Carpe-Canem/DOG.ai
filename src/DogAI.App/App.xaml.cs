@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using System.Windows;
 using DogAI.Core;
+using DogAI.Core.Appearance;
 using DogAI.Core.Net;
 using DogAI.Core.Settings;
 using DogAI.Data;
@@ -53,6 +54,7 @@ public partial class App : Application
 
             await _services.MigrateDogDatabaseAsync();
             await EnsureFirstRunDefaultsAsync(_services, paths);
+            await _services.GetRequiredService<AppearanceState>().LoadAsync();
 
             new MainWindow(_services).Show();
         }
@@ -72,6 +74,8 @@ public partial class App : Application
         services.AddSingleton<OnlineGate>();
         services.AddSingleton<NetworkAudit>();
         services.AddSingleton<HubHttp>();
+        services.AddSingleton<ISystemTheme, WindowsSystemTheme>();
+        services.AddSingleton<AppearanceState>();
         services.AddDogData();
         services.AddWpfBlazorWebView();
 #if DEBUG

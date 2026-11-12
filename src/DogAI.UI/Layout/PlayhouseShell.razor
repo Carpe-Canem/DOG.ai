@@ -1,0 +1,29 @@
+<header class="top">
+    <a class="brand" href="" aria-label="Home"><Logo /><span class="word">DOG AI</span></a>
+    <nav class="nav" aria-label="Main"><NavButtons IncludeHome="true" /></nav>
+    <div class="top-tools">
+        <OfflineBadge />
+        <NavLink class="nav-btn" href="settings" aria-label="Settings" title="Settings"><Icon Name="settings" /><span>Settings</span></NavLink>
+    </div>
+</header>
+@if (Screen == "home")
+{
+    <div class="home">@ChildContent</div>
+}
+else
+{
+    <div class="body">
+        <section class="list card"><SectionOutlet SectionName="list" /></section>
+        <section class="center card">
+            <header class="head"><SectionOutlet SectionName="title" /></header>
+            <div class="main">@ChildContent</div>
+            <div class="composer-wrap"><SectionOutlet SectionName="composer" /></div>
+        </section>
+        <aside class="aside card"><SectionOutlet SectionName="aside" /></aside>
+    </div>
+}
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [CascadingParameter(Name = "Screen")] public string Screen { get; set; } = "home";
+}

@@ -1,5 +1,8 @@
-﻿using System.Windows;
+﻿using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
 using DogAI.Core;
+using DogAI.Core.Appearance;
 using DogAI.Core.Net;
 using DogAI.UI;
 using Microsoft.AspNetCore.Components.WebView;
@@ -37,6 +40,10 @@ public partial class MainWindow : Window
             _audit.Record("webview", e.Url.GetLeftPart(UriPartial.Path), allowed: false, "external link");
         };
 
+        var appearance = services.GetRequiredService<AppearanceState>();
+        SourceInitialized += (_, _) => ApplyTitleBar(appearance);
+        appearance.Changed += () => Dispatcher.Invoke(() => ApplyTitleBar(appearance));
+
         WebView.Services = services;
         WebView.RootComponents.Add(new RootComponent { Selector = "#app", ComponentType = typeof(Root) });
     }
@@ -73,6 +80,20 @@ public partial class MainWindow : Window
         core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
         core.DownloadStarting += (_, e) => e.Cancel = true;
     }
+
+    /// <summary>Makes the Windows title bar dark or light to match the app.</summary>
+    private void ApplyTitleBar(AppearanceState appearance)
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero) return;
+        var dark = appearance.EffectiveTheme == Themes.Dark ? 1 : 0;
+        _ = DwmSetWindowAttribute(handle, UseImmersiveDarkMode, ref dark, sizeof(int));
+    }
+
+    private const int UseImmersiveDarkMode = 20;
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
     private static string StripQuery(string uri)
     {
