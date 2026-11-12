@@ -1,0 +1,34 @@
+@page "/"
+@inject AppPaths Paths
+@inject OnlineGate Gate
+@inject NetworkAudit Audit
+@inject ISettingsStore SettingsStore
+
+<h1>DOG AI</h1>
+<p>Skeleton build. This page only proves the plumbing works; the real interface comes after the design is chosen.</p>
+
+<table>
+    <tr><td>Data folder</td><td>@Paths.Root</td></tr>
+    <tr><td>Database</td><td>@(File.Exists(Paths.DatabaseFile) ? "ready" : "missing")</td></tr>
+    <tr><td>Models folder</td><td>@(_settings?.ModelsDirectory ?? "(not set)")</td></tr>
+    <tr><td>Network</td><td>@(Gate.IsOnline ? "ONLINE" : "offline")</td></tr>
+    <tr><td>Blocked requests this session</td><td>@Audit.Snapshot().Count(e => !e.Allowed)</td></tr>
+    <tr><td>Settings saved</td><td>@_saves time(s)</td></tr>
+</table>
+
+<p><button @onclick="SaveAgain">Save settings</button></p>
+
+@code {
+    private AppSettings? _settings;
+    private int _saves;
+
+    protected override async Task OnInitializedAsync() => _settings = await SettingsStore.LoadAsync();
+
+    private async Task SaveAgain()
+    {
+        if (_settings is null) return;
+        await SettingsStore.SaveAsync(_settings);
+        _settings = await SettingsStore.LoadAsync();
+        _saves++;
+    }
+}
