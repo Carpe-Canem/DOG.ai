@@ -32,6 +32,9 @@ internal sealed class FileServer : HttpMessageHandler
     /// <summary>Stop sending after this many bytes of a response, to simulate a dropped connection.</summary>
     public long? CutAfter { get; set; }
 
+    /// <summary>Answer every request with the whole file, like a server without range support.</summary>
+    public bool IgnoreRanges { get; set; }
+
     /// <summary>Wait on this before sending each response body, to hold a download open.</summary>
     public TaskCompletionSource? Hold { get; set; }
 
@@ -42,11 +45,13 @@ internal sealed class FileServer : HttpMessageHandler
         if (!Files.TryGetValue(request.RequestUri!.ToString(), out var data))
             return new HttpResponseMessage(HttpStatusCode.NotFound);
 
-        long from = request.Headers.Range?.Ranges.First().From ?? 0;
+        var range = IgnoreRanges ? null : request.Headers.Range?.Ranges.First();
+        long from = range?.From ?? 0;
         if (from >= data.Length && data.Length > 0) return new HttpResponseMessage(HttpStatusCode.RequestedRangeNotSatisfiable);
-        var body = data[(int)from..];
+        var to = Math.Min(range?.To ?? data.Length - 1, data.Length - 1);
+        var body = data[(int)from..(int)(to + 1)];
         if (CutAfter is { } cut && body.Length > cut) body = body[..(int)cut];
-        var response = new HttpResponseMessage(from > 0 ? HttpStatusCode.PartialContent : HttpStatusCode.OK)
+        var response = new HttpResponseMessage(range is not null ? HttpStatusCode.PartialContent : HttpStatusCode.OK)
         {
             Content = new ByteArrayContent(body),
         };
@@ -123,6 +128,64 @@ public sealed class DownloadManagerTests : IDisposable
         Assert.Equal(DownloadStatus.Done, job.Status);
         Assert.Equal(_data, await File.ReadAllBytesAsync(Final));
         Assert.Equal(1024 * 1024, _server.Requests[^1].Headers.Range!.Ranges.First().From);
+    }
+
+    private static readonly TransferOptions Parallel4 = new(ParallelFrom: 1024 * 1024, Connections: 4);
+
+    [Fact]
+    public async Task A_big_file_is_fetched_over_several_connections()
+    {
+        var manager = Manager();
+        manager.Transfer = Parallel4;
+
+        var job = await manager.EnqueueAsync(Job());
+        await manager.IdleAsync();
+
+        Assert.Equal(DownloadStatus.Done, job.Status);
+        Assert.Equal(_data, await File.ReadAllBytesAsync(Final));
+        Assert.Equal(4, _server.Requests.Count(r => r.Headers.Range is not null));
+        Assert.False(File.Exists(Final + ".part"));
+        Assert.False(File.Exists(Final + ".part.segments"));
+    }
+
+    [Fact]
+    public async Task A_server_without_ranges_falls_back_to_one_connection()
+    {
+        var manager = Manager();
+        manager.Transfer = Parallel4;
+        _server.IgnoreRanges = true;
+
+        var job = await manager.EnqueueAsync(Job());
+        await manager.IdleAsync();
+
+        Assert.Equal(DownloadStatus.Done, job.Status);
+        Assert.Equal(_data, await File.ReadAllBytesAsync(Final));
+        Assert.False(File.Exists(Final + ".part.segments"));
+    }
+
+    [Fact]
+    public async Task A_multi_connection_download_resumes_where_each_segment_stopped()
+    {
+        var manager = Manager();
+        manager.Transfer = Parallel4;
+        _server.CutAfter = 100 * 1024;
+
+        var job = await manager.EnqueueAsync(Job());
+        await manager.IdleAsync();
+        Assert.Equal(DownloadStatus.Failed, job.Status);
+        Assert.True(File.Exists(Final + ".part.segments"));
+        var partial = job.BytesDone;
+        Assert.InRange(partial, 1, _data.Length - 1);
+
+        _server.CutAfter = null;
+        _server.Requests.Clear();
+        manager.Resume(job.Id);
+        await manager.IdleAsync();
+
+        Assert.Equal(DownloadStatus.Done, job.Status);
+        Assert.Equal(_data, await File.ReadAllBytesAsync(Final));
+        Assert.All(_server.Requests, r => Assert.True(r.Headers.Range!.Ranges.First().From > 0 || _server.Requests.Count == 4));
+        Assert.False(File.Exists(Final + ".part.segments"));
     }
 
     [Fact]

@@ -77,6 +77,9 @@ public sealed class DownloadManager : IDisposable
     public const long DiskMargin = 2 * Sizes.GiB;
 
     private readonly HttpClient _http;
+
+    /// <summary>How big files are fetched (several connections at once). Tests lower the size limit.</summary>
+    internal TransferOptions Transfer { get; set; } = TransferOptions.Default;
     private readonly IDocumentStore _store;
     private readonly OnlineSession _online;
     private readonly HfToken _token;
@@ -228,7 +231,7 @@ public sealed class DownloadManager : IDisposable
         if (job.Status != DownloadStatus.Done)
         {
             foreach (var part in job.Parts.Where(p => !p.Done))
-                TryDelete(Path.Combine(job.Folder, part.FileName) + ".part");
+                FileTransfer.DeletePart(Path.Combine(job.Folder, part.FileName) + ".part");
         }
         await SaveAsync().ConfigureAwait(false);
         Changed?.Invoke();
@@ -305,7 +308,7 @@ public sealed class DownloadManager : IDisposable
                     if (throttle.ElapsedMilliseconds < 250) return;
                     throttle.Restart();
                     Changed?.Invoke();
-                }, ct).ConfigureAwait(false);
+                }, ct, Transfer).ConfigureAwait(false);
 
                 job.Status = DownloadStatus.Verifying;
                 job.BytesVerified = 0;
@@ -317,7 +320,7 @@ public sealed class DownloadManager : IDisposable
                 }, ct).ConfigureAwait(false);
                 if (!FileTransfer.HashMatches(hash, part.Sha256))
                 {
-                    TryDelete(temp);
+                    FileTransfer.DeletePart(temp);
                     throw new HubException($"{part.FileName} arrived damaged (its checksum did not match), so it was deleted. Try the download again.");
                 }
 
@@ -383,8 +386,7 @@ public sealed class DownloadManager : IDisposable
     private static long BytesOnDisk(DownloadJob job) => job.Parts.Sum(p =>
     {
         if (p.Done) return p.Size;
-        var temp = Path.Combine(job.Folder, p.FileName) + ".part";
-        return File.Exists(temp) ? Math.Min(p.Size, new FileInfo(temp).Length) : 0;
+        return FileTransfer.BytesOnDisk(Path.Combine(job.Folder, p.FileName) + ".part", p.Size);
     });
 
     private static long? FreeSpace(string folder)

@@ -6,15 +6,37 @@ using System.Security.Cryptography;
 namespace DogAI.Hub;
 
 /// <summary>Downloads one file into a ".part" file, resuming where an earlier attempt stopped, and checks its hash.</summary>
-internal static class FileTransfer
+internal static partial class FileTransfer
 {
     private const int BufferSize = 1 << 20;
 
-    /// <param name="progress">Called with the number of bytes of this file now on disk.</param>
+    /// <param name="progress">Called with the number of bytes of this file now on disk. Never called from two threads at once.</param>
+    /// <param name="options">Big files are fetched over several connections at once; null uses the defaults.</param>
     public static async Task DownloadAsync(HttpClient http, string url, string partPath, long expectedSize, string? bearer,
-        Action<long> progress, CancellationToken ct)
+        Action<long> progress, CancellationToken ct, TransferOptions? options = null)
     {
+        options ??= TransferOptions.Default;
         Directory.CreateDirectory(Path.GetDirectoryName(partPath)!);
+
+        // Several connections, each filling its own stretch of the file. A leftover plain ".part" file from an
+        // older attempt (no segment record beside it) is finished the plain way below.
+        if (options.Connections >= 2 && expectedSize >= options.ParallelFrom)
+        {
+            var state = LoadState(partPath, expectedSize);
+            if (state is not null || !File.Exists(partPath))
+            {
+                try
+                {
+                    await DownloadParallelAsync(http, url, partPath, expectedSize, bearer, progress, state, options.Connections, ct).ConfigureAwait(false);
+                    return;
+                }
+                catch (RangesNotSupportedException)
+                {
+                    DeletePart(partPath); // this server sends whole files only; fall through to one connection
+                }
+            }
+        }
+
         for (var attempt = 0; ; attempt++)
         {
             var existing = File.Exists(partPath) ? new FileInfo(partPath).Length : 0;
