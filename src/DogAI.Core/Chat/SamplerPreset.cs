@@ -26,6 +26,10 @@ public sealed record SamplerPreset(string Id, string Name, string Description)
     /// <summary>A JSON schema the answer must follow (structured output). Set by DOG AI for its own jobs, never saved with a style.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string? JsonSchema { get; init; }
+
+    /// <summary>Text at which to stop writing. Set by DOG AI for its own jobs, never saved with a style.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlyList<string>? Stop { get; init; }
 }
 
 public static class SamplerPresets

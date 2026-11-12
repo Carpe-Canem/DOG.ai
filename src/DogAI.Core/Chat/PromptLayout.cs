@@ -116,6 +116,30 @@ public sealed class PromptLayout
     /// <summary>Text that <see cref="Arrange"/> adds to the history, for token counting.</summary>
     public string InsertedText() => AuthorsNote.Trim() + "\n" + FinalInstruction.Trim();
 
+    /// <summary>
+    /// Where a model writing a user's turn should stop: given the text a chat template puts after a user's message
+    /// (such as the ChatML end-of-turn and assistant header, or Mistral's " [/INST]"), its first line and the whole of it.
+    /// </summary>
+    public static IReadOnlyList<string> TurnEnds(string afterUserText)
+    {
+        var whole = afterUserText.Trim();
+        if (whole.Length == 0) return [];
+        var firstLine = whole.Split('\n')[0].Trim();
+        return new[] { firstLine, whole }.Where(s => s.Length > 0).Distinct().ToList();
+    }
+
+    /// <summary><paramref name="text"/> up to the first of <paramref name="stops"/>, or all of it when none appears.</summary>
+    public static string CutAtFirst(string text, IEnumerable<string> stops)
+    {
+        var cut = text.Length;
+        foreach (var stop in stops)
+        {
+            var at = text.IndexOf(stop, StringComparison.Ordinal);
+            if (at >= 0 && at < cut) cut = at;
+        }
+        return text[..cut];
+    }
+
     /// <summary>The newest user turn at or before <paramref name="index"/>, else the oldest one after it.</summary>
     private static int? UserTurnAt(IReadOnlyList<PromptMessage> history, int index)
     {

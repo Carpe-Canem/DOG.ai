@@ -262,6 +262,19 @@ public sealed class PromptLayoutTests
     }
 
     [Fact]
+    public void A_drafted_user_turn_stops_where_the_template_closes_it()
+    {
+        // Mistral-style templates close a user turn with "[/INST]", which is ordinary text, not a stop token.
+        Assert.Equal(["[/INST]"], PromptLayout.TurnEnds(" [/INST]"));
+        Assert.Equal(["<|im_end|>", "<|im_end|>\n<|im_start|>assistant"], PromptLayout.TurnEnds("<|im_end|>\n<|im_start|>assistant\n"));
+        Assert.Empty(PromptLayout.TurnEnds("  "));
+
+        var runOn = "*pats Mara* Good work. [/INST] *Mara grunts* Don't get soft on me.";
+        Assert.Equal("*pats Mara* Good work. ", PromptLayout.CutAtFirst(runOn, PromptLayout.TurnEnds(" [/INST]")));
+        Assert.Equal("all of it", PromptLayout.CutAtFirst("all of it", ["[/INST]"]));
+    }
+
+    [Fact]
     public void The_final_instruction_is_no_longer_in_the_system_message()
     {
         var layout = CharacterPrompt.Layout(new Character { Name = "R", PostHistoryInstructions = "Stay short, {{user}}." }, new Persona { Name = "Sam" });

@@ -71,6 +71,8 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
             ["xtc_probability"] = sampler.XtcProbability,
             ["xtc_threshold"] = sampler.XtcThreshold,
         };
+        if (sampler.Stop is { Count: > 0 } stop)
+            body["stop"] = new JsonArray(stop.Select(s => (JsonNode)JsonValue.Create(s)!).ToArray());
         // "max_tokens" for chat completions, "n_predict" for /completion; each endpoint ignores the other.
         if (sampler.MaxTokens is { } max)
         {

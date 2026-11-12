@@ -438,21 +438,48 @@ public sealed class ChatServiceTests : IDisposable
         var chat = await _chat.StartCharacterChatAsync(rex.Id);
         _engine.ContextLength = 400; // 300 tokens for the prompt; each turn below is about 40
         var words = string.Join(' ', Enumerable.Repeat("word", 38));
-        _engine.Reply = _ => IsSummaryRequest() ? FakeEngine.Say("SUMMARY", " of the story") : FakeEngine.Say(words);
+        // A summary of realistic size: it takes room in the prompt, so more turns are left out once it is there.
+        var summaryText = "SUMMARY of the story " + string.Join(' ', Enumerable.Range(0, 60).Select(i => $"fact{i}"));
+        _engine.Reply = _ => IsSummaryRequest() ? FakeEngine.Say(summaryText) : FakeEngine.Say(words);
 
         for (var i = 0; i < 6; i++) await _chat.SendAsync(chat.Id, $"turn {i} " + words);
 
         var saved = (await _store.GetAsync(chat.Id))!;
-        Assert.Equal("SUMMARY of the story", saved.Summary);
+        Assert.Equal(summaryText, saved.Summary);
         Assert.NotNull(saved.SummaryThroughId);
         var last = (await ShownAsync(chat.Id))[^1];
         Assert.Contains("SUMMARY of the story", last.PromptText);
         Assert.NotNull(last.MemoryUsed);
         Assert.True(last.TrimmedMessages > 0);
+        // Every message left out of the prompt is covered by the summary.
+        var shown = await ShownAsync(chat.Id);
+        var covered = shown.ToList().FindIndex(m => m.Id == saved.SummaryThroughId) + 1;
+        Assert.True(covered >= last.TrimmedMessages, $"summary covers {covered}, {last.TrimmedMessages} left out");
         // The summary request named both sides and left out the newest turns.
         var request = _engine.Prompts.Last(p => p[0].Content.Contains("summarise stories"));
         Assert.Contains("Rex:", request[1].Content);
         Assert.DoesNotContain("turn 5", request[1].Content);
+    }
+
+    [Fact]
+    public async Task A_long_summary_still_covers_every_turn_it_pushes_out()
+    {
+        // As seen live: a summary of ~500 tokens pushes out more turns than the summary's head start covers.
+        var rex = await SaveCharacterAsync();
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        _engine.ContextLength = 2000; // 1500 for the prompt; each turn below is about 40
+        var words = string.Join(' ', Enumerable.Repeat("word", 38));
+        var summaryText = string.Join(' ', Enumerable.Range(0, 500).Select(i => $"fact{i}"));
+        _engine.Reply = _ => IsSummaryRequest() ? FakeEngine.Say(summaryText) : FakeEngine.Say(words);
+
+        for (var i = 0; i < 30; i++) await _chat.SendAsync(chat.Id, words);
+
+        var saved = (await _store.GetAsync(chat.Id))!;
+        var shown = await ShownAsync(chat.Id);
+        var last = shown[^1];
+        Assert.NotNull(last.MemoryUsed);
+        var covered = shown.ToList().FindIndex(m => m.Id == saved.SummaryThroughId) + 1;
+        Assert.True(covered >= last.TrimmedMessages, $"summary covers {covered}, {last.TrimmedMessages} left out");
     }
 
     [Fact]

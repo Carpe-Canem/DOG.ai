@@ -228,6 +228,7 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
         var active = new ActiveReply(conversationId, leaf, kind: ReplyKind.Draft);
         Begin(active, cts);
         string? error = null;
+        IReadOnlyList<string> stops = [];
         try
         {
             var token = cts.Token;
@@ -239,7 +240,11 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
             var built = await BuildPromptAsync(layout, path, PromptEnd.UserTurn, token);
             var preset = _presets.Get(conversation.PresetId);
             // Writing inside an open user turn makes the model speak as the user; asking it to is the fallback.
-            var stream = built.OpenUserTurn ? engine.StreamCompletionAsync(built.Text, preset, token) : engine.StreamChatAsync(built.Prompt, preset, token);
+            // Stop where the template would close the user's turn, so the draft never runs on into the character's reply.
+            var stream = built.OpenUserTurn
+                ? engine.StreamCompletionAsync(built.Text, preset with { Stop = built.TurnEnds }, token)
+                : engine.StreamChatAsync(built.Prompt, preset, token);
+            stops = built.TurnEnds;
             await StreamAsync(stream, active, null, 0, token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -254,7 +259,7 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
             End(conversationId, error);
             cts.Dispose();
         }
-        return active.Content.Trim();
+        return PromptLayout.CutAtFirst(active.Content, stops).Trim();
     }
 
     /// <summary>Forgets the chat's summary; it is written again from scratch when next needed.</summary>
@@ -407,18 +412,27 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
         var plain = await BuildPromptAsync(layout, path, PromptEnd.Reply, ct);
         if (plain.Trimmed == 0) return (layout, names);
 
+        // The summary itself takes room, so with it in place more turns may be left out than without. Check again
+        // after adding it, so every left-out turn is covered by the summary (a few passes at most).
         var (summary, through) = ValidSummary(conversation, path);
-        var waiting = _summaryRetryAt.TryGetValue(conversation.Id, out var retryAt) && path.Count < retryAt;
-        if (through < plain.Trimmed - 1 && !waiting)
+        var trimmed = plain.Trimmed;
+        if (summary.Length > 0) trimmed = Math.Max(trimmed, (await BuildPromptAsync(Make(summary), path, PromptEnd.Reply, ct)).Trimmed);
+        for (var pass = 0; pass < 3 && through < trimmed - 1; pass++)
         {
+            if (_summaryRetryAt.TryGetValue(conversation.Id, out var retryAt) && path.Count < retryAt) break;
             // Run a little ahead of what is trimmed, so the summary is not rewritten after every message.
-            var target = Math.Min(plain.Trimmed - 1 + SummaryLead, Math.Max(plain.Trimmed - 1, path.Count - 1 - SummaryKeepsOut));
+            var target = Math.Min(trimmed - 1 + SummaryLead, Math.Max(trimmed - 1, path.Count - 1 - SummaryKeepsOut));
             active.Status = "Summarising older messages";
             Changed?.Invoke();
             (summary, through) = await SummariseAsync(conversation, path, summary, through + 1, target, names, ct);
-            // If the model gave nothing usable, try again a few messages later rather than before every reply.
-            if (through < target) _summaryRetryAt[conversation.Id] = path.Count + SummaryLead;
-            else _summaryRetryAt.Remove(conversation.Id);
+            if (through < target)
+            {
+                // The model gave nothing usable: try again a few messages later rather than before every reply.
+                _summaryRetryAt[conversation.Id] = path.Count + SummaryLead;
+                break;
+            }
+            _summaryRetryAt.Remove(conversation.Id);
+            trimmed = Math.Max(trimmed, (await BuildPromptAsync(Make(summary), path, PromptEnd.Reply, ct)).Trimmed);
         }
         if (summary.Length == 0) return (layout, names);
         layout = Make(summary);
@@ -526,8 +540,12 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
     private const string UserTurnMark = "@@DOGAI-USER-TURN-7f3a@@";
 
     /// <param name="OpenUserTurn">True when <see cref="Text"/> ends inside an empty user turn, for raw completion.</param>
-    private sealed record BuiltPrompt(List<PromptMessage> Prompt, string Text, int Tokens, int Trimmed, IReadOnlyList<PromptPart> Parts, bool OpenUserTurn = false)
+    /// <param name="TurnEnds">With an open user turn: the text the template puts after a user's message, to stop at.</param>
+    private sealed record BuiltPrompt(List<PromptMessage> Prompt, string Text, int Tokens, int Trimmed, IReadOnlyList<PromptPart> Parts,
+        bool OpenUserTurn = false, IReadOnlyList<string>? TurnEnds = null)
     {
+        public IReadOnlyList<string> TurnEnds { get; } = TurnEnds ?? [];
+
         public bool Has(PromptPartKind kind) => Parts.Any(p => p.Kind == kind);
     }
 
@@ -588,6 +606,7 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
             string text;
             List<PromptMessage> prompt;
             var open = false;
+            IReadOnlyList<string> turnEnds = [];
             if (end == PromptEnd.UserTurn && (history.Count == 0 || history[^1].Role == "assistant"))
             {
                 prompt = layout.Arrange(system, history, directive: false);
@@ -595,6 +614,7 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
                 var cut = rendered.IndexOf(UserTurnMark, StringComparison.Ordinal);
                 open = cut >= 0;
                 text = open ? rendered[..cut] : "";
+                turnEnds = open ? PromptLayout.TurnEnds(rendered[(cut + UserTurnMark.Length)..]) : [];
             }
             else
             {
@@ -608,10 +628,10 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
                 if (continuation) text += included[^1].Content;
             }
             var tokens = await engine.CountTokensAsync(text, ct);
-            if (tokens <= budget) return new BuiltPrompt(prompt, text, tokens, fit.Trimmed, parts, open);
+            if (tokens <= budget) return new BuiltPrompt(prompt, text, tokens, fit.Trimmed, parts, open, turnEnds);
             var next = ContextBudgeter.DropOldest(fit, items);
             if (next != fit) fit = next;
-            else if (!DropPart()) return new BuiltPrompt(prompt, text, tokens, fit.Trimmed, parts, open);
+            else if (!DropPart()) return new BuiltPrompt(prompt, text, tokens, fit.Trimmed, parts, open, turnEnds);
         }
     }
 
