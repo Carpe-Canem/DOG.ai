@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DogAI.Core;
+using DogAI.Core.Characters;
 using DogAI.Core.Chat;
 using DogAI.Core.Models;
 using DogAI.Core.Settings;
@@ -16,6 +17,7 @@ public static class DataServices
             o.UseSqlite($"Data Source={sp.GetRequiredService<AppPaths>().DatabaseFile}"));
         services.AddSingleton<ISettingsStore, SqliteSettingsStore>();
         services.AddSingleton<IChatStore, SqliteChatStore>();
+        services.AddSingleton<ICharacterStore, SqliteCharacterStore>();
         services.AddSingleton<IModelRecordStore, SqliteModelRecordStore>();
         services.AddSingleton<IDocumentStore>(sp => (SqliteSettingsStore)sp.GetRequiredService<ISettingsStore>());
         return services;

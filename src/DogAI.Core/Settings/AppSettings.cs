@@ -53,6 +53,22 @@ public interface IDesktopShell
     Task<string?> PickFolderAsync(string? startFolder);
 
     void CopyText(string text);
+
+    /// <summary>Shows the "open file" dialog for a character card (PNG or JSON). Returns null if cancelled.</summary>
+    Task<string?> PickCardFileAsync();
+
+    /// <summary>Shows the "open file" dialog for a picture. Returns null if cancelled.</summary>
+    Task<string?> PickImageFileAsync();
+
+    /// <summary>Shows the "save file" dialog and writes the bytes. Returns the path written, or null if cancelled.</summary>
+    /// <param name="filter">A Windows dialog filter such as "PNG picture (*.png)|*.png".</param>
+    Task<string?> SaveFileAsync(string suggestedName, string filter, byte[] content);
+
+    /// <summary>
+    /// Turns any picture Windows can read into (full PNG, small square avatar PNG). The avatar is cropped
+    /// around the top centre, where faces usually are on character art. Throws if the picture cannot be read.
+    /// </summary>
+    Task<(byte[] Png, byte[] Avatar)> PreparePictureAsync(byte[] picture);
 }
 
 public interface ISettingsStore

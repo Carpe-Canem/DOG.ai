@@ -1,7 +1,9 @@
 # Launches the built DOG AI app against a throwaway data folder and drives it through the
 # WebView2 debugging port, so a change can be checked in the real app.
 #
-#   -Steps    list of @{ eval = '<javascript>' } and @{ shot = '<name>' } hashtables, run in order
+#   -Steps    list of @{ eval = '<javascript>' } and @{ shot = '<name>' } hashtables, run in order;
+#             @{ dialog = '<file path>'; title = '<dialog title>' } fills in a Windows open/save dialog
+#             that the previous step opened (it types the path and presses Enter)
 #   -DataDir  data folder for the run (default: a fresh temp folder, deleted afterwards)
 #   -OutDir   where screenshots are written (default: a temp folder, printed at the end)
 #   -Keep     keep the data folder, e.g. to restart and check that something persisted
@@ -65,6 +67,40 @@ try {
             if ($r.exceptionDetails) { "EVAL ERROR: $($r.exceptionDetails.exception.description)" }
             elseif ($null -ne $r.result.value) { "=> $($r.result.value)" }
             Start-Sleep -Milliseconds 600
+        }
+        if ($step.dialog) {
+            # A Windows open/save dialog opened by the previous step: put the path in its file name box and
+            # press its OK button, through UI Automation (sending keys would need the window to have focus).
+            Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+            $A = [Windows.Automation.AutomationElement]
+            $byPid = [Windows.Automation.PropertyCondition]::new($A::ProcessIdProperty, $app.Id)
+            $dlg = $null
+            foreach ($i in 1..30) {
+                Start-Sleep -Milliseconds 300
+                $dlg = $A::RootElement.FindAll('Children', $byPid) | ForEach-Object { $_.FindAll('Children', [Windows.Automation.Condition]::TrueCondition) } |
+                    Where-Object { $_.Current.Name -eq $step.title -and $_.Current.ClassName -eq '#32770' } | Select-Object -First 1
+                if ($dlg) { break }
+            }
+            if (-not $dlg) { "DIALOG NOT FOUND: $($step.title)" }
+            else {
+                # The file name box is the Edit with id 1148 (open dialogs) or 1001 (save dialogs); control 1 of class Button is Open/Save.
+                # Set the text and press the button with window messages, which needs no focus.
+                if (-not ('DogWalk.Win' -as [type])) {
+                    Add-Type -Namespace DogWalk -Name Win -MemberDefinition @'
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, string lParam);
+[DllImport("user32.dll")] public static extern IntPtr PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+'@
+                }
+                $all = $dlg.FindAll('Descendants', [Windows.Automation.Condition]::TrueCondition)
+                $box = $all | Where-Object { $_.Current.AutomationId -in '1148', '1001' -and $_.Current.ClassName -eq 'Edit' } | Select-Object -First 1
+                $ok = $all | Where-Object { $_.Current.AutomationId -eq '1' -and $_.Current.ClassName -eq 'Button' } | Select-Object -First 1
+                if (-not $box -or -not $ok) { "DIALOG CONTROLS NOT FOUND: $($step.title)" }
+                else {
+                    [DogWalk.Win]::SendMessage([IntPtr]$box.Current.NativeWindowHandle, 0x000C, [IntPtr]::Zero, $step.dialog) | Out-Null  # WM_SETTEXT
+                    [DogWalk.Win]::PostMessage([IntPtr]$ok.Current.NativeWindowHandle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null  # BM_CLICK
+                    Start-Sleep -Milliseconds 1500
+                }
+            }
         }
         if ($step.shot) {
             $r = Send 'Page.captureScreenshot' @{ format = 'png' }

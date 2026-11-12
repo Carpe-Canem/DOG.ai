@@ -1,0 +1,28 @@
+@* A character's (or persona's) round picture, or its first letter when it has none. *@
+@if (Url is { } url)
+{
+    <img class="avatar @Class" src="@url" alt="" />
+}
+else
+{
+    <span class="avatar @Class" aria-hidden="true">@Letter</span>
+}
+
+@code {
+    [Parameter] public Character? Character { get; set; }
+    [Parameter] public Persona? Persona { get; set; }
+    [Parameter] public string Class { get; set; } = "";
+
+    private string? Url => Character is { } c
+        ? Format.PictureUrl("character", c.Id, c.UpdatedAt, c.Avatar)
+        : Persona is { } p ? Format.PictureUrl("persona", p.Id, p.CreatedAt, p.Avatar) : null;
+
+    private string Letter
+    {
+        get
+        {
+            var name = Character?.Name ?? Persona?.Name ?? "";
+            return name.Length > 0 && char.IsLetterOrDigit(name[0]) ? name[..1].ToUpperInvariant() : "?";
+        }
+    }
+}

@@ -1,0 +1,98 @@
+@* The message box under a chat: Enter sends, Shift+Enter adds a line, Stop while a reply is written,
+   and the context meter. Shared by General and Characters. *@
+@implements IAsyncDisposable
+@inject ChatService Chat
+@inject EngineManager Engine
+@inject IJSRuntime JS
+
+<div class="composer">
+    <textarea @ref="_input" rows="1" aria-label="Message" @bind="_draft" @bind:event="oninput"
+              placeholder="@(Engine.IsReady ? Placeholder : "Load a model to start chatting.")"></textarea>
+    @if (Chat.IsBusy)
+    {
+        <button class="btn" @onclick="Chat.Stop">Stop</button>
+    }
+    else
+    {
+        <button class="btn primary" disabled="@(!Engine.IsReady || string.IsNullOrWhiteSpace(_draft))" @onclick="SendAsync">Send</button>
+    }
+</div>
+@if (Usage is { } usage)
+{
+    <div class="ctx" title="How much of the model's context window this chat is using">
+        <div class="meter"><i style="width:@usage.Percent%"></i></div>
+        <span>@usage.Used.ToString("N0") of @usage.Total.ToString("N0") tokens@(usage.Trimmed > 0 ? $" · {usage.Trimmed} older message{(usage.Trimmed == 1 ? "" : "s")} left out to fit" : "")</span>
+    </div>
+}
+
+@code {
+    [Parameter] public string Placeholder { get; set; } = "Message the model. Enter sends, Shift+Enter adds a line.";
+
+    /// <summary>The branch on screen, used for the context meter.</summary>
+    [Parameter] public IReadOnlyList<ChatMessage> Path { get; set; } = [];
+
+    /// <summary>Called with the trimmed text. The box is cleared first.</summary>
+    [Parameter] public EventCallback<string> OnSend { get; set; }
+
+    private string _draft = "";
+    private ElementReference _input;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<ChatComposer>? _self;
+
+    private (int Used, int Total, int Percent, int Trimmed)? Usage
+    {
+        get
+        {
+            if (!Engine.IsReady || Engine.ContextLength <= 0) return null;
+            var last = Path.LastOrDefault(m => m.Role == ChatRole.Assistant && m.PromptTokens is not null);
+            if (last is null) return null;
+            var used = last.PromptTokens!.Value + (last.CompletionTokens ?? 0);
+            return (used, Engine.ContextLength, Math.Clamp(used * 100 / Engine.ContextLength, 1, 100), last.TrimmedMessages ?? 0);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
+            _self ??= DotNetObjectReference.Create(this);
+            if (_input.Context is not null)
+            {
+                await _module.InvokeVoidAsync("initComposer", _input, _self);
+                await _module.InvokeVoidAsync("resizeComposer", _input);
+            }
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException or ObjectDisposedException)
+        {
+            // Enter-to-send and the growing box are conveniences; the Send button still works.
+        }
+    }
+
+    [JSInvokable]
+    public Task SubmitFromKeyboard() => InvokeAsync(async () =>
+    {
+        await SendAsync();
+        StateHasChanged();
+    });
+
+    private async Task SendAsync()
+    {
+        var text = _draft.Trim();
+        if (text.Length == 0 || Chat.IsBusy || !Engine.IsReady) return;
+        _draft = "";
+        await OnSend.InvokeAsync(text);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _self?.Dispose();
+        try
+        {
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
+}

@@ -58,6 +58,8 @@ pwsh tools/walkthrough.ps1 -Steps @(
   @{ shot = 'fireside-settings' })
 ```
 
+A step `@{ dialog = '<path>'; title = '<dialog title>' }` fills in a Windows open or save dialog that the previous step opened (for card import and export). Run the script with `&` inside PowerShell, not `pwsh -File`, so the step list arrives intact.
+
 To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.gguf` before running the script; a fresh data folder then uses it as the models folder. The Ollama blobs under `~\.ollama\models\blobs` are GGUF files and can be hard-linked there with a `.gguf` name. `dotnet test` runs the real-engine smoke test only when `$env:DOGAI_TEST_MODEL` points at a model file. Wait for conditions in `eval` steps with a promise (model loads and replies take seconds).
 
 ## How chat works
@@ -66,6 +68,7 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - Messages are a tree (`MessageTree`). Regenerate and edit add a sibling and move `Conversation.ActiveLeafId`; nothing is overwritten.
 - Model output goes through `MarkdownRenderer` (Core), which disables raw HTML and neutralises non-web links. Never render model text with `MarkupString` any other way.
 - UI needs from Windows (file dialog, clipboard) go through `IDesktopShell`, implemented in App.
+- General and Characters share `Components/Chat/` (`ChatThread`, `ChatComposer`, `StylePanel`). Character chats run through the same `ChatService`; `CharacterPrompt` (Core) turns card + persona into the system message, and `CharacterCard` reads and writes card files. Styles come from `PresetCatalog`, not `SamplerPresets` directly.
 
 Check every new screen in all three skins, dark and light. Say plainly what was and was not looked at. Never point a test run at the real data folder (`%LOCALAPPDATA%\DOG-AI`).
 

@@ -1,15 +1,391 @@
 @page "/characters"
+@page "/characters/{CharacterId:long}"
+@page "/characters/chat/{ChatId:long}"
+@implements IDisposable
+@inject ICharacterStore CharacterStore
+@inject IChatStore Store
+@inject ChatService Chat
+@inject EngineManager Engine
+@inject IDesktopShell Desktop
+@inject NavigationManager Nav
 
 <SectionContent SectionName="title">
-    <h2>Characters</h2>
-    <p>Personality chat driven by character cards</p>
+    <div class="head-row">
+        @if (_character is { } who)
+        {
+            <div class="head-who">
+                <CharacterAvatar Character="who" />
+                <div class="head-text">
+                    <h2>@who.Name</h2>
+                    <p>@(_conversation.Id != 0 ? _conversation.Title : $"{_chats.Count} chat{(_chats.Count == 1 ? "" : "s")}")</p>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="head-text">
+                <h2>Characters</h2>
+                <p>Personality chat driven by character cards</p>
+            </div>
+        }
+        <ModelPicker Mode="characters" />
+    </div>
 </SectionContent>
 
-<SectionContent SectionName="list">
-    <div class="list-head"><h3>Characters</h3></div>
-    <p class="list-note">No characters yet.</p>
-</SectionContent>
+<SectionContent SectionName="list"><CharacterList ActiveId="@_character?.Id" Version="@_listVersion" /></SectionContent>
 
-<EmptyState IconName="characters" Title="Characters aren't built yet">
-    You'll create characters here or import character cards, then chat with them. Planned for milestone 3.
-</EmptyState>
+@if (!_loaded)
+{
+}
+else if (_character is null)
+{
+    <EmptyState IconName="characters" Title="Pick a character">
+        Choose one from the list, import a character card (PNG or JSON) from another app, or make a new one.
+    </EmptyState>
+}
+else if (_conversation.Id == 0)
+{
+    var c = _character;
+    <div class="profile">
+        <div class="profile-top">
+            @if (Format.PictureUrl("character", c.Id, c.UpdatedAt, c.Avatar) is { } picture)
+            {
+                <img class="portrait" src="@picture" alt="" />
+            }
+            <div class="profile-text">
+                <h3>@c.Name</h3>
+                @if (c.Creator.Length > 0 || c.CharacterVersion.Length > 0)
+                {
+                    <p class="small">@(c.Creator.Length > 0 ? $"by {c.Creator}" : "")@(c.CharacterVersion.Length > 0 ? $" · version {c.CharacterVersion}" : "")</p>
+                }
+                @if (c.Tags.Count > 0)
+                {
+                    <div class="chips">@foreach (var tag in c.Tags) { <span class="chip">@tag</span> }</div>
+                }
+                <div class="row">
+                    <button class="btn primary" disabled="@_busy" @onclick="StartChatAsync">New chat</button>
+                    <a class="btn" href="characters/@c.Id/edit">Edit</a>
+                    <button class="btn" @onclick="ExportPngAsync" title="A picture with the card inside, which other apps can import">Save as card</button>
+                    <button class="btn" @onclick="ExportJsonAsync">Save as JSON</button>
+                    @if (_confirmDelete)
+                    {
+                        <button class="btn danger" @onclick="DeleteCharacterAsync">Delete @c.Name and @_chats.Count chat@(_chats.Count == 1 ? "" : "s")</button>
+                        <button class="btn" @onclick="() => _confirmDelete = false">Keep</button>
+                    }
+                    else
+                    {
+                        <button class="btn" @onclick="() => _confirmDelete = true">Delete</button>
+                    }
+                </div>
+                @if (_saved is not null)
+                {
+                    <p class="small">Saved to @_saved</p>
+                }
+            </div>
+        </div>
+        @if (_notice is not null)
+        {
+            <div class="notice bad"><span>@_notice</span><button class="btn" @onclick="() => _notice = null">Dismiss</button></div>
+        }
+
+        <h4 class="group-title">Chats</h4>
+        @if (_chats.Count == 0)
+        {
+            <p class="small">No chats with @c.Name yet. Press New chat to start one.</p>
+        }
+        else
+        {
+            <div class="chat-list">
+                @foreach (var chat in _chats)
+                {
+                    <a class="li" href="characters/chat/@chat.Id">
+                        <span class="li-text"><span class="li-title">@chat.Title</span><span class="li-sub">@Format.When(chat.UpdatedAt)</span></span>
+                    </a>
+                }
+            </div>
+        }
+
+        @if (c.CreatorNotes.Trim().Length > 0)
+        {
+            <details class="card-text" open>
+                <summary>Notes from the card's creator</summary>
+                <div class="msg-body"><MarkdownView Text="@c.CreatorNotes" /></div>
+            </details>
+        }
+        @if (c.Description.Trim().Length > 0)
+        {
+            <details class="card-text">
+                <summary>Description</summary>
+                <div class="msg-body plain">@c.Description</div>
+            </details>
+        }
+    </div>
+}
+else
+{
+    @if (_path.Count == 0 && !Streaming)
+    {
+        <EmptyState IconName="characters" Title="@($"Say hello to {_character.Name}")">
+            This character has no greeting, so you start. Type below.
+        </EmptyState>
+    }
+    else
+    {
+        <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" Swipes="true" @bind-Notice="_notice"
+                    AssistantName="@_character.Name" AssistantAvatar="@Format.PictureUrl("character", _character.Id, _character.UpdatedAt, _character.Avatar)"
+                    UserName="@(_persona?.Name ?? "You")" UserAvatar="@(_persona is { } p ? Format.PictureUrl("persona", p.Id, p.CreatedAt, p.Avatar) : null)" />
+    }
+}
+
+@if (_conversation.Id != 0 && _character is not null)
+{
+    <SectionContent SectionName="composer">
+        <ChatComposer Path="@_path" OnSend="SendAsync" Placeholder="@($"Message {_character.Name}. Enter sends, Shift+Enter adds a line.")" />
+    </SectionContent>
+
+    <SectionContent SectionName="aside">
+        <div class="panel">
+            <h4>You are</h4>
+            @if (_personas.Count == 0)
+            {
+                <p class="small">"User", with no description. <a class="link-text" href="characters/personas">Make a persona</a> to give yourself a name and a description the character knows.</p>
+            }
+            else
+            {
+                <select class="field" aria-label="Your persona" value="@(_persona?.Id ?? 0)" @onchange="SetPersonaAsync">
+                    @foreach (var persona in _personas)
+                    {
+                        <option value="@persona.Id">@persona.Name</option>
+                    }
+                </select>
+                <p class="small">@(_persona?.Description is { Length: > 0 } d ? Shorten(CharacterPrompt.Fill(d, _character.Name, _persona.Name), 140) : "No description.")</p>
+            }
+        </div>
+        <StylePanel Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />
+        <div class="panel">
+            <h4>Extra instructions</h4>
+            <textarea class="field" rows="5" aria-label="Extra instructions" placeholder="Optional. Added to the character's card for this chat only."
+                      value="@_conversation.SystemPrompt" @onchange="SetInstructionsAsync"></textarea>
+        </div>
+        <div class="panel">
+            <h4>This chat</h4>
+            <input class="field" aria-label="Chat name" value="@_conversation.Title" @onchange="RenameAsync" />
+            <div class="row">
+                <button class="btn" disabled="@_busy" @onclick="StartChatAsync">New chat</button>
+                <a class="btn" href="characters/@_character.Id">About @_character.Name</a>
+                @if (_confirmDelete)
+                {
+                    <button class="btn danger" @onclick="DeleteChatAsync">Yes, delete it</button>
+                    <button class="btn" @onclick="() => _confirmDelete = false">Keep</button>
+                }
+                else
+                {
+                    <button class="btn" @onclick="() => _confirmDelete = true">Delete chat</button>
+                }
+            </div>
+        </div>
+    </SectionContent>
+}
+
+@code {
+    [Parameter] public long? CharacterId { get; set; }
+    [Parameter] public long? ChatId { get; set; }
+
+    private Character? _character;
+    private List<Conversation> _chats = [];
+    private Conversation _conversation = new();
+    private MessageTree _tree = new([]);
+    private IReadOnlyList<ChatMessage> _path = [];
+    private List<Persona> _personas = [];
+    private Persona? _persona;
+    private bool _loaded;
+    private int _loadVersion;
+    private int _listVersion;
+    private bool _busy;
+    private bool _confirmDelete;
+    private string? _notice;
+    private string? _saved;
+    private ActiveReply? _seenActive;
+
+    private bool Streaming => Chat.Active is { } a && a.ConversationId == _conversation.Id && _conversation.Id != 0;
+
+    protected override void OnInitialized()
+    {
+        Chat.Changed += OnChatChanged;
+        Engine.Changed += OnEngineChanged;
+        _seenActive = Chat.Active;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _confirmDelete = false;
+        _notice = null;
+        _saved = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var version = ++_loadVersion;
+        Conversation? conversation = null;
+        IReadOnlyList<ChatMessage> messages = [];
+        var characterId = CharacterId;
+        if (ChatId is { } chatId)
+        {
+            conversation = await Store.GetAsync(chatId);
+            if (conversation?.CharacterId is null)
+            {
+                Nav.NavigateTo("characters", replace: true);
+                return;
+            }
+            characterId = conversation.CharacterId;
+            messages = await Store.GetMessagesAsync(chatId);
+        }
+        var character = characterId is { } id ? await CharacterStore.GetAsync(id) : null;
+        var chats = character is not null ? (await Store.ListForCharacterAsync(character.Id)).ToList() : [];
+        var personas = (await CharacterStore.ListPersonasAsync()).ToList();
+        if (version != _loadVersion) return;
+
+        if (characterId is not null && character is null)
+        {
+            Nav.NavigateTo("characters", replace: true);
+            return;
+        }
+        _character = character;
+        _chats = chats;
+        _personas = personas;
+        _conversation = conversation ?? new Conversation();
+        _persona = personas.FirstOrDefault(p => p.Id == _conversation.PersonaId) ?? personas.FirstOrDefault(p => p.IsDefault) ?? personas.FirstOrDefault();
+        _tree = new MessageTree(messages);
+        _path = _tree.PathTo(_tree.ResolveLeaf(_conversation.ActiveLeafId));
+        _loaded = true;
+    }
+
+    private void OnEngineChanged() => InvokeAsync(StateHasChanged);
+
+    private void OnChatChanged() => InvokeAsync(async () =>
+    {
+        var active = Chat.Active;
+        if (active is null || !ReferenceEquals(active, _seenActive))
+        {
+            _seenActive = active;
+            await LoadAsync();
+        }
+        StateHasChanged();
+    });
+
+    private async Task StartChatAsync()
+    {
+        if (_character is null) return;
+        _busy = true;
+        try
+        {
+            var chat = await Chat.StartCharacterChatAsync(_character.Id, _conversation.Id != 0 ? _conversation.PersonaId : null);
+            Nav.NavigateTo($"characters/chat/{chat.Id}");
+        }
+        catch (InvalidOperationException e)
+        {
+            _notice = e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SendAsync(string text)
+    {
+        if (Chat.IsBusy || !Engine.IsReady || _conversation.Id == 0) return;
+        _notice = null;
+        try
+        {
+            await Chat.SendAsync(_conversation.Id, text);
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            _notice = e.Message;
+        }
+    }
+
+    private async Task SetPersonaAsync(ChangeEventArgs e)
+    {
+        if (!long.TryParse(e.Value?.ToString(), out var id)) return;
+        _conversation.PersonaId = id;
+        _persona = _personas.FirstOrDefault(p => p.Id == id);
+        await Store.UpdateAsync(_conversation);
+    }
+
+    private async Task SetPresetAsync(string id)
+    {
+        _conversation.PresetId = id;
+        await Store.UpdateAsync(_conversation);
+    }
+
+    private async Task SetInstructionsAsync(ChangeEventArgs e)
+    {
+        _conversation.SystemPrompt = e.Value?.ToString() ?? "";
+        await Store.UpdateAsync(_conversation);
+    }
+
+    private async Task RenameAsync(ChangeEventArgs e)
+    {
+        var title = (e.Value?.ToString() ?? "").Trim();
+        if (title.Length == 0) return;
+        _conversation.Title = title;
+        await Store.UpdateAsync(_conversation);
+    }
+
+    private async Task DeleteChatAsync()
+    {
+        if (Streaming) Chat.Stop();
+        var characterId = _character?.Id;
+        await Store.DeleteAsync(_conversation.Id);
+        _conversation = new Conversation();
+        Nav.NavigateTo(characterId is null ? "characters" : $"characters/{characterId}");
+    }
+
+    private async Task DeleteCharacterAsync()
+    {
+        if (_character is null) return;
+        if (Chat.Active is { } a && _chats.Any(c => c.Id == a.ConversationId)) Chat.Stop();
+        await CharacterStore.DeleteAsync(_character.Id);
+        _character = null;
+        _listVersion++;
+        Nav.NavigateTo("characters");
+    }
+
+    private async Task ExportPngAsync()
+    {
+        if (_character is null) return;
+        await SaveAsync(() => CharacterCard.ToPng(_character), _character.Name + ".png", "Character card picture (*.png)|*.png");
+    }
+
+    private async Task ExportJsonAsync()
+    {
+        if (_character is null) return;
+        await SaveAsync(() => System.Text.Encoding.UTF8.GetBytes(CharacterCard.ToV3Json(_character, indented: true)),
+            _character.Name + ".json", "Character card JSON (*.json)|*.json");
+    }
+
+    private async Task SaveAsync(Func<byte[]> make, string name, string filter)
+    {
+        _notice = null;
+        _saved = null;
+        try
+        {
+            _saved = await Desktop.SaveFileAsync(name, filter, make());
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            _notice = "Could not save the card: " + e.Message;
+        }
+    }
+
+    private static string Shorten(string text, int max) => text.Length <= max ? text : text[..(max - 1)].TrimEnd() + "…";
+
+    public void Dispose()
+    {
+        Chat.Changed -= OnChatChanged;
+        Engine.Changed -= OnEngineChanged;
+    }
+}

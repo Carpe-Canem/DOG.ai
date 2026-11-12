@@ -186,14 +186,19 @@ public sealed class EngineManager : IChatEngine, IDisposable
     public Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default) =>
         Api().ApplyTemplateAsync(messages, ct);
 
-    public async IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    public IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, CancellationToken ct = default) =>
+        TrackAsync(Api().StreamChatAsync(messages, sampler, ct));
+
+    public IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, SamplerPreset sampler, CancellationToken ct = default) =>
+        TrackAsync(Api().StreamCompletionAsync(prompt, sampler, ct));
+
+    /// <summary>Counts the reply as engine activity (for idle unload) and reports its speed.</summary>
+    private async IAsyncEnumerable<ChatDelta> TrackAsync(IAsyncEnumerable<ChatDelta> source)
     {
-        var api = Api();
         Interlocked.Increment(ref _busy);
         try
         {
-            await foreach (var delta in api.StreamChatAsync(messages, sampler, ct).ConfigureAwait(false))
+            await foreach (var delta in source.ConfigureAwait(false))
             {
                 if (delta.Stats is { TokensPerSecond: > 0 } stats)
                 {

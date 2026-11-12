@@ -48,7 +48,7 @@
                 <div class="model">
                     <div class="li-text">
                         <div class="model-name">@model.Name</div>
-                        <div class="model-meta">@model.SizeText@(IsDefault(path) ? " · default for General" : "") · @path</div>
+                        <div class="model-meta">@model.SizeText@(IsDefault(path) ? $" · default for {ModeName}" : "") · @path</div>
                     </div>
                     @if (current)
                     {
@@ -85,6 +85,11 @@
 @code {
     /// <summary>Draw as the main call-to-action (used in the empty state).</summary>
     [Parameter] public bool Primary { get; set; }
+
+    /// <summary>Which mode's default model to label: "general", "characters" or "story".</summary>
+    [Parameter] public string Mode { get; set; } = "general";
+
+    private string ModeName => Mode switch { "characters" => "Characters", "story" => "Story", _ => "General" };
 
     private static readonly int[] ContextSizes = [4096, 8192, 16384, 32768, 65536, 131072];
 
@@ -126,7 +131,8 @@
         if (_settings.LastModelPath is { } last && models.All(m => !SamePath(m.Path, last)) && File.Exists(last))
             models.Insert(0, new ModelFile(last, GgufReader.TryRead(last)?.DisplayName(last) ?? Path.GetFileNameWithoutExtension(last), new FileInfo(last).Length));
 
-        _models = models;
+        // The mode's own default model goes first.
+        _models = models.OrderByDescending(m => IsDefault(m.Path)).ToList();
         _open = true;
     }
 
@@ -161,7 +167,7 @@
         await SettingsStore.SaveAsync(_settings);
     }
 
-    private bool IsDefault(string path) => _settings.DefaultModels.TryGetValue("general", out var d) && SamePath(d, path);
+    private bool IsDefault(string path) => _settings.DefaultModels.TryGetValue(Mode, out var d) && SamePath(d, path);
 
     private static bool SamePath(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 }

@@ -21,6 +21,12 @@ public sealed class Conversation
 
     public string PresetId { get; set; } = SamplerPresets.DefaultId;
 
+    /// <summary>The character this chat is with (Characters mode). Null for other modes.</summary>
+    public long? CharacterId { get; set; }
+
+    /// <summary>Who the user is in this chat (Characters mode). Null uses the default persona.</summary>
+    public long? PersonaId { get; set; }
+
     /// <summary>The last message of the branch currently shown. Null while the chat is empty.</summary>
     public long? ActiveLeafId { get; set; }
 
@@ -39,6 +45,9 @@ public sealed class ChatMessage
     public long? ParentId { get; set; }
     public ChatRole Role { get; set; }
     public string Content { get; set; } = "";
+
+    /// <summary>Which character wrote a reply, for group chats. Null in one-to-one chats.</summary>
+    public long? SpeakerId { get; set; }
 
     /// <summary>The model's "thinking" text, when a reasoning model produced any.</summary>
     public string? Reasoning { get; set; }
@@ -65,7 +74,7 @@ public interface IChatStore
     Task<Conversation?> GetAsync(long id, CancellationToken ct = default);
     Task<Conversation> CreateAsync(Conversation conversation, CancellationToken ct = default);
 
-    /// <summary>Saves title, instructions and preset. The active branch is changed only through <see cref="SetActiveLeafAsync"/>.</summary>
+    /// <summary>Saves title, instructions, preset and persona. The active branch is changed only through <see cref="SetActiveLeafAsync"/>.</summary>
     Task UpdateAsync(Conversation conversation, CancellationToken ct = default);
 
     /// <summary>Chooses which branch is shown and marks the chat as just used.</summary>
@@ -74,5 +83,9 @@ public interface IChatStore
 
     Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(long conversationId, CancellationToken ct = default);
     Task<ChatMessage> AddMessageAsync(ChatMessage message, CancellationToken ct = default);
+    /// <summary>Saves a message's text, thinking, prompt and speed figures (used by edit and continue).</summary>
     Task UpdateMessageAsync(ChatMessage message, CancellationToken ct = default);
+
+    /// <summary>Chats with one character, newest first.</summary>
+    Task<IReadOnlyList<Conversation>> ListForCharacterAsync(long characterId, CancellationToken ct = default);
 }

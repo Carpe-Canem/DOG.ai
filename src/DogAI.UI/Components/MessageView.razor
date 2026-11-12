@@ -1,6 +1,13 @@
 @* One turn in a thread. The page supplies the buttons (Actions) and, while editing, the edit box (Editor). *@
 <div class="msg @(IsUser ? "user" : "ai")">
-    <div class="avatar" aria-hidden="true">@(IsUser ? "You" : "D")</div>
+    @if (AvatarUrl is not null)
+    {
+        <img class="avatar" src="@AvatarUrl" alt="" />
+    }
+    else
+    {
+        <div class="avatar" aria-hidden="true">@(IsUser ? "You" : Initial)</div>
+    }
     <div class="msg-col">
         <div class="msg-name">@Name</div>
         @if (!string.IsNullOrEmpty(Reasoning))
@@ -40,4 +47,12 @@
     [Parameter] public bool Streaming { get; set; }
     [Parameter] public RenderFragment? Editor { get; set; }
     [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>A picture for the speaker (a data: URL). Without one, a letter is shown.</summary>
+    [Parameter] public string? AvatarUrl { get; set; }
+
+    /// <summary>The letter shown for replies when there is no picture. DOG AI's own "D" by default.</summary>
+    [Parameter] public string? Letter { get; set; }
+
+    private string Initial => Letter ?? "D";
 }

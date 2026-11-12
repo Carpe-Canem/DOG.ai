@@ -56,24 +56,69 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
         return json["prompt"]?.GetValue<string>() ?? "";
     }
 
+    private static JsonObject SamplerBody(SamplerPreset sampler) => new()
+    {
+        ["stream"] = true,
+        ["cache_prompt"] = true,
+        ["temperature"] = sampler.Temperature,
+        ["top_p"] = sampler.TopP,
+        ["top_k"] = sampler.TopK,
+        ["min_p"] = sampler.MinP,
+        ["repeat_penalty"] = sampler.RepeatPenalty,
+        ["dry_multiplier"] = sampler.DryMultiplier,
+        ["xtc_probability"] = sampler.XtcProbability,
+        ["xtc_threshold"] = sampler.XtcThreshold,
+    };
+
+    /// <summary>
+    /// Streams a continuation of raw prompt text through the native /completion endpoint, which (unlike chat
+    /// completions) does not wrap the text in the chat template, so the model carries on mid-reply.
+    /// </summary>
+    public async IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, SamplerPreset sampler, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var body = SamplerBody(sampler);
+        body["prompt"] = prompt;
+        body["n_predict"] = -1;
+
+        using var response = await http.SendAsync(
+            Request(HttpMethod.Post, "completion", body), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw new EngineException(ErrorText(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false), (int)response.StatusCode));
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
+        {
+            if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
+            var data = line.AsSpan(5).Trim().ToString();
+            if (data == "[DONE]") break;
+            using var doc = JsonDocument.Parse(data);
+            if (ParseCompletionChunk(doc.RootElement) is { } delta) yield return delta;
+        }
+    }
+
+    /// <summary>One /completion stream event: text in "content"; the last one has "stop": true and "timings".</summary>
+    internal static ChatDelta? ParseCompletionChunk(JsonElement root)
+    {
+        if (root.TryGetProperty("error", out var error))
+            throw new EngineException(ErrorText(error.GetRawText(), 0));
+        var content = Text(root, "content");
+        GenerationStats? stats = null;
+        if (root.TryGetProperty("timings", out var timings) && timings.ValueKind == JsonValueKind.Object)
+        {
+            var speed = timings.TryGetProperty("predicted_per_second", out var ps) && ps.ValueKind == JsonValueKind.Number ? ps.GetDouble() : 0;
+            // timings.prompt_n counts only the part not already cached; tokens_evaluated is the whole prompt.
+            stats = new GenerationStats(Int(root, "tokens_evaluated") ?? 0, Int(timings, "predicted_n") ?? 0, speed);
+        }
+        return content is null && stats is null ? null : new ChatDelta(content, null, stats);
+    }
+
     public async IAsyncEnumerable<ChatDelta> StreamChatAsync(
         IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, [EnumeratorCancellation] CancellationToken ct)
     {
-        var body = new JsonObject
-        {
-            ["messages"] = ToJson(messages),
-            ["stream"] = true,
-            ["stream_options"] = new JsonObject { ["include_usage"] = true },
-            ["cache_prompt"] = true,
-            ["temperature"] = sampler.Temperature,
-            ["top_p"] = sampler.TopP,
-            ["top_k"] = sampler.TopK,
-            ["min_p"] = sampler.MinP,
-            ["repeat_penalty"] = sampler.RepeatPenalty,
-            ["dry_multiplier"] = sampler.DryMultiplier,
-            ["xtc_probability"] = sampler.XtcProbability,
-            ["xtc_threshold"] = sampler.XtcThreshold,
-        };
+        var body = SamplerBody(sampler);
+        body["messages"] = ToJson(messages);
+        body["stream_options"] = new JsonObject { ["include_usage"] = true };
 
         using var response = await http.SendAsync(
             Request(HttpMethod.Post, "v1/chat/completions", body), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);

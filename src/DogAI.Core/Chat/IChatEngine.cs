@@ -23,4 +23,7 @@ public interface IChatEngine
     Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default);
 
     IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, CancellationToken ct = default);
+
+    /// <summary>Carries on writing exactly where <paramref name="prompt"/> ends (raw text, no chat template applied).</summary>
+    IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, SamplerPreset sampler, CancellationToken ct = default);
 }

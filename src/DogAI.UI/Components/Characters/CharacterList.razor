@@ -1,0 +1,102 @@
+@* The Characters list region: import a card, make a new character, open personas, pick a character. *@
+@inject ICharacterStore Characters
+@inject IDesktopShell Desktop
+@inject NavigationManager Nav
+
+<div class="list-head">
+    <h3>Characters</h3>
+    <div class="row tight">
+        <button class="btn" disabled="@_busy" @onclick="ImportAsync" title="Import a character card (PNG or JSON)">Import</button>
+        <a class="btn" href="characters/new">New</a>
+    </div>
+</div>
+@if (_error is not null)
+{
+    <div class="notice bad list-notice"><span>@_error</span><button class="btn" @onclick="() => _error = null">OK</button></div>
+}
+@if (_all.Count > 8)
+{
+    <input class="field list-search" type="search" placeholder="Find a character" aria-label="Find a character" @bind="_filter" @bind:event="oninput" />
+}
+@foreach (var c in Shown)
+{
+    <a class="li @(c.Id == ActiveId ? "active" : "")" href="characters/@c.Id">
+        <CharacterAvatar Character="c" />
+        <span class="li-text">
+            <span class="li-title">@c.Name</span>
+            <span class="li-sub">@(c.Tags.Count > 0 ? string.Join(", ", c.Tags.Take(3)) : Format.When(c.UpdatedAt))</span>
+        </span>
+    </a>
+}
+@if (_all.Count == 0 && _loaded)
+{
+    <p class="list-note">No characters yet. Import a card or make a new one.</p>
+}
+<a class="li li-foot @(PersonasActive ? "active" : "")" href="characters/personas">
+    <span class="avatar you" aria-hidden="true">You</span>
+    <span class="li-text"><span class="li-title">Your personas</span><span class="li-sub">Who you are in chats</span></span>
+</a>
+
+@code {
+    [Parameter] public long? ActiveId { get; set; }
+    [Parameter] public bool PersonasActive { get; set; }
+
+    /// <summary>Bump to make the list reload (after a save or delete elsewhere on the page).</summary>
+    [Parameter] public int Version { get; set; }
+
+    private List<Character> _all = [];
+    private int _loadedVersion = -1;
+    private bool _loaded;
+    private string _filter = "";
+    private string? _error;
+    private bool _busy;
+
+    private IEnumerable<Character> Shown => _filter.Trim() is { Length: > 0 } f
+        ? _all.Where(c => c.Name.Contains(f, StringComparison.CurrentCultureIgnoreCase) || c.Tags.Any(t => t.Contains(f, StringComparison.CurrentCultureIgnoreCase)))
+        : _all;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedVersion == Version) return;
+        _loadedVersion = Version;
+        _all = (await Characters.ListAsync()).ToList();
+        _loaded = true;
+    }
+
+    private async Task ImportAsync()
+    {
+        _error = null;
+        var path = await Desktop.PickCardFileAsync();
+        if (path is null) return;
+        _busy = true;
+        try
+        {
+            var info = new FileInfo(path);
+            if (info.Length > CharacterCard.MaxFileBytes) throw new CardFormatException("That file is too large to be a character card.");
+            var character = CharacterCard.Read(await File.ReadAllBytesAsync(path));
+            if (character.Image is { } image)
+            {
+                try
+                {
+                    (character.Image, character.Avatar) = await Desktop.PreparePictureAsync(image);
+                }
+                catch (InvalidOperationException)
+                {
+                    // The card text was fine; carry on without a picture.
+                    character.Image = null;
+                }
+            }
+            var saved = await Characters.SaveAsync(character);
+            Nav.NavigateTo($"characters/{saved.Id}");
+            _all = (await Characters.ListAsync()).ToList();
+        }
+        catch (Exception e) when (e is CardFormatException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

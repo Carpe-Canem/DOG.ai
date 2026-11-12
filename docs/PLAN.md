@@ -2,8 +2,25 @@
 
 ## Status (updated 2026-11-12)
 
-- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section).
-- **Next:** M3, Characters. Start with the two items M1 left for it (continue, editable sampler presets).
+- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 part 1 (characters, cards, personas, continue, editable styles).
+- **Next:** M3 part 2: lorebooks (the cards' embedded ones are already kept, ready to read), author's note, impersonate, rolling-summary memory, the AI card builder, group chat, avatar cropping. Lore and memory will need the prompt split into parts that are trimmed by priority (system > card > lore > memory > recent turns); today the whole system message is one block the budgeter always keeps.
+- **What M3 part 1 delivered:**
+  - *Characters section.* Import Character Card V1/V2/V3 from PNG or JSON; export as a PNG card (V2 and V3 inside, as other apps expect) or as V3 JSON. Fields DOG AI does not edit (extensions, the embedded lorebook, V3-only fields) are kept and written back unchanged.
+  - *Card editor* with every standard field, extra greetings, a picture, a style for new chats, and a live token count (exact when a model is loaded).
+  - *Personas:* who you are in a chat (name, description, picture). One is the default; each chat can switch.
+  - *Character chat:* greetings are alternatives you flip through with the arrows; the last reply always shows arrows, and the right arrow past the newest writes another version (swipe). The prompt inspector shows the full card text sent.
+  - *Continue* (General and Characters) carries on the last reply from where it stopped. *Styles* can now be copied and edited ("Edit styles…" under Style); the four built-in ones stay fixed.
+  - The model picker labels and lists first the default model for the mode you are in.
+  - `tools/walkthrough.ps1` can now fill in Windows open/save dialogs, so import and export are tested in the real app.
+- **How M3 part 1 behaves, decided while building it:**
+  - *Continue is hidden on a reply that has only "thinking" text* (stopped before any answer): the raw continuation cannot keep thinking apart from the answer.
+  - *Continue changes the reply in place* rather than adding a version beside it: it is the same reply made longer. The raw prompt (template up to the reply, then its text so far) goes to the engine's `/completion`, so the model carries on mid-sentence.
+  - *Greeting first:* a character chat's prompt starts with a short user turn, "[Start a new chat]", before the greeting, because strict chat templates (Mistral `[INST]`, Gemma) refuse a conversation that opens with a reply. Tried with real models using the ChatML and Llama 3 templates, which accept it; no model with a strict template was on this PC to try.
+  - *Names in greetings are filled in when the chat starts.* Switching persona later changes what the model is told, but greetings already shown keep the old name.
+  - *The card's "final instruction"* (post-history instructions) goes at the end of the system message for now. Placing it after the chat history comes with author's note in part 2.
+  - *Pictures* are converted to PNG on import (so any picture can carry a card on export) and a 256-pixel avatar is cut from the top-centre square. There is no manual crop yet.
+  - *No database links* from chats to characters and personas: adding them would make SQLite rebuild the chats table when upgrading. The store deletes a character's chats and clears a deleted persona itself. Upgrading an M2 database was tested.
+- **Left out of M3 part 1, still owed:** everything listed under Next. Not tried live: a card with a JPEG or WebP picture (the code converts them through Windows, but only PNG cards were imported in the app).
 - **What M2 delivered:** a Models section with five parts. *Recommended* shows researched picks per use case with a fit badge and the best file for this PC pre-selected. *Browse* searches Hugging Face, shows each repository's files with fit badges and the model card. *Library* lists models from the models folder and any added folders, and can load, benchmark, delete, or make one the default per mode. *Downloads* queues downloads, pauses and resumes them, checks free space first and verifies every file's SHA-256 before using it. *Engine* installs and updates DOG AI's own CUDA build of llama.cpp. The side panel shows hardware, graphics memory, the context size used for fit, and an optional Hugging Face token stored with Windows DPAPI. The status bar now shows tokens per second and graphics memory, and an unused model unloads itself after 30 minutes.
 - **How M2 behaves, decided while building it:**
   - *Going online* is a button in the Models section, off at start. Leaving the section goes offline, unless a download or engine install is running; then it goes offline when that finishes. "Go offline" pauses running downloads.
@@ -13,7 +30,7 @@
   - *Stable engine releases*: llama.cpp now marks numbered builds as pre-releases and publishes a stable release that names one build (b12110 on 2026-11-12). DOG AI installs that build, picking the newest CUDA version the driver supports (CUDA 13.4 here) plus its runtime.
   - *Curated picks* are in `src/DogAI.Core/Models/curated-models.json` (researched 2026-11-12). There is no "refresh" button yet: the only allowed hosts are Hugging Face and GitHub, and there is no online copy of the list. Publishing the JSON in a GitHub repo would make it refreshable. Uncensored role-play fine-tunes were left out of the defaults; they can be found through Browse. Voice picks come with M6.
 - **Left out of M2, still owed:**
-  - Per-mode defaults are saved, but only General uses them (the model picker labels its default); Characters and Story will read them in M3 and M4.
+  - Per-mode defaults are saved and the model picker labels the current mode's default (General and Characters); Story will read them in M4. Nothing loads a default automatically yet.
   - Links in model cards do not open. The confirm-then-open-in-browser prompt is still to do (planned for M7).
   - Not tried live: a gated model with a token, partial offload of a model bigger than the card, and the 30-minute idle unload. Unit tests cover the logic.
   - The download resume and checksum tests use an in-process fake server, not a real local web server as the Verification section suggests.
@@ -21,7 +38,7 @@
   - The real data folder still uses the winget engine until Install is clicked once in Models → Engine.
 - **What M1 delivered:** the app starts and stops `llama-server` itself (found from winget for now), loads any GGUF from the models folder or picked by hand, and General mode has streaming chat with stop, regenerate, edit-and-branch, version switching, markdown with code copy buttons, collapsed "thinking", four style presets, per-chat instructions, a context meter with automatic trimming of old turns, and a prompt inspector. Chats are saved in SQLite as a message tree.
 - **Left out of M1 on purpose, still owed by a later milestone:**
-  - "Continue" a stopped reply, and editing your own sampler presets (the four built-in ones are fixed). Best done early in M3, where characters need both.
+  - ~~"Continue" a stopped reply, and editing your own sampler presets.~~ Done in M3 part 1.
   - Syntax colouring and LaTeX in replies (needs highlight.js and KaTeX bundled). Planned with M7 polish.
   - ~~Idle auto-unload, VRAM readout and GPU-layer tuning.~~ Done in M2.
   - ~~The winget `llama-server` is a Vulkan build.~~ M2's Engine tab installs the CUDA build.

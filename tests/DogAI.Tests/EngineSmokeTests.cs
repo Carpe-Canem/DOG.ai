@@ -44,6 +44,32 @@ public class EngineSmokeTests
         Assert.NotNull(stats);
         Assert.True(stats.PromptTokens > 0 && stats.CompletionTokens > 0 && stats.TokensPerSecond > 0, stats.ToString());
 
+        // Continue: raw text through /completion carries on mid-reply instead of starting a new turn.
+        var start = await engine.RenderPromptAsync([new("user", "Count from one to ten in words, separated by commas.")]);
+        var more = new StringBuilder();
+        GenerationStats? moreStats = null;
+        await foreach (var delta in engine.StreamCompletionAsync(start + "one, two, three,", SamplerPresets.Get("precise")))
+        {
+            more.Append(delta.Content);
+            moreStats = delta.Stats ?? moreStats;
+        }
+        Assert.Contains("four", more.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.NotNull(moreStats);
+        Assert.True(moreStats.CompletionTokens > 0 && moreStats.PromptTokens > 0, moreStats.ToString());
+
+        // A character chat's prompt: system, the "start" user turn, the greeting, then the user. Strict templates
+        // (Mistral, Gemma) must accept this shape.
+        PromptMessage[] character =
+        [
+            new("system", "You are Rex, a dog."), new("user", Core.Characters.CharacterPrompt.ChatStart),
+            new("assistant", "*wags* Hello!"), new("user", "Good boy."),
+        ];
+        Assert.Contains("*wags* Hello!", await engine.RenderPromptAsync(character));
+        var said = new StringBuilder();
+        await foreach (var delta in engine.StreamChatAsync(character, SamplerPresets.Get("precise")))
+            said.Append(delta.Content);
+        Assert.False(string.IsNullOrWhiteSpace(said.ToString()));
+
         await engine.UnloadAsync();
         Assert.Equal(EngineState.Idle, engine.State);
         await Assert.ThrowsAsync<EngineException>(() => engine.CountTokensAsync("x"));

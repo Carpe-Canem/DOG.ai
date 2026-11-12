@@ -67,6 +67,7 @@ public partial class App : Application
             await EnsureFirstRunDefaultsAsync(_services, paths);
             await StartModelServicesAsync(_services, log);
             await _services.GetRequiredService<AppearanceState>().LoadAsync();
+            await _services.GetRequiredService<PresetCatalog>().LoadAsync();
 
             new MainWindow(_services).Show();
         }
@@ -102,6 +103,7 @@ public partial class App : Application
         services.AddSingleton<LlamaServerLocator>();
         services.AddSingleton<EngineManager>();
         services.AddSingleton<IChatEngine>(sp => sp.GetRequiredService<EngineManager>());
+        services.AddSingleton<PresetCatalog>();
         services.AddSingleton<ChatService>();
         services.AddDogData();
         services.AddWpfBlazorWebView();

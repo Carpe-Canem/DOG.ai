@@ -1,0 +1,156 @@
+@page "/characters/personas"
+@inject ICharacterStore Characters
+@inject IDesktopShell Desktop
+
+<SectionContent SectionName="title">
+    <div class="head-text">
+        <h2>Your personas</h2>
+        <p>Who you are in character chats. The character sees the name and description.</p>
+    </div>
+</SectionContent>
+
+<SectionContent SectionName="list"><CharacterList PersonasActive="true" /></SectionContent>
+
+<div class="editor">
+    <div class="persona-grid">
+        @foreach (var p in _personas)
+        {
+            var persona = p;
+            <button class="persona @(persona.Id == _form.Id ? "active" : "")" @onclick="() => Select(persona)">
+                <CharacterAvatar Persona="persona" />
+                <span class="li-text">
+                    <span class="li-title">@persona.Name</span>
+                    <span class="li-sub">@(persona.IsDefault ? "Default for new chats" : Shorten(persona.Description))</span>
+                </span>
+            </button>
+        }
+        <button class="persona add @(_form.Id == 0 ? "active" : "")" @onclick="New">
+            <span class="avatar" aria-hidden="true">+</span>
+            <span class="li-text"><span class="li-title">New persona</span></span>
+        </button>
+    </div>
+
+    <div class="editor-top">
+        <div class="picture-pick">
+            @if (Format.PictureUrl("persona-edit", _form.Id, _stamp, _form.Avatar) is { } picture)
+            {
+                <img class="portrait small-portrait" src="@picture" alt="" />
+            }
+            else
+            {
+                <div class="portrait small-portrait empty-portrait" aria-hidden="true">@(_form.Name.Length > 0 ? _form.Name[..1].ToUpperInvariant() : "?")</div>
+            }
+            <div class="row">
+                <button class="btn" @onclick="PickPictureAsync">@(_form.Avatar is null ? "Add picture" : "Change")</button>
+                @if (_form.Avatar is not null)
+                {
+                    <button class="btn" @onclick="() => { _form.Avatar = null; _stamp = DateTime.UtcNow; }">Remove</button>
+                }
+            </div>
+        </div>
+        <div class="editor-fields">
+            <label>Name<input class="field" @bind="_form.Name" placeholder="What characters call you" /></label>
+            <label class="field-block">
+                <span class="field-label">Description <span class="small">Optional. Who you are in the story: looks, role, anything the character should know.</span></span>
+                <textarea class="field" rows="6" @bind="_form.Description"></textarea>
+            </label>
+            <label class="check"><input type="checkbox" @bind="_form.IsDefault" /> Use for new chats</label>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="notice bad"><span>@_error</span></div>
+    }
+    <div class="editor-foot">
+        <div class="row">
+            <button class="btn primary" @onclick="SaveAsync">@(_form.Id == 0 ? "Create persona" : "Save")</button>
+            @if (_form.Id != 0)
+            {
+                @if (_confirmDelete)
+                {
+                    <button class="btn danger" @onclick="DeleteAsync">Yes, delete it</button>
+                    <button class="btn" @onclick="() => _confirmDelete = false">Keep</button>
+                }
+                else
+                {
+                    <button class="btn" @onclick="() => _confirmDelete = true">Delete</button>
+                }
+            }
+        </div>
+        @if (_savedNote)
+        {
+            <span class="small">Saved.</span>
+        }
+    </div>
+</div>
+
+@code {
+    private List<Persona> _personas = [];
+    private Persona _form = new() { Name = "" };
+    private DateTime _stamp = DateTime.UtcNow;
+    private string? _error;
+    private bool _confirmDelete;
+    private bool _savedNote;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+        if ((_personas.FirstOrDefault(p => p.IsDefault) ?? _personas.FirstOrDefault()) is { } first) Select(first);
+    }
+
+    private async Task ReloadAsync() => _personas = (await Characters.ListPersonasAsync()).ToList();
+
+    private void Select(Persona persona)
+    {
+        _form = new Persona { Id = persona.Id, Name = persona.Name, Description = persona.Description, Avatar = persona.Avatar, IsDefault = persona.IsDefault, CreatedAt = persona.CreatedAt };
+        _stamp = DateTime.UtcNow;
+        _error = null;
+        _confirmDelete = false;
+        _savedNote = false;
+    }
+
+    private void New() => Select(new Persona { Name = "" });
+
+    private async Task PickPictureAsync()
+    {
+        _error = null;
+        var path = await Desktop.PickImageFileAsync();
+        if (path is null) return;
+        try
+        {
+            if (new FileInfo(path).Length > CharacterCard.MaxFileBytes) throw new InvalidOperationException("That picture is too large.");
+            (_, _form.Avatar) = await Desktop.PreparePictureAsync(await File.ReadAllBytesAsync(path));
+            _stamp = DateTime.UtcNow;
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _form.Name = _form.Name.Trim();
+        if (_form.Name.Length == 0)
+        {
+            _error = "Give the persona a name.";
+            return;
+        }
+        var saved = await Characters.SavePersonaAsync(_form);
+        await ReloadAsync();
+        Select(_personas.First(p => p.Id == saved.Id));
+        _savedNote = true;
+    }
+
+    private async Task DeleteAsync()
+    {
+        await Characters.DeletePersonaAsync(_form.Id);
+        await ReloadAsync();
+        if (_personas.FirstOrDefault() is { } first) Select(first);
+        else New();
+    }
+
+    private static string Shorten(string text) => text.Length <= 60 ? text : text[..59].TrimEnd() + "…";
+}

@@ -35,7 +35,8 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
         await db.Conversations.Where(c => c.Id == conversation.Id).ExecuteUpdateAsync(s => s
             .SetProperty(c => c.Title, conversation.Title)
             .SetProperty(c => c.SystemPrompt, conversation.SystemPrompt)
-            .SetProperty(c => c.PresetId, conversation.PresetId), ct);
+            .SetProperty(c => c.PresetId, conversation.PresetId)
+            .SetProperty(c => c.PersonaId, conversation.PersonaId), ct);
     }
 
     public async Task SetActiveLeafAsync(long conversationId, long? leafId, CancellationToken ct = default)
@@ -76,6 +77,23 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         await db.Messages.Where(m => m.Id == message.Id).ExecuteUpdateAsync(s => s
-            .SetProperty(m => m.Content, message.Content), ct);
+            .SetProperty(m => m.Content, message.Content)
+            .SetProperty(m => m.Reasoning, message.Reasoning)
+            .SetProperty(m => m.PromptText, message.PromptText)
+            .SetProperty(m => m.ModelName, message.ModelName)
+            .SetProperty(m => m.PresetId, message.PresetId)
+            .SetProperty(m => m.PromptTokens, message.PromptTokens)
+            .SetProperty(m => m.CompletionTokens, message.CompletionTokens)
+            .SetProperty(m => m.TokensPerSecond, message.TokensPerSecond)
+            .SetProperty(m => m.TrimmedMessages, message.TrimmedMessages), ct);
+    }
+
+    public async Task<IReadOnlyList<Conversation>> ListForCharacterAsync(long characterId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.Conversations.AsNoTracking()
+            .Where(c => c.CharacterId == characterId)
+            .OrderByDescending(c => c.UpdatedAt)
+            .ToListAsync(ct);
     }
 }

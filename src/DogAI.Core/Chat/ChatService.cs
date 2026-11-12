@@ -1,19 +1,23 @@
 using System.Diagnostics;
 using System.Text;
+using DogAI.Core.Characters;
 
 namespace DogAI.Core.Chat;
 
 /// <summary>The reply being written right now. Read from the UI while it streams.</summary>
-public sealed class ActiveReply(long conversationId, long parentId)
+public sealed class ActiveReply(long conversationId, long? parentId, long? continuingId = null, string? startText = null, string? startReasoning = null)
 {
-    private readonly StringBuilder _content = new();
-    private readonly StringBuilder _reasoning = new();
+    private readonly StringBuilder _content = new(startText ?? "");
+    private readonly StringBuilder _reasoning = new(startReasoning ?? "");
     private readonly object _lock = new();
 
     public long ConversationId { get; } = conversationId;
 
-    /// <summary>The user message this reply answers.</summary>
-    public long ParentId { get; } = parentId;
+    /// <summary>The message this reply follows (the user's question). Null for a greeting being continued.</summary>
+    public long? ParentId { get; } = parentId;
+
+    /// <summary>When continuing a stopped reply: that reply's id. Its text so far is already in <see cref="Content"/>.</summary>
+    public long? ContinuingId { get; } = continuingId;
 
     public string Content { get { lock (_lock) return _content.ToString(); } }
     public string Reasoning { get { lock (_lock) return _reasoning.ToString(); } }
@@ -31,12 +35,14 @@ public sealed class ActiveReply(long conversationId, long parentId)
 /// <summary>
 /// Runs chat turns: stores the user's message, builds a prompt that fits the context window,
 /// streams the reply and saves it. One reply at a time; it keeps going if the user looks at another screen.
+/// Used by General and Characters; a character chat gets its card and persona as standing instructions.
 /// </summary>
-public sealed class ChatService(IChatStore store, IChatEngine engine)
+public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCatalog? presets = null, ICharacterStore? characters = null)
 {
     public const string UntitledChat = "New chat";
     private static readonly TimeSpan UiInterval = TimeSpan.FromMilliseconds(50);
 
+    private readonly PresetCatalog _presets = presets ?? new PresetCatalog();
     private readonly Dictionary<long, (int Hash, int Tokens)> _tokenCache = [];
     private string? _tokenCacheModel;
     private CancellationTokenSource? _cts;
@@ -63,10 +69,11 @@ public sealed class ChatService(IChatStore store, IChatEngine engine)
     {
         EnsureCanStart();
         var conversation = await store.GetAsync(conversationId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
-        var tree = new MessageTree(await store.GetMessagesAsync(conversationId, ct));
-        var leaf = tree.ResolveLeaf(conversation.ActiveLeafId);
+        var messages = await store.GetMessagesAsync(conversationId, ct);
+        var leaf = new MessageTree(messages).ResolveLeaf(conversation.ActiveLeafId);
 
-        if (conversation.Title == UntitledChat && tree.Count == 0)
+        // Name the chat after its first question (a character's greeting does not count).
+        if (conversation.Title == UntitledChat && messages.All(m => m.Role != ChatRole.User))
         {
             conversation.Title = TitleFrom(text);
             await store.UpdateAsync(conversation, ct);
@@ -91,12 +98,60 @@ public sealed class ChatService(IChatStore store, IChatEngine engine)
         await GenerateAsync(conversationId, question);
     }
 
+    /// <summary>
+    /// Carries on a reply that was stopped or ended too soon. The new text is added to the same message,
+    /// since it is the same reply made longer, not an alternative to it.
+    /// </summary>
+    public async Task ContinueAsync(long conversationId, long assistantMessageId, CancellationToken ct = default)
+    {
+        EnsureCanStart();
+        var reply = await FindAsync(conversationId, assistantMessageId, ChatRole.Assistant, ct);
+        await GenerateAsync(conversationId, reply.ParentId, reply);
+    }
+
     /// <summary>Answers a question that has no reply yet, e.g. after an error or an immediate stop.</summary>
     public async Task ReplyToAsync(long conversationId, long userMessageId, CancellationToken ct = default)
     {
         EnsureCanStart();
         await FindAsync(conversationId, userMessageId, ChatRole.User, ct);
         await GenerateAsync(conversationId, userMessageId);
+    }
+
+    /// <summary>
+    /// Starts a chat with a character. Its greetings become the first message, each one an alternative
+    /// the user can flip through before replying.
+    /// </summary>
+    public async Task<Conversation> StartCharacterChatAsync(long characterId, long? personaId = null, CancellationToken ct = default)
+    {
+        if (characters is null) throw new InvalidOperationException("Characters are not available.");
+        var character = await characters.GetAsync(characterId, ct) ?? throw new InvalidOperationException("That character no longer exists.");
+        var persona = await characters.PersonaForAsync(personaId, ct);
+        var conversation = await store.CreateAsync(new Conversation
+        {
+            Mode = "characters",
+            Title = UntitledChat,
+            CharacterId = character.Id,
+            PersonaId = persona?.Id,
+            PresetId = character.PresetId is { } p && _presets.All.Any(x => x.Id == p) ? p : SamplerPresets.DefaultId,
+        }, ct);
+
+        long? first = null;
+        foreach (var greeting in character.Greetings())
+        {
+            var message = await store.AddMessageAsync(new ChatMessage
+            {
+                ConversationId = conversation.Id,
+                Role = ChatRole.Assistant,
+                Content = CharacterPrompt.Fill(greeting, character.Name, persona?.Name ?? "User").Trim(),
+            }, ct);
+            first ??= message.Id;
+        }
+        if (first is not null)
+        {
+            await store.SetActiveLeafAsync(conversation.Id, first, ct);
+            conversation.ActiveLeafId = first;
+        }
+        return conversation;
     }
 
     /// <summary>Shows the branch that runs through <paramref name="messageId"/>, down to its newest end.</summary>
@@ -142,45 +197,53 @@ public sealed class ChatService(IChatStore store, IChatEngine engine)
         await GenerateAsync(conversationId, question.Id);
     }
 
-    private async Task GenerateAsync(long conversationId, long questionId)
+    /// <param name="questionId">The message the reply follows.</param>
+    /// <param name="continuing">When set, the reply to make longer instead of writing a new one.</param>
+    private async Task GenerateAsync(long conversationId, long? questionId, ChatMessage? continuing = null)
     {
         var cts = new CancellationTokenSource();
-        var active = new ActiveReply(conversationId, questionId);
+        var active = new ActiveReply(conversationId, questionId, continuing?.Id, continuing?.Content, continuing?.Reasoning);
         _cts = cts;
         Active = active;
         LastError = null;
-        await store.SetActiveLeafAsync(conversationId, questionId);
+        await store.SetActiveLeafAsync(conversationId, continuing?.Id ?? questionId);
         Changed?.Invoke();
 
-        var reply = new ChatMessage
+        var reply = continuing ?? new ChatMessage
         {
             ConversationId = conversationId,
             ParentId = questionId,
             Role = ChatRole.Assistant,
-            ModelName = engine.ModelName,
         };
+        var textBefore = continuing?.Content;
+        var tokensBefore = continuing?.CompletionTokens ?? 0;
         string? error = null;
         try
         {
             var ct = cts.Token;
             var conversation = await store.GetAsync(conversationId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
-            var path = new MessageTree(await store.GetMessagesAsync(conversationId, ct)).PathTo(questionId);
-            var preset = SamplerPresets.Get(conversation.PresetId);
+            var path = new MessageTree(await store.GetMessagesAsync(conversationId, ct)).PathTo(continuing?.Id ?? questionId);
+            var preset = _presets.Get(conversation.PresetId);
             reply.PresetId = preset.Id;
+            reply.ModelName = engine.ModelName;
 
-            var (prompt, promptText, promptTokens, trimmed) = await BuildPromptAsync(conversation.SystemPrompt, path, ct);
+            var system = await SystemPromptAsync(conversation, ct);
+            var (prompt, promptText, promptTokens, trimmed) = await BuildPromptAsync(system, path, continuing is not null, ct);
             reply.PromptText = promptText;
             reply.PromptTokens = promptTokens;
             reply.TrimmedMessages = trimmed;
 
+            var stream = continuing is null
+                ? engine.StreamChatAsync(prompt, preset, ct)
+                : engine.StreamCompletionAsync(promptText, preset, ct);
             var lastRaise = Stopwatch.StartNew();
-            await foreach (var delta in engine.StreamChatAsync(prompt, preset, ct).ConfigureAwait(false))
+            await foreach (var delta in stream.ConfigureAwait(false))
             {
                 active.Append(delta);
                 if (delta.Stats is { } stats)
                 {
                     if (stats.PromptTokens > 0) reply.PromptTokens = stats.PromptTokens;
-                    reply.CompletionTokens = stats.CompletionTokens;
+                    reply.CompletionTokens = tokensBefore + stats.CompletionTokens;
                     reply.TokensPerSecond = stats.TokensPerSecond;
                 }
                 if (lastRaise.Elapsed >= UiInterval)
@@ -201,10 +264,17 @@ public sealed class ChatService(IChatStore store, IChatEngine engine)
 
         try
         {
-            reply.Content = active.Content.Trim();
+            // A continued reply keeps its leading text exactly; only the far end is tidied.
+            reply.Content = continuing is null ? active.Content.Trim() : active.Content.TrimEnd();
             var reasoning = active.Reasoning.Trim();
             reply.Reasoning = reasoning.Length == 0 ? null : reasoning;
-            if (reply.Content.Length > 0 || reply.Reasoning is not null)
+            if (continuing is not null)
+            {
+                // Only touch the saved reply if something was actually added.
+                if (reply.Content != textBefore) await store.UpdateMessageAsync(reply);
+                await store.SetActiveLeafAsync(conversationId, reply.Id);
+            }
+            else if (reply.Content.Length > 0 || reply.Reasoning is not null)
             {
                 var saved = await store.AddMessageAsync(reply);
                 await store.SetActiveLeafAsync(conversationId, saved.Id);
@@ -224,12 +294,24 @@ public sealed class ChatService(IChatStore store, IChatEngine engine)
         }
     }
 
+    /// <summary>The standing instructions: the chat's own, or for a character chat the card, persona and the chat's own.</summary>
+    private async Task<string> SystemPromptAsync(Conversation conversation, CancellationToken ct)
+    {
+        if (conversation.CharacterId is not { } characterId || characters is null) return conversation.SystemPrompt;
+        var character = await characters.GetAsync(characterId, ct);
+        if (character is null) return conversation.SystemPrompt;
+        var persona = await characters.PersonaForAsync(conversation.PersonaId, ct);
+        return CharacterPrompt.Build(character, persona, conversation.SystemPrompt);
+    }
+
     /// <summary>
     /// Picks the messages that fit, then checks the real size using the model's own template and
     /// tokenizer, dropping further old turns until the prompt leaves room for a reply.
+    /// When <paramref name="continuation"/> is set, the last message of <paramref name="path"/> is a reply to
+    /// carry on: the prompt is the template up to where that reply starts, followed by its text so far.
     /// </summary>
     private async Task<(List<PromptMessage> Prompt, string Text, int Tokens, int Trimmed)> BuildPromptAsync(
-        string systemPrompt, IReadOnlyList<ChatMessage> path, CancellationToken ct)
+        string systemPrompt, IReadOnlyList<ChatMessage> path, bool continuation, CancellationToken ct)
     {
         if (_tokenCacheModel != engine.ModelName)
         {
@@ -249,10 +331,16 @@ public sealed class ChatService(IChatStore store, IChatEngine engine)
         {
             var prompt = new List<PromptMessage>();
             if (system.Length > 0) prompt.Add(new PromptMessage("system", system));
-            prompt.AddRange(path.Skip(fit.FirstIncluded).Select(m =>
+            var included = path.Skip(fit.FirstIncluded).ToList();
+
+            // A character chat opens with the character speaking; give the template the user turn it expects first.
+            if (included.Count > 0 && included[0].Role == ChatRole.Assistant)
+                prompt.Add(new PromptMessage("user", CharacterPrompt.ChatStart));
+            prompt.AddRange((continuation ? included[..^1] : included).Select(m =>
                 new PromptMessage(m.Role == ChatRole.User ? "user" : "assistant", m.Content)));
 
             var text = await engine.RenderPromptAsync(prompt, ct);
+            if (continuation) text += included[^1].Content;
             var tokens = await engine.CountTokensAsync(text, ct);
             var next = ContextBudgeter.DropOldest(fit, items);
             if (tokens <= budget || next == fit) return (prompt, text, tokens, fit.Trimmed);

@@ -1,0 +1,259 @@
+@* The message thread shared by General and Characters: versions, edit, regenerate, continue,
+   the reply being written, problems, and the prompt inspector. The page loads the chat and passes it in. *@
+@implements IAsyncDisposable
+@inject ChatService Chat
+@inject EngineManager Engine
+@inject IChatStore Store
+@inject IDesktopShell Desktop
+@inject PresetCatalog Presets
+@inject IJSRuntime JS
+
+<div class="thread">
+    @foreach (var message in Visible)
+    {
+        var m = message;
+        var siblings = Tree.Siblings(m);
+        var position = IndexOf(siblings, m.Id);
+        var isUser = m.Role == ChatRole.User;
+        var isLast = ReferenceEquals(m, Visible[^1]);
+        // In character chats the last reply always shows its arrows; the right one past the newest writes another.
+        var swipe = Swipes && isLast && !isUser && Streaming is null;
+        <MessageView IsUser="@isUser" Name="@(isUser ? UserName : AssistantName ?? m.ModelName ?? "Model")"
+                     Content="@m.Content" Reasoning="@m.Reasoning" AvatarUrl="@(isUser ? UserAvatar : AssistantAvatar)" Letter="@Letter"
+                     Editor="@(_editingId == m.Id ? EditBox(m) : null)">
+            <Actions>
+                @if (_editingId != m.Id)
+                {
+                    @if (siblings.Count > 1 || swipe)
+                    {
+                        var canSwipeNew = swipe && position == siblings.Count - 1 && m.ParentId is not null;
+                        <span class="branch-nav">
+                            <button disabled="@(Chat.IsBusy || position == 0)" aria-label="Previous version" @onclick="() => ShowAsync(siblings[position - 1])">‹</button>
+                            <span>@(position + 1) of @siblings.Count</span>
+                            @if (canSwipeNew)
+                            {
+                                <button disabled="@(Chat.IsBusy || !Engine.IsReady)" aria-label="Write another version" title="Write another version"
+                                        @onclick="() => Run(() => Chat.RegenerateAsync(m.ConversationId, m.Id))">›</button>
+                            }
+                            else
+                            {
+                                <button disabled="@(Chat.IsBusy || position == siblings.Count - 1)" aria-label="Next version" @onclick="() => ShowAsync(siblings[position + 1])">›</button>
+                            }
+                        </span>
+                    }
+                    <button @onclick="() => Desktop.CopyText(m.Content)">Copy</button>
+                    @if (!Chat.IsBusy)
+                    {
+                        <button @onclick="() => StartEdit(m)">Edit</button>
+                        @if (!isUser)
+                        {
+                            @if (m.ParentId is not null)
+                            {
+                                <button disabled="@(!Engine.IsReady)" @onclick="() => Run(() => Chat.RegenerateAsync(m.ConversationId, m.Id))">Regenerate</button>
+                            }
+                            @* A reply stopped while still "thinking" has no answer text to carry on from. *@
+                            @if (isLast && m.Content.Length > 0)
+                            {
+                                <button disabled="@(!Engine.IsReady)" title="Carry on writing this reply" @onclick="() => Run(() => Chat.ContinueAsync(m.ConversationId, m.Id))">Continue</button>
+                            }
+                        }
+                        else if (isLast)
+                        {
+                            <button disabled="@(!Engine.IsReady)" @onclick="() => Run(() => Chat.ReplyToAsync(m.ConversationId, m.Id))">Answer</button>
+                        }
+                    }
+                    @if (m.PromptText is not null)
+                    {
+                        <button @onclick="() => _inspect = m">Prompt</button>
+                    }
+                    @if (m.TokensPerSecond is > 0)
+                    {
+                        <span class="stat">@m.CompletionTokens tokens · @m.TokensPerSecond.Value.ToString("0.0") tok/s</span>
+                    }
+                }
+            </Actions>
+        </MessageView>
+    }
+    @if (Streaming is { } reply)
+    {
+        <MessageView Name="@(AssistantName ?? Engine.ModelName ?? "Model")" AvatarUrl="@AssistantAvatar" Letter="@Letter"
+                     Content="@reply.Content" Reasoning="@reply.Reasoning" Streaming="true" />
+    }
+    @if (Problem is { } problem)
+    {
+        <div class="notice bad"><span>@problem</span><button class="btn" @onclick="DismissProblem">Dismiss</button></div>
+    }
+</div>
+
+@if (_inspect is { } inspected)
+{
+    <Modal Title="What the model was sent" Class="wide" OnClose="() => _inspect = null">
+        <div class="about">
+            <div class="kv"><span>Model</span><span>@inspected.ModelName</span></div>
+            <div class="kv"><span>Style</span><span>@Presets.Get(inspected.PresetId).Name</span></div>
+            <div class="kv"><span>Prompt size</span><span>@(inspected.PromptTokens?.ToString("N0") ?? "?") tokens</span></div>
+            @if (inspected.CompletionTokens is { } written)
+            {
+                <div class="kv"><span>Reply size</span><span>@written.ToString("N0") tokens</span></div>
+            }
+            @if (inspected.TrimmedMessages is > 0)
+            {
+                <div class="kv"><span>Older messages left out to fit</span><span>@inspected.TrimmedMessages</span></div>
+            }
+        </div>
+        <div class="code">
+            <div class="code-head"><span>exact prompt text</span><button @onclick="() => Desktop.CopyText(inspected.PromptText!)">Copy</button></div>
+            <pre class="wrap"><code>@inspected.PromptText</code></pre>
+        </div>
+    </Modal>
+}
+
+@code {
+    [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();
+    [Parameter, EditorRequired] public MessageTree Tree { get; set; } = new([]);
+    [Parameter, EditorRequired] public IReadOnlyList<ChatMessage> Path { get; set; } = [];
+
+    /// <summary>Name shown on replies. Null shows the model's name.</summary>
+    [Parameter] public string? AssistantName { get; set; }
+    [Parameter] public string? AssistantAvatar { get; set; }
+
+    private string? Letter => AssistantName is { Length: > 0 } n && char.IsLetterOrDigit(n[0]) ? n[..1].ToUpperInvariant() : null;
+    [Parameter] public string UserName { get; set; } = "You";
+    [Parameter] public string? UserAvatar { get; set; }
+
+    /// <summary>Character-chat behaviour: arrows on the last reply, and the right arrow past the newest writes another.</summary>
+    [Parameter] public bool Swipes { get; set; }
+
+    /// <summary>A problem the page wants shown under the thread (for example a refused send).</summary>
+    [Parameter] public string? Notice { get; set; }
+    [Parameter] public EventCallback<string?> NoticeChanged { get; set; }
+
+    private long? _editingId;
+    private string _editText = "";
+    private ChatMessage? _inspect;
+    private long _shownConversation = -1;
+    private ActiveReply? _shownActive;
+    private IJSObjectReference? _module;
+
+    /// <summary>The reply being written in this chat, if any.</summary>
+    private ActiveReply? Streaming => Chat.Active is { } a && a.ConversationId == Conversation.Id && Conversation.Id != 0 ? a : null;
+
+    /// <summary>The branch on screen. While a reply streams it ends where that reply goes.</summary>
+    private IReadOnlyList<ChatMessage> Visible
+    {
+        get
+        {
+            if (Streaming is not { } reply) return Path;
+            if (reply.ContinuingId is { } continuing)
+            {
+                var at = IndexOf(Path, continuing);
+                return at < 0 ? Path : Path.Take(at).ToList();
+            }
+            var end = reply.ParentId is { } parent ? IndexOf(Path, parent) : -1;
+            return end < 0 ? Path : Path.Take(end + 1).ToList();
+        }
+    }
+
+    private string? Problem => Notice ?? (Chat.LastError is { } e && e.ConversationId == Conversation.Id ? e.Message : null);
+
+    protected override void OnParametersSet()
+    {
+        if (Conversation.Id != _shownConversation)
+        {
+            _editingId = null;
+            _inspect = null;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Jump to the end when a chat opens or a reply starts. Otherwise follow only if the reader is already at
+        // the end, so flipping versions or a reply finishing never pulls someone away from what they are reading.
+        var force = Conversation.Id != _shownConversation || (Streaming is not null && !ReferenceEquals(Streaming, _shownActive));
+        _shownConversation = Conversation.Id;
+        _shownActive = Streaming;
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
+            await _module.InvokeVoidAsync("followThread", force);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException or ObjectDisposedException)
+        {
+            // Scrolling is a convenience; the thread works without it.
+        }
+    }
+
+    private async Task Run(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            await NoticeChanged.InvokeAsync(e.Message);
+        }
+    }
+
+    private Task ShowAsync(ChatMessage message) => Chat.SelectBranchAsync(message.ConversationId, message.Id);
+
+    private void StartEdit(ChatMessage message)
+    {
+        _editingId = message.Id;
+        _editText = message.Content;
+    }
+
+    private async Task SaveEditAsync(ChatMessage message)
+    {
+        var text = _editText.Trim();
+        _editingId = null;
+        if (text.Length == 0 || text == message.Content) return;
+        if (message.Role == ChatRole.User)
+        {
+            // A changed question starts a new branch and gets a fresh answer; the old one stays reachable.
+            await Run(() => Chat.EditAndResendAsync(message.ConversationId, message.Id, text));
+        }
+        else
+        {
+            message.Content = text;
+            await Store.UpdateMessageAsync(message);
+        }
+    }
+
+    private RenderFragment EditBox(ChatMessage message) => __builder =>
+    {
+        <div class="edit">
+            <textarea class="field" rows="@Math.Clamp(_editText.Split('\n').Length + 1, 3, 16)" aria-label="Edit message" @bind="_editText"></textarea>
+            <div class="row">
+                <button class="btn primary" disabled="@(message.Role == ChatRole.User && !Engine.IsReady)" @onclick="() => SaveEditAsync(message)">
+                    @(message.Role == ChatRole.User ? "Save and ask again" : "Save")
+                </button>
+                <button class="btn" @onclick="() => _editingId = null">Cancel</button>
+            </div>
+        </div>
+    };
+
+    private async Task DismissProblem()
+    {
+        await NoticeChanged.InvokeAsync(null);
+        if (Chat.LastError is not null) Chat.ClearError();
+    }
+
+    private static int IndexOf(IReadOnlyList<ChatMessage> messages, long id)
+    {
+        for (var i = 0; i < messages.Count; i++)
+            if (messages[i].Id == id) return i;
+        return -1;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
+}

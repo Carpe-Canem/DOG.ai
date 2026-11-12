@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
 using DogAI.Core;
+using DogAI.Core.Characters;
 using DogAI.Core.Chat;
+using DogAI.Core.Models;
 using DogAI.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +19,8 @@ public sealed class ChatServiceTests : IDisposable
         public string? ModelName => "fake";
         public int ContextLength { get; set; } = 4096;
         public List<IReadOnlyList<PromptMessage>> Prompts { get; } = [];
+        public List<string> Completions { get; } = [];
+        public List<SamplerPreset> Samplers { get; } = [];
         public Func<CancellationToken, IAsyncEnumerable<ChatDelta>> Reply { get; set; } = _ => Say("Hello", " there");
 
         public Task<int> CountTokensAsync(string text, CancellationToken ct = default) =>
@@ -28,6 +32,14 @@ public sealed class ChatServiceTests : IDisposable
         public IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, CancellationToken ct = default)
         {
             Prompts.Add(messages);
+            Samplers.Add(sampler);
+            return Reply(ct);
+        }
+
+        public IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, SamplerPreset sampler, CancellationToken ct = default)
+        {
+            Completions.Add(prompt);
+            Samplers.Add(sampler);
             return Reply(ct);
         }
 
@@ -47,6 +59,8 @@ public sealed class ChatServiceTests : IDisposable
     private readonly IChatStore _store;
     private readonly FakeEngine _engine = new();
     private readonly ChatService _chat;
+    private readonly ICharacterStore _characters;
+    private readonly PresetCatalog _presets;
 
     public ChatServiceTests()
     {
@@ -55,7 +69,9 @@ public sealed class ChatServiceTests : IDisposable
         _services = new ServiceCollection().AddSingleton(paths).AddDogData().BuildServiceProvider();
         _services.MigrateDogDatabaseAsync().GetAwaiter().GetResult();
         _store = _services.GetRequiredService<IChatStore>();
-        _chat = new ChatService(_store, _engine);
+        _characters = _services.GetRequiredService<ICharacterStore>();
+        _presets = new PresetCatalog(_services.GetRequiredService<IDocumentStore>());
+        _chat = new ChatService(_store, _engine, _presets, _characters);
     }
 
     private async Task<long> NewChatAsync(string instructions = "") =>
@@ -247,6 +263,170 @@ public sealed class ChatServiceTests : IDisposable
         await _store.DeleteAsync(a);
         Assert.Equal([b], (await _store.ListAsync("general")).Select(c => c.Id));
         Assert.Empty(await _store.GetMessagesAsync(a));
+    }
+
+    [Fact]
+    public async Task Continue_lengthens_the_same_reply_from_where_it_stopped()
+    {
+        var id = await NewChatAsync("Be brief.");
+        await _chat.SendAsync(id, "Count to five");
+        var reply = (await ShownAsync(id))[1];
+
+        _engine.Reply = _ => FakeEngine.Say(" and", " more");
+        await _chat.ContinueAsync(id, reply.Id);
+
+        var shown = await ShownAsync(id);
+        Assert.Equal(2, shown.Count);
+        Assert.Equal(reply.Id, shown[1].Id);
+        Assert.Equal("Hello there and more", shown[1].Content);
+        // The template is rendered up to the reply's start, then its text so far is appended verbatim.
+        Assert.Equal("<system> Be brief. <user> Count to five" + "Hello there", Assert.Single(_engine.Completions));
+        Assert.Equal(_engine.Completions[0], shown[1].PromptText);
+        Assert.Equal(2 + 2, shown[1].CompletionTokens);
+        Assert.Single(new MessageTree(await _store.GetMessagesAsync(id)).Siblings(shown[1]));
+    }
+
+    [Fact]
+    public async Task Continue_that_adds_nothing_leaves_the_reply_alone()
+    {
+        var id = await NewChatAsync();
+        await _chat.SendAsync(id, "Hi");
+        var reply = (await ShownAsync(id))[1];
+
+        _engine.Reply = _ => FakeEngine.Say();
+        await _chat.ContinueAsync(id, reply.Id);
+
+        var after = (await ShownAsync(id))[1];
+        Assert.Equal("Hello there", after.Content);
+        Assert.Equal(reply.PromptText, after.PromptText);
+    }
+
+    [Fact]
+    public async Task A_users_own_style_is_used_and_falls_back_when_deleted()
+    {
+        var mine = await _presets.SaveAsync(new SamplerPreset("", "Mine", "") { Temperature = 9, MinP = 0.2 });
+        Assert.Equal(5, mine.Temperature); // kept in range
+        var id = await NewChatAsync();
+        var chat = (await _store.GetAsync(id))!;
+        chat.PresetId = mine.Id;
+        await _store.UpdateAsync(chat);
+
+        await _chat.SendAsync(id, "Hi");
+        Assert.Equal(0.2, _engine.Samplers[^1].MinP);
+
+        // A fresh catalog reads the saved style back.
+        var reloaded = new PresetCatalog(_services.GetRequiredService<IDocumentStore>());
+        await reloaded.LoadAsync();
+        Assert.Equal("Mine", reloaded.Get(mine.Id).Name);
+
+        await _presets.DeleteAsync(mine.Id);
+        await _chat.SendAsync(id, "Again");
+        Assert.Equal(SamplerPresets.DefaultId, _engine.Samplers[^1].Id);
+    }
+
+    [Fact]
+    public async Task Built_in_styles_cannot_be_overwritten()
+    {
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _presets.SaveAsync(SamplerPresets.Get("precise") with { Temperature = 2 }));
+        Assert.Equal("Precise (copy)", PresetCatalog.CopyOf(SamplerPresets.Get("precise")).Name);
+    }
+
+    private async Task<Character> SaveCharacterAsync() => await _characters.SaveAsync(new Character
+    {
+        Name = "Rex",
+        Description = "{{char}} is a loyal dog who guards {{user}}'s farm.",
+        Personality = "Brave",
+        FirstMessage = "*wags* Hello, {{user}}!",
+        AlternateGreetings = ["Woof.", "  "],
+        ExampleMessages = "<START>\n{{user}}: Sit.\n{{char}}: *sits*",
+        CreatorNotes = "Never sent to the model.",
+    });
+
+    [Fact]
+    public async Task A_character_chat_opens_with_its_greetings_as_alternatives()
+    {
+        var rex = await SaveCharacterAsync();
+        await _characters.SavePersonaAsync(new Persona { Name = "Sam", Description = "A farmer." });
+
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+
+        Assert.Equal("characters", chat.Mode);
+        var messages = await _store.GetMessagesAsync(chat.Id);
+        Assert.Equal(["*wags* Hello, Sam!", "Woof."], messages.Select(m => m.Content));
+        Assert.All(messages, m => Assert.Null(m.ParentId));
+        Assert.Equal(messages[0].Id, (await _store.GetAsync(chat.Id))!.ActiveLeafId);
+        Assert.Equal([chat.Id], (await _store.ListForCharacterAsync(rex.Id)).Select(c => c.Id));
+    }
+
+    [Fact]
+    public async Task A_character_reply_is_given_the_card_the_persona_and_a_start_turn()
+    {
+        var rex = await SaveCharacterAsync();
+        await _characters.SavePersonaAsync(new Persona { Name = "Sam", Description = "{{user}} is a farmer." });
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+
+        await _chat.SendAsync(chat.Id, "Good boy");
+
+        var prompt = _engine.Prompts[^1];
+        Assert.Equal(["system", "user", "assistant", "user"], prompt.Select(m => m.Role));
+        var system = prompt[0].Content;
+        Assert.Contains("Rex is a loyal dog who guards Sam's farm.", system);
+        Assert.Contains("Sam is a farmer.", system);
+        Assert.Contains("Brave", system);
+        Assert.Contains("Sam: Sit.", system);
+        Assert.DoesNotContain("Never sent", system);
+        Assert.DoesNotContain("{{", system);
+        Assert.Equal(CharacterPrompt.ChatStart, prompt[1].Content);
+        Assert.Equal("*wags* Hello, Sam!", prompt[2].Content);
+        // The greeting does not name the chat; the first thing the user says does.
+        Assert.Equal("Good boy", (await _store.GetAsync(chat.Id))!.Title);
+    }
+
+    [Fact]
+    public async Task Deleting_a_character_removes_its_chats()
+    {
+        var rex = await SaveCharacterAsync();
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        await _chat.SendAsync(chat.Id, "Hi");
+
+        await _characters.DeleteAsync(rex.Id);
+
+        Assert.Null(await _store.GetAsync(chat.Id));
+        Assert.Empty(await _store.GetMessagesAsync(chat.Id));
+        Assert.Empty(await _characters.ListAsync());
+    }
+
+    [Fact]
+    public async Task Characters_keep_their_lists_and_pictures_through_the_database()
+    {
+        var saved = await _characters.SaveAsync(new Character
+        {
+            Name = "Pix",
+            Tags = ["cute", "dog"],
+            AlternateGreetings = ["Hi"],
+            Image = [1, 2, 3],
+            Avatar = [4, 5],
+        });
+        var full = (await _characters.GetAsync(saved.Id))!;
+        Assert.Equal(["cute", "dog"], full.Tags);
+        Assert.Equal([1, 2, 3], full.Image);
+
+        var listed = Assert.Single(await _characters.ListAsync());
+        Assert.Null(listed.Image); // lists leave the big picture out
+        Assert.Equal([4, 5], listed.Avatar);
+    }
+
+    [Fact]
+    public async Task There_is_always_one_default_persona()
+    {
+        var a = await _characters.SavePersonaAsync(new Persona { Name = "A" });
+        Assert.True(a.IsDefault);
+        var b = await _characters.SavePersonaAsync(new Persona { Name = "B", IsDefault = true });
+        Assert.Equal(["B"], (await _characters.ListPersonasAsync()).Where(p => p.IsDefault).Select(p => p.Name));
+
+        await _characters.DeletePersonaAsync(b.Id);
+        Assert.True((await _characters.PersonaForAsync(null))!.IsDefault);
+        Assert.Equal("A", (await _characters.PersonaForAsync(b.Id))!.Name);
     }
 
     [Theory]

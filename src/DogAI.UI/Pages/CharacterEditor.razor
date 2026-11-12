@@ -1,0 +1,231 @@
+@page "/characters/new"
+@page "/characters/{CharacterId:long}/edit"
+@inject ICharacterStore Characters
+@inject IDesktopShell Desktop
+@inject EngineManager Engine
+@inject PresetCatalog Presets
+@inject NavigationManager Nav
+
+<SectionContent SectionName="title">
+    <div class="head-row">
+        <div class="head-text">
+            <h2>@(CharacterId is null ? "New character" : $"Edit {(_c.Name.Length > 0 ? _c.Name : "character")}")</h2>
+            <p>Everything here is sent to the model except the creator's notes</p>
+        </div>
+    </div>
+</SectionContent>
+
+<SectionContent SectionName="list"><CharacterList ActiveId="@CharacterId" /></SectionContent>
+
+@if (_loaded)
+{
+    <div class="editor">
+        <div class="editor-top">
+            <div class="picture-pick">
+                @if (Format.PictureUrl("edit", _c.Id, _pictureStamp, _c.Avatar) is { } picture)
+                {
+                    <img class="portrait" src="@picture" alt="" />
+                }
+                else
+                {
+                    <div class="portrait empty-portrait" aria-hidden="true">@(_c.Name.Length > 0 ? _c.Name[..1].ToUpperInvariant() : "?")</div>
+                }
+                <div class="row">
+                    <button class="btn" @onclick="PickPictureAsync">@(_c.Avatar is null ? "Add picture" : "Change")</button>
+                    @if (_c.Avatar is not null)
+                    {
+                        <button class="btn" @onclick="RemovePicture">Remove</button>
+                    }
+                </div>
+            </div>
+            <div class="editor-fields">
+                <label>Name<input class="field" @bind="_c.Name" @bind:after="Measure" /></label>
+                <label>Tags<input class="field" placeholder="Separate with commas" @bind="_tags" /></label>
+                <div class="two">
+                    <label>Creator<input class="field" @bind="_c.Creator" /></label>
+                    <label>Version<input class="field" @bind="_c.CharacterVersion" /></label>
+                </div>
+                <label>
+                    Style for new chats
+                    <select class="field" @bind="_presetId">
+                        @foreach (var preset in Presets.All)
+                        {
+                            <option value="@preset.Id">@preset.Name</option>
+                        }
+                    </select>
+                </label>
+            </div>
+        </div>
+
+        <p class="small">Write {{char}} for the character's name and {{user}} for yours; they are filled in during the chat.</p>
+
+        @Area("Description", "Who the character is: looks, background, how they behave. The most important part.", () => _c.Description, v => _c.Description = v, 8)
+        @Area("Personality", "A short summary of their personality.", () => _c.Personality, v => _c.Personality = v, 3)
+        @Area("Scenario", "Where and when the chat takes place, and what is going on.", () => _c.Scenario, v => _c.Scenario = v, 3)
+        @Area("First message", "What the character says to open a chat.", () => _c.FirstMessage, v => _c.FirstMessage = v, 6)
+
+        <div class="field-block">
+            <div class="field-label">Other greetings <span class="small">Alternative opening messages. In a chat, flip through them with the arrows.</span></div>
+            @for (var i = 0; i < _c.AlternateGreetings.Count; i++)
+            {
+                var index = i;
+                <div class="greeting">
+                    <textarea class="field" rows="4" aria-label="@($"Greeting {index + 2}")" value="@_c.AlternateGreetings[index]"
+                              @onchange="e => { _c.AlternateGreetings[index] = e.Value?.ToString() ?? string.Empty; Measure(); }"></textarea>
+                    <button class="btn" @onclick="() => { _c.AlternateGreetings.RemoveAt(index); Measure(); }">Remove</button>
+                </div>
+            }
+            <div class="row"><button class="btn" @onclick="() => _c.AlternateGreetings.Add(string.Empty)">Add a greeting</button></div>
+        </div>
+
+        @Area("Example dialogue", "Sample exchanges that show how the character talks. Start each one with <START>.", () => _c.ExampleMessages, v => _c.ExampleMessages = v, 6)
+
+        <details class="card-text" open="@(_c.SystemPrompt.Length > 0 || _c.PostHistoryInstructions.Length > 0)">
+            <summary>Advanced</summary>
+            @Area("Main instruction", $"Replaces DOG AI's default role-play instruction. Leave empty to use the default. Write {{{{original}}}} to include the default inside your own.", () => _c.SystemPrompt, v => _c.SystemPrompt = v, 4)
+            @Area("Final instruction", "A reminder added after everything else, such as \"Keep replies short\".", () => _c.PostHistoryInstructions, v => _c.PostHistoryInstructions = v, 3)
+        </details>
+
+        @Area("Creator's notes", "For people reading the card. Never sent to the model.", () => _c.CreatorNotes, v => _c.CreatorNotes = v, 3, measure: false)
+
+        @if (_error is not null)
+        {
+            <div class="notice bad"><span>@_error</span></div>
+        }
+        <div class="editor-foot">
+            <div class="row">
+                <button class="btn primary" disabled="@_saving" @onclick="SaveAsync">@(CharacterId is null ? "Create character" : "Save")</button>
+                <a class="btn" href="@(CharacterId is null ? "characters" : $"characters/{CharacterId}")">Cancel</a>
+            </div>
+            <span class="small" title="How much of the model's context window the card takes in every reply">@TokenText</span>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long? CharacterId { get; set; }
+
+    private Character _c = new();
+    private string _tags = "";
+    private string _presetId = SamplerPresets.DefaultId;
+    private DateTime _pictureStamp = DateTime.UtcNow;
+    private bool _loaded;
+    private bool _saving;
+    private string? _error;
+    private int? _tokens;
+    private bool _exactTokens;
+    private int _measureVersion;
+
+    private string TokenText => _tokens is { } t
+        ? $"The card uses {(_exactTokens ? "" : "about ")}{t:N0} tokens{(_exactTokens ? "" : " (load a model for an exact count)")}"
+        : "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _error = null;
+        if (CharacterId is { } id)
+        {
+            var found = await Characters.GetAsync(id);
+            if (found is null)
+            {
+                Nav.NavigateTo("characters", replace: true);
+                return;
+            }
+            _c = found;
+        }
+        else
+        {
+            _c = new Character();
+        }
+        _tags = string.Join(", ", _c.Tags);
+        _presetId = Presets.Get(_c.PresetId).Id;
+        _pictureStamp = DateTime.UtcNow;
+        _loaded = true;
+        Measure();
+    }
+
+    /// <summary>Counts the tokens the card will take, exactly when a model is loaded, roughly otherwise.</summary>
+    private async void Measure()
+    {
+        // Fire-and-forget, so nothing may escape: any failure just leaves an estimate (or nothing) on screen.
+        try
+        {
+            var version = ++_measureVersion;
+            var text = CharacterPrompt.Build(_c, null) + "\n" + _c.FirstMessage;
+            (_tokens, _exactTokens) = (text.Length / 4, false);
+            if (Engine.IsReady)
+            {
+                try
+                {
+                    var count = await Engine.CountTokensAsync(text);
+                    if (version != _measureVersion) return;
+                    (_tokens, _exactTokens) = (count, true);
+                }
+                catch (Exception)
+                {
+                    // Keep the estimate.
+                }
+            }
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private async Task PickPictureAsync()
+    {
+        _error = null;
+        var path = await Desktop.PickImageFileAsync();
+        if (path is null) return;
+        try
+        {
+            if (new FileInfo(path).Length > CharacterCard.MaxFileBytes) throw new InvalidOperationException("That picture is too large.");
+            (_c.Image, _c.Avatar) = await Desktop.PreparePictureAsync(await File.ReadAllBytesAsync(path));
+            _pictureStamp = DateTime.UtcNow;
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private void RemovePicture()
+    {
+        _c.Image = null;
+        _c.Avatar = null;
+        _pictureStamp = DateTime.UtcNow;
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _c.Name = _c.Name.Trim();
+        if (_c.Name.Length == 0)
+        {
+            _error = "Give the character a name.";
+            return;
+        }
+        _c.Tags = _tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        _c.AlternateGreetings = _c.AlternateGreetings.Where(g => !string.IsNullOrWhiteSpace(g)).ToList();
+        _c.PresetId = _presetId == SamplerPresets.DefaultId ? null : _presetId;
+        _saving = true;
+        try
+        {
+            var saved = await Characters.SaveAsync(_c);
+            Nav.NavigateTo($"characters/{saved.Id}");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private RenderFragment Area(string label, string help, Func<string> get, Action<string> set, int rows, bool measure = true) => __builder =>
+    {
+        <label class="field-block">
+            <span class="field-label">@label <span class="small">@help</span></span>
+            <textarea class="field" rows="@rows" value="@get()" @onchange="e => { set(e.Value?.ToString() ?? string.Empty); if (measure) Measure(); }"></textarea>
+        </label>
+    };
+}
