@@ -1,0 +1,164 @@
+@implements IDisposable
+@inject HuggingFaceClient Hf
+@inject ModelsContext Ctx
+@inject OnlineGate Gate
+
+<div class="repo-head">
+    <a class="btn" href="models/browse">‹ Back to results</a>
+    <div class="li-text">
+        <h3 class="repo-title">@Repo</h3>
+        <div class="model-meta">@HeaderText</div>
+    </div>
+</div>
+
+@if (!Gate.IsOnline)
+{
+    <div class="notice"><span>Go online to see this model’s files.</span></div>
+}
+else if (_error is not null)
+{
+    <div class="notice bad"><span>@_error</span></div>
+}
+else if (_variants is null)
+{
+    <p class="note">Reading the file list…</p>
+}
+else if (_variants.Count == 0)
+{
+    <div class="notice"><span>This repository has no GGUF model files DOG AI can use.</span></div>
+}
+else
+{
+    @if (_best is { } pick)
+    {
+        var fit = Ctx.Fit(Shape(pick.Size));
+        <div class="notice ok">
+            <span>Best for this PC: <b>@(pick.Quant ?? pick.Name)</b>, @Sizes.Gb(pick.Size). @fit.Label@(fit.SpeedText is { Length: > 0 } s ? $", about {s.TrimStart('~')}" : "").</span>
+            <DownloadButton Repo="@Repo" Variant="pick" Primary="true" Installed="@Installed.Contains(pick.Main.Path.Split('/')[^1])" />
+        </div>
+    }
+    else
+    {
+        <div class="notice bad"><span>None of these files can run on this PC at a @Ctx.Context.ToString("N0")-token context.</span></div>
+    }
+    <h4 class="group-title">Files</h4>
+    <div class="models">
+        @foreach (var v in _variants)
+        {
+            var fit = Ctx.Fit(Shape(v.Size));
+            var best = ReferenceEquals(v, _best);
+            <div class="model has-fit @(best ? "picked" : "")">
+                <div class="li-text">
+                    <div class="model-name">@(v.Quant ?? v.Name)@if (best) {<span class="rec">Best pick</span>}</div>
+                    <div class="model-meta">@Sizes.Gb(v.Size)@(v.Parts.Count > 1 ? $" · {v.Parts.Count} parts" : "") · @v.Name</div>
+                </div>
+                <FitBadge Fit="fit" />
+                <DownloadButton Repo="@Repo" Variant="v" Primary="best" Installed="@Installed.Contains(v.Main.Path.Split('/')[^1])"
+                                TooLarge="@(fit.Kind == FitKind.TooLarge)" />
+            </div>
+        }
+    </div>
+    <p class="note">@ShapeNote</p>
+}
+
+@if (!string.IsNullOrWhiteSpace(_readme))
+{
+    <details class="card-text" open="@(_variants is { Count: 0 })">
+        <summary>Model card</summary>
+        @* Third-party text: rendered with raw HTML disabled, images shown as links. *@
+        <div class="msg-body"><MarkdownView Text="@_readme" /></div>
+    </details>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Repo { get; set; } = "";
+    [Parameter] public IReadOnlySet<string> Installed { get; set; } = new HashSet<string>();
+
+    private IReadOnlyList<ModelVariant>? _variants;
+    private ModelVariant? _best;
+    private GgufInfo? _info;
+    private string? _readme;
+    private string? _error;
+    private string? _loaded;
+
+    private string HeaderText => _info is null
+        ? "GGUF model on Hugging Face"
+        : string.Join(" · ", new[]
+        {
+            _info.Architecture,
+            _info.SizeLabel,
+            _info.ContextLength is > 0 and var c ? $"trained for {c:N0} tokens" : null,
+            _info.ExpertCount is > 1 ? "mixture of experts" : null,
+        }.Where(s => !string.IsNullOrEmpty(s)));
+
+    private string ShapeNote => _info?.KvBytesPerToken is > 0
+        ? $"Fit uses this model’s own layout, read from the first file, at a {Ctx.Context:N0}-token context."
+        : $"Fit is estimated from file sizes at a {Ctx.Context:N0}-token context; the model’s layout could not be read.";
+
+    private ModelShape Shape(long size) => _info?.ToShape(size) ?? new ModelShape { WeightBytes = size };
+
+    protected override void OnInitialized()
+    {
+        Ctx.Changed += OnContext;
+        Gate.Changed += OnGate;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loaded == Repo) return;
+        _loaded = Repo;
+        _variants = null;
+        _info = null;
+        _readme = null;
+        _best = null;
+        await LoadAsync();
+    }
+
+    private void OnContext() => InvokeAsync(() =>
+    {
+        PickBest();
+        StateHasChanged();
+    });
+
+    private void OnGate() => InvokeAsync(async () =>
+    {
+        if (Gate.IsOnline && _variants is null) await LoadAsync();
+        StateHasChanged();
+    });
+
+    private async Task LoadAsync()
+    {
+        if (!Gate.IsOnline) return;
+        _error = null;
+        var repo = Repo;
+        try
+        {
+            var readme = Hf.ReadmeAsync(repo);
+            _variants = await Ctx.VariantsAsync(repo);
+            PickBest();
+            StateHasChanged();
+            if (_variants.Count > 0)
+            {
+                // One small ranged read of the smallest file's header gives the layout all versions share.
+                var probe = _variants.OrderBy(v => v.Main.Size).First().Main.Path;
+                try { _info = await Hf.ReadHeaderAsync(repo, probe, s => GgufReader.Read(s)); }
+                catch (Exception e) when (e is HubException or HttpRequestException or InvalidDataException or IOException) { _info = null; }
+                PickBest();
+                StateHasChanged();
+            }
+            _readme = await readme;
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException)
+        {
+            if (repo == Repo) _error = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
+        }
+    }
+
+    private void PickBest() => _best = _variants is null ? null : Ctx.Best(_variants, Shape);
+
+    public void Dispose()
+    {
+        Ctx.Changed -= OnContext;
+        Gate.Changed -= OnGate;
+    }
+}

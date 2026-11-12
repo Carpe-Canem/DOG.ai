@@ -1,10 +1,238 @@
 @page "/models"
+@page "/models/{Tab}"
+@implements IDisposable
+@inject OnlineGate Gate
+@inject OnlineSession Session
+@inject ModelsContext Ctx
+@inject DownloadManager Downloads
+@inject EngineUpdater Updater
+@inject EngineManager Engine
+@inject ISettingsStore SettingsStore
+@inject HfToken Token
+@inject NavigationManager Nav
 
 <SectionContent SectionName="title">
-    <h2>Models</h2>
-    <p>Browse, download and manage local models</p>
+    <div class="head-row">
+        <div class="head-text">
+            <h2>Models</h2>
+            <p>@Subtitle</p>
+        </div>
+        <div class="online-switch">
+            <span class="offline @(Gate.IsOnline ? "on" : "")"><i class="dot"></i>@(Gate.IsOnline ? "Online" : "Offline")</span>
+            @if (Gate.IsOnline)
+            {
+                <button class="btn" @onclick="() => Session.SetWanted(false)">Go offline</button>
+            }
+            else
+            {
+                <button class="btn primary" @onclick="() => Session.SetWanted(true)">Go online</button>
+            }
+        </div>
+    </div>
 </SectionContent>
 
-<EmptyState IconName="models" Title="The model browser isn't built yet">
-    This will be the only part of DOG AI that goes online: browsing Hugging Face and downloading models that fit your PC. Planned for milestone 2.
-</EmptyState>
+<SectionContent SectionName="list">
+    <div class="list-head"><h3>Models</h3></div>
+    @foreach (var (id, title, sub) in Tabs)
+    {
+        <a class="li @(id == Current ? "active" : "")" href="@(id == "recommended" ? "models" : $"models/{id}")" aria-current="@(id == Current ? "page" : null)">
+            <span class="li-text">
+                <span class="li-title">@title</span>
+                <span class="li-sub">@sub</span>
+            </span>
+        </a>
+    }
+</SectionContent>
+
+@switch (Current)
+{
+    case "browse" when Repo is { Length: > 0 } repo:
+        <RepoView Repo="@repo" Installed="_installed" />
+        break;
+    case "browse":
+        <BrowseTab />
+        break;
+    case "library":
+        <LibraryTab Changed="ScanAsync" />
+        break;
+    case "downloads":
+        <DownloadsTab />
+        break;
+    case "engine":
+        <EngineTab />
+        break;
+    default:
+        <div class="hw">@foreach (var chip in HardwareChips) {<span class="chip">@chip</span>}</div>
+        <RecommendedTab Installed="_installed" />
+        break;
+}
+
+<SectionContent SectionName="aside">
+    <div class="panel">
+        <h4>Your hardware</h4>
+        @if (!Ctx.Measured)
+        {
+            <div class="small">Measuring…</div>
+        }
+        else
+        {
+            var hw = Ctx.Hardware;
+            <div class="kv"><span>GPU</span><span>@(hw.MainGpu?.Name.Replace("NVIDIA GeForce ", "") ?? "None found")</span></div>
+            <div class="kv"><span>CPU</span><span>@(hw.CpuName ?? "Unknown") (@hw.CpuThreads threads)</span></div>
+            <div class="kv"><span>RAM</span><span>@Sizes.Gb(hw.RamTotalBytes) · @Sizes.Gb(hw.RamFreeBytes) free</span></div>
+            @foreach (var d in hw.Drives)
+            {
+                <div class="kv"><span>Drive @d.Name</span><span>@Sizes.Gb(d.FreeBytes) free</span></div>
+            }
+        }
+    </div>
+    @if (Ctx.Hardware.MainGpu is { } gpu)
+    {
+        var used = gpu.TotalBytes - gpu.FreeBytes;
+        <div class="panel">
+            <h4>Graphics memory</h4>
+            <div class="meter full-w"><i style="width:@Pct(used, gpu.TotalBytes)%"></i></div>
+            <div class="small">@Sizes.Gb(used) of @Sizes.Gb(gpu.TotalBytes) in use@(Ctx.EngineVram > 0 ? $", {Sizes.Gb(Ctx.EngineVram)} by the loaded model" : "")</div>
+            <div class="row"><button class="btn" @onclick="Ctx.RefreshAsync">Measure again</button></div>
+        </div>
+    }
+    <div class="panel">
+        <h4>How fit is judged</h4>
+        <label class="inline">
+            <span>Context</span>
+            <select class="field" value="@Ctx.Context" @onchange="SetContextAsync">
+                @foreach (var size in ModelsContext.ContextSizes)
+                {
+                    <option value="@size">@int.Parse(size).ToString("N0") tokens</option>
+                }
+            </select>
+        </label>
+        <div class="small">File size plus the memory a @Ctx.Context.ToString("N0")-token conversation needs, compared with free graphics memory. Bigger contexts need more. This is also the context models load with.</div>
+    </div>
+    <div class="panel">
+        <h4>Connection</h4>
+        <div class="small">This is the only section that goes online, and only to Hugging Face and GitHub. Leaving it goes offline again, unless a download is still running.</div>
+    </div>
+    <div class="panel">
+        <h4>Hugging Face token</h4>
+        @if (Token.IsSet)
+        {
+            <div class="small">A token is saved, encrypted for your Windows account. It is sent only to Hugging Face.</div>
+            <div class="row"><button class="btn" @onclick="() => SaveTokenAsync(null)">Remove token</button></div>
+        }
+        else
+        {
+            <div class="small">Only needed for gated models. Accept the model’s terms on huggingface.co, create a read token there, and paste it here.</div>
+            <form class="row" @onsubmit="() => SaveTokenAsync(_tokenInput)">
+                <input class="field" type="password" autocomplete="off" placeholder="hf_…" @bind="_tokenInput" aria-label="Hugging Face token" />
+                <button class="btn" type="submit" disabled="@string.IsNullOrWhiteSpace(_tokenInput)">Save</button>
+            </form>
+        }
+    </div>
+</SectionContent>
+
+@code {
+    [Parameter] public string? Tab { get; set; }
+    [SupplyParameterFromQuery(Name = "repo")] public string? Repo { get; set; }
+
+    private IReadOnlySet<string> _installed = new HashSet<string>();
+    private int _libraryCount;
+    private long _librarySize;
+    private string? _tokenInput;
+
+    private string Current => Tab ?? "recommended";
+
+    private string Subtitle => Current switch
+    {
+        "browse" => "Search Hugging Face for GGUF models",
+        "library" => "Models on this PC",
+        "downloads" => "Downloads in progress and finished",
+        "engine" => "The program that runs models",
+        _ => "Recommended for your PC",
+    };
+
+    private IEnumerable<(string, string, string)> Tabs =>
+    [
+        ("recommended", "Recommended", "Picked for your hardware"),
+        ("browse", "Browse Hugging Face", "Search all GGUF models"),
+        ("library", "Library", $"{_libraryCount} installed · {Sizes.Gb(_librarySize)}"),
+        ("downloads", "Downloads", DownloadsSub),
+        ("engine", "Engine", Updater.InstalledTag is { } tag ? $"llama.cpp {tag}" : "llama.cpp"),
+    ];
+
+    private string DownloadsSub
+    {
+        get
+        {
+            var jobs = Downloads.Jobs;
+            var active = jobs.Count(j => j.IsActive || j.Status == DownloadStatus.Queued);
+            return active > 0 ? $"{active} active" : jobs.Any(j => j.Status == DownloadStatus.Paused) ? "Paused" : "None active";
+        }
+    }
+
+    private IEnumerable<string> HardwareChips
+    {
+        get
+        {
+            var hw = Ctx.Hardware;
+            if (!Ctx.Measured) yield break;
+            if (hw.MainGpu is { } gpu)
+            {
+                yield return gpu.Name.Replace("NVIDIA GeForce ", "");
+                yield return $"{Sizes.Gb(gpu.TotalBytes)} VRAM · {Sizes.Gb(gpu.FreeBytes + Ctx.EngineVram)} free";
+            }
+            else yield return "No graphics card found: models run on the processor";
+            yield return $"{Sizes.Gb(hw.RamTotalBytes)} RAM";
+            foreach (var d in hw.Drives) yield return $"{d.Name} {Sizes.Gb(d.FreeBytes)} free";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.EnterModels();
+        Gate.Changed += Refresh;
+        Ctx.Changed += Refresh;
+        Downloads.Changed += Refresh;
+        Downloads.Completed += OnCompleted;
+        await Ctx.RefreshAsync();
+        await ScanAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    private void OnCompleted(DownloadJob job) => InvokeAsync(ScanAsync);
+
+    private async Task ScanAsync()
+    {
+        var settings = await SettingsStore.LoadAsync();
+        var folders = new[] { settings.ModelsDirectory }.Concat(settings.ExtraModelFolders);
+        var files = await Task.Run(() => ModelLibrary.ScanAll(folders));
+        _installed = files.SelectMany(f => f.Parts).Select(Path.GetFileName).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _libraryCount = files.Count;
+        _librarySize = files.Sum(f => f.SizeBytes);
+        StateHasChanged();
+    }
+
+    private async Task SetContextAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var size)) await Ctx.SetContextAsync(size);
+    }
+
+    private async Task SaveTokenAsync(string? token)
+    {
+        var protectedToken = Token.Set(token);
+        await SettingsStore.SaveAsync(await SettingsStore.LoadAsync() with { HfTokenProtected = protectedToken });
+        _tokenInput = null;
+    }
+
+    private static string Pct(long part, long whole) =>
+        (whole <= 0 ? 0 : part * 100.0 / whole).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    public void Dispose()
+    {
+        Session.LeaveModels();
+        Gate.Changed -= Refresh;
+        Ctx.Changed -= Refresh;
+        Downloads.Changed -= Refresh;
+        Downloads.Completed -= OnCompleted;
+    }
+}

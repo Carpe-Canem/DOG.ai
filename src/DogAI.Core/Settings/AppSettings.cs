@@ -49,6 +49,9 @@ public interface IDesktopShell
     /// <summary>Shows the Windows "open file" dialog for a model. Returns null if cancelled.</summary>
     Task<string?> PickModelFileAsync(string? startFolder);
 
+    /// <summary>Shows the Windows folder picker. Returns null if cancelled.</summary>
+    Task<string?> PickFolderAsync(string? startFolder);
+
     void CopyText(string text);
 }
 

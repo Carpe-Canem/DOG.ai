@@ -2,6 +2,7 @@
 @inject EngineManager Engine
 @inject ISettingsStore SettingsStore
 @inject IDesktopShell Desktop
+@inject ModelLauncher Launcher
 
 <button class="btn model-btn @(Primary ? "primary" : "")" @onclick="OpenAsync" title="Choose which model answers">
     <i class="dot @StateClass"></i><span>@ButtonText</span>
@@ -42,7 +43,7 @@
                 <div class="model">
                     <div class="li-text">
                         <div class="model-name">@model.Name</div>
-                        <div class="model-meta">@model.SizeText · @path</div>
+                        <div class="model-meta">@model.SizeText@(IsDefault(path) ? " · default for General" : "") · @path</div>
                     </div>
                     @if (current)
                     {
@@ -56,7 +57,7 @@
             }
             @if (_models.Count == 0)
             {
-                <p class="small">No model files were found in <b>@(_settings.ModelsDirectory ?? "the models folder")</b>. Pick a .gguf file from anywhere on this PC with the button below. Downloading models from inside DOG AI arrives with the Models section.</p>
+                <p class="small">No model files were found in <b>@(_settings.ModelsDirectory ?? "the models folder")</b>. Get one in the <a class="link-text" href="models" @onclick="() => _open = false">Models section</a>, or pick a .gguf file from anywhere on this PC with the button below.</p>
             }
         </div>
 
@@ -80,7 +81,7 @@
     /// <summary>Draw as the main call-to-action (used in the empty state).</summary>
     [Parameter] public bool Primary { get; set; }
 
-    private static readonly int[] ContextSizes = [4096, 8192, 16384, 32768, 65536];
+    private static readonly int[] ContextSizes = [4096, 8192, 16384, 32768, 65536, 131072];
 
     private bool _open;
     private bool _engineMissing;
@@ -111,11 +112,12 @@
     {
         _settings = await SettingsStore.LoadAsync();
         _engineMissing = Engine.FindExecutable() is null;
-        var models = await Task.Run(() => ModelLibrary.Scan(_settings.ModelsDirectory).ToList());
+        var folders = new[] { _settings.ModelsDirectory }.Concat(_settings.ExtraModelFolders);
+        var models = await Task.Run(() => ModelLibrary.ScanAll(folders).ToList());
 
         // A model picked from elsewhere last time stays on offer.
         if (_settings.LastModelPath is { } last && models.All(m => !SamePath(m.Path, last)) && File.Exists(last))
-            models.Insert(0, new ModelFile(last, GgufReader.TryRead(last)?.Name ?? Path.GetFileNameWithoutExtension(last), new FileInfo(last).Length));
+            models.Insert(0, new ModelFile(last, GgufReader.TryRead(last)?.DisplayName(last) ?? Path.GetFileNameWithoutExtension(last), new FileInfo(last).Length));
 
         _models = models;
         _open = true;
@@ -129,7 +131,7 @@
 
     private async Task LoadAsync(string path)
     {
-        await Engine.LoadAsync(path, new EngineOptions(_settings.ContextLength));
+        await Launcher.LoadAsync(path, _settings.ContextLength);
         if (Engine.State != EngineState.Ready) return;
         _settings = await SettingsStore.LoadAsync() with { LastModelPath = path };
         await SettingsStore.SaveAsync(_settings);
@@ -142,6 +144,8 @@
         _settings = await SettingsStore.LoadAsync() with { ContextLength = size };
         await SettingsStore.SaveAsync(_settings);
     }
+
+    private bool IsDefault(string path) => _settings.DefaultModels.TryGetValue("general", out var d) && SamePath(d, path);
 
     private static bool SamePath(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 }

@@ -1,0 +1,23 @@
+{
+  "updated": "2026-11-12",
+  "note": "Researched 2026-11-12 from current local-LLM guides and checked against Hugging Face (repo exists, not gated, open licence). Bigger entries suit bigger graphics cards; the app shows the ones that fit first.",
+  "picks": [
+    { "useCase": "general", "repo": "unsloth/Qwen3.8-27B-GGUF", "title": "Qwen3.8 27B", "params": 27.3, "blurb": "The strongest all-rounder that fits on a 24 GB card, with room for a long context." },
+    { "useCase": "general", "repo": "unsloth/Qwen3.6-35B-A3B-GGUF", "title": "Qwen3.6 35B-A3B", "params": 34.7, "experts": true, "blurb": "Mixture-of-experts: only about 3B parameters work per word, so it answers very quickly." },
+    { "useCase": "general", "repo": "unsloth/gemma-4-12b-it-GGUF", "title": "Gemma 4 12B", "params": 11.9, "blurb": "A capable mid-size model for 8 to 12 GB cards." },
+    { "useCase": "general", "repo": "unsloth/Qwen3.5-9B-GGUF", "title": "Qwen3.5 9B", "params": 9.0, "blurb": "Small and quick; a good first model for modest hardware." },
+    { "useCase": "general", "repo": "unsloth/Qwen3.5-4B-GGUF", "title": "Qwen3.5 4B", "params": 4.2, "blurb": "Runs on almost anything, including without a graphics card." },
+
+    { "useCase": "characters", "repo": "unsloth/gemma-4-31B-it-GGUF", "title": "Gemma 4 31B", "params": 30.7, "blurb": "The best prose and character voice among open models of this size." },
+    { "useCase": "characters", "repo": "unsloth/gemma-4-26B-A4B-it-GGUF", "title": "Gemma 4 26B-A4B", "params": 25.2, "experts": true, "blurb": "Gemma's writing style at mixture-of-experts speed." },
+    { "useCase": "characters", "repo": "unsloth/gemma-4-12b-it-GGUF", "title": "Gemma 4 12B", "params": 11.9, "blurb": "Good character chat on mid-range cards." },
+    { "useCase": "characters", "repo": "unsloth/Qwen3.5-9B-GGUF", "title": "Qwen3.5 9B", "params": 9.0, "blurb": "A light option for 8 GB cards." },
+
+    { "useCase": "story", "repo": "unsloth/gemma-4-31B-it-GGUF", "title": "Gemma 4 31B", "params": 30.7, "blurb": "Rich, varied prose for long stories." },
+    { "useCase": "story", "repo": "unsloth/Qwen3.8-27B-GGUF", "title": "Qwen3.8 27B", "params": 27.3, "blurb": "Keeps plots and facts straight over long contexts; good for interactive stories." },
+    { "useCase": "story", "repo": "unsloth/gemma-4-26B-A4B-it-GGUF", "title": "Gemma 4 26B-A4B", "params": 25.2, "experts": true, "blurb": "Fast storytelling with a large context." },
+    { "useCase": "story", "repo": "unsloth/gemma-4-12b-it-GGUF", "title": "Gemma 4 12B", "params": 11.9, "blurb": "Story writing on mid-range cards." },
+
+    { "useCase": "embedding", "repo": "Qwen/Qwen3-Embedding-0.6B-GGUF", "title": "Qwen3 Embedding 0.6B", "params": 0.6, "blurb": "Finds relevant passages for chat with documents (milestone 5). Small, multilingual, Apache 2.0." }
+  ]
+}

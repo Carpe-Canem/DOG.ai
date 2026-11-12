@@ -125,6 +125,15 @@ public class MarkdownRendererTests
         string.Concat(MarkdownRenderer.Render(markdown).Select(s => s.Html ?? $"[code:{s.Language}:{s.Code}]"));
 
     [Fact]
+    public void Images_become_links_so_nothing_remote_loads()
+    {
+        var html = Html("![banner](https://example.com/b.png) and ![](https://example.com/c.png)");
+        Assert.DoesNotContain("<img", html);
+        Assert.Contains("<a href=\"https://example.com/b.png\">banner</a>", html);
+        Assert.Contains(">image</a>", html);
+    }
+
+    [Fact]
     public void Renders_ordinary_markdown()
     {
         var html = Html("# Title\n\nSome **bold** text.\n\n| a | b |\n|---|---|\n| 1 | 2 |");

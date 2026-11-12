@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\DogAI.Core\DogAI.Core.csproj" />
     <ProjectReference Include="..\DogAI.Engine\DogAI.Engine.csproj" />
+    <ProjectReference Include="..\DogAI.Hub\DogAI.Hub.csproj" />
   </ItemGroup>
 
 </Project>

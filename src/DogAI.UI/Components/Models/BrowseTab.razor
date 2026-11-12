@@ -1,0 +1,99 @@
+@implements IDisposable
+@inject HuggingFaceClient Hf
+@inject OnlineGate Gate
+@inject NavigationManager Nav
+
+@if (!Gate.IsOnline)
+{
+    <EmptyState IconName="models" Title="Go online to browse">
+        Searching Hugging Face needs the internet. Use “Go online” at the top of this page; DOG AI goes offline again when you leave the Models section.
+    </EmptyState>
+}
+else
+{
+    <form class="search-row" @onsubmit="SearchAsync">
+        <input class="field" type="search" placeholder="Search GGUF models, e.g. gemma or qwen 27b" @bind="_query" aria-label="Search" />
+        <select class="field" @bind="_sort" @bind:after="SearchAsync" aria-label="Sort by">
+            <option value="@HfSort.Trending">Trending</option>
+            <option value="@HfSort.Downloads">Most downloaded</option>
+            <option value="@HfSort.Recent">Recently updated</option>
+            <option value="@HfSort.Likes">Most liked</option>
+        </select>
+        <button class="btn primary" type="submit">Search</button>
+    </form>
+
+    @if (_error is not null)
+    {
+        <div class="notice bad"><span>@_error</span></div>
+    }
+    else if (_busy && _results.Count == 0)
+    {
+        <p class="note">Searching…</p>
+    }
+    else if (_searched && _results.Count == 0)
+    {
+        <p class="note">Nothing matched. Try fewer words.</p>
+    }
+
+    <div class="models">
+        @foreach (var repo in _results)
+        {
+            <a class="model link" href="@($"models/browse?repo={Uri.EscapeDataString(repo.Id)}")">
+                <div class="li-text">
+                    <div class="model-name">@repo.Name @if (repo.Gated) {<span class="chip">Gated</span>}</div>
+                    <div class="model-meta">@repo.Author · @Count(repo.Downloads) downloads · @repo.Likes likes@(repo.LastModified is { } d ? $" · updated {d:d MMM yyyy}" : "")</div>
+                </div>
+                <span class="chevron" aria-hidden="true">›</span>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    private string _query = "";
+    private HfSort _sort = HfSort.Trending;
+    private IReadOnlyList<HfModelSummary> _results = [];
+    private bool _busy, _searched;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Gate.Changed += OnGate;
+        if (Gate.IsOnline) await SearchAsync();
+    }
+
+    private void OnGate() => InvokeAsync(async () =>
+    {
+        if (Gate.IsOnline && !_searched) await SearchAsync();
+        StateHasChanged();
+    });
+
+    private async Task SearchAsync()
+    {
+        if (!Gate.IsOnline) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            _results = await Hf.SearchAsync(_query, _sort);
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException)
+        {
+            _error = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
+        }
+        finally
+        {
+            _busy = false;
+            _searched = true;
+        }
+    }
+
+    public static string Count(long n) => n switch
+    {
+        >= 1_000_000 => $"{n / 1e6:0.#}M",
+        >= 1_000 => $"{n / 1e3:0.#}k",
+        _ => n.ToString(),
+    };
+
+    public void Dispose() => Gate.Changed -= OnGate;
+}

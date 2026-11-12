@@ -34,8 +34,16 @@ public static class MarkdownRenderer
         if (string.IsNullOrEmpty(markdown)) return segments;
 
         var document = Markdown.Parse(markdown, Pipeline);
-        foreach (var link in document.Descendants<LinkInline>())
+        foreach (var link in document.Descendants<LinkInline>().ToList())
+        {
             if (!IsSafeLink(link.Url)) link.Url = "#";
+            // Remote images would be blocked by the app's security policy; show them as links instead.
+            if (link.IsImage)
+            {
+                link.IsImage = false;
+                if (link.FirstChild is null) link.AppendChild(new LiteralInline("image"));
+            }
+        }
 
         var writer = new StringWriter();
         var renderer = new HtmlRenderer(writer);

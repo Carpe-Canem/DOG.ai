@@ -1,9 +1,26 @@
 @implements IDisposable
 @inject EngineManager Engine
+@inject HardwareProbe Probe
 
 <span>@Text</span>
+@if (Engine.IsReady && Engine.LastTokensPerSecond > 0)
+{
+    <span>@Engine.LastTokensPerSecond.ToString("0.0") tok/s</span>
+}
+@if (_gpu is { } gpu)
+{
+    <span>VRAM @Sizes.Gb(gpu.TotalBytes - gpu.FreeBytes) / @Sizes.Gb(gpu.TotalBytes)</span>
+}
+@if (_idleNote)
+{
+    <span>Unloaded after sitting unused</span>
+}
 
 @code {
+    private GpuInfo? _gpu;
+    private bool _idleNote;
+    private Timer? _timer;
+
     private string Text => Engine.State switch
     {
         EngineState.Loading => $"Loading {Engine.ModelName}…",
@@ -12,7 +29,42 @@
         _ => "No model loaded",
     };
 
-    protected override void OnInitialized() => Engine.Changed += Refresh;
-    private void Refresh() => InvokeAsync(StateHasChanged);
-    public void Dispose() => Engine.Changed -= Refresh;
+    protected override void OnInitialized()
+    {
+        Engine.Changed += OnEngine;
+        Engine.UnloadedForIdle += OnIdle;
+        // Graphics memory changes as models load and other programs run; a light poll keeps the readout honest.
+        _timer = new Timer(_ => _ = PollAsync(), null, TimeSpan.Zero, TimeSpan.FromSeconds(5));
+    }
+
+    private async Task PollAsync()
+    {
+        try
+        {
+            _gpu = await Probe.MainGpuAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+    }
+
+    private void OnEngine()
+    {
+        if (Engine.State != EngineState.Idle) _idleNote = false;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnIdle()
+    {
+        _idleNote = true;
+        _ = PollAsync();
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        Engine.Changed -= OnEngine;
+        Engine.UnloadedForIdle -= OnIdle;
+    }
 }

@@ -230,3 +230,27 @@ public class OnlineSessionTests
         Assert.False(gate.IsOnline);
     }
 }
+
+public class CuratedPicksTests
+{
+    [Fact]
+    public void The_shipped_list_loads_and_covers_every_use_case()
+    {
+        Assert.NotEmpty(CuratedPicks.All);
+        foreach (var useCase in CuratedPicks.UseCases)
+            Assert.Contains(CuratedPicks.All, p => p.UseCase == useCase);
+        Assert.All(CuratedPicks.All, p => Assert.Contains('/', p.Repo));
+        Assert.NotEqual("", CuratedPicks.Updated);
+    }
+
+    [Fact]
+    public void Offline_estimates_pick_a_sensible_quant_for_a_24_GB_card()
+    {
+        var pick = CuratedPicks.All.First(p => p.Repo == "unsloth/Qwen3.8-27B-GGUF");
+        var budget = new FitBudget(23 * Sizes.GiB, 24 * Sizes.GiB, 1008, 60);
+        var best = Quantization.PickBest(pick.EstimatedVariants()
+            .Select(v => (v, FitEstimator.Estimate(pick.EstimatedShape(v.Size), 8192, budget))));
+        Assert.NotNull(best);
+        Assert.InRange(best!.Bits, 4.25, 5.7);
+    }
+}

@@ -21,6 +21,15 @@ public sealed class WpfDesktopShell : IDesktopShell
             return dialog.ShowDialog(Application.Current.MainWindow) == true ? dialog.FileName : null;
         }).Task;
 
+    public Task<string?> PickFolderAsync(string? startFolder) =>
+        Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var dialog = new OpenFolderDialog { Title = "Choose a folder with model files" };
+            if (!string.IsNullOrEmpty(startFolder) && Directory.Exists(startFolder))
+                dialog.InitialDirectory = startFolder;
+            return dialog.ShowDialog(Application.Current.MainWindow) == true ? dialog.FolderName : null;
+        }).Task;
+
     public void CopyText(string text) =>
         Application.Current.Dispatcher.Invoke(() =>
         {

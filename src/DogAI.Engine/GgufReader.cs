@@ -25,6 +25,10 @@ public sealed record GgufInfo
     public int? ExpertCount { get; init; }
     public int? ExpertUsedCount { get; init; }
 
+    /// <summary>The model's own name, or the file name when the header has none or only punctuation.</summary>
+    public string DisplayName(string path) =>
+        Name is { } n && n.Any(char.IsLetterOrDigit) ? n.Trim() : System.IO.Path.GetFileNameWithoutExtension(path);
+
     /// <summary>Context cache per token of context, or null when the header lacks the numbers.</summary>
     public long? KvBytesPerToken
     {

@@ -1,0 +1,153 @@
+@implements IDisposable
+@inject EngineUpdater Updater
+@inject EngineManager Engine
+@inject ModelsContext Ctx
+@inject OnlineGate Gate
+@inject OnlineSession Session
+@inject AppPaths Paths
+
+<section class="group">
+    <h3 class="group-title">Engine in use</h3>
+    <div class="about">
+        <div class="kv"><span>Program</span><span>@(_exe ?? "Not found")</span></div>
+        <div class="kv"><span>Source</span><span>@Source</span></div>
+        @if (Updater.InstalledTag is { } tag)
+        {
+            <div class="kv"><span>DOG AI’s copy</span><span>llama.cpp @tag</span></div>
+        }
+        <div class="kv"><span>Graphics driver</span><span>@(Ctx.Hardware.DriverCuda is { } cuda ? $"NVIDIA, supports CUDA {cuda}" : "No NVIDIA driver found")</span></div>
+    </div>
+</section>
+
+<section class="group">
+    <h3 class="group-title">Updates</h3>
+    @if (!Gate.IsOnline)
+    {
+        <div class="notice"><span>Go online at the top of this page to check for a newer engine.</span></div>
+    }
+    else if (_release is null)
+    {
+        <div class="row"><button class="btn primary" disabled="@_busy" @onclick="CheckAsync">@(_busy ? "Checking…" : "Check for updates")</button></div>
+    }
+    else
+    {
+        var current = Updater.InstalledTag == _release.Tag && Updater.IsInstalled;
+        <div class="model has-fit">
+            <div class="li-text">
+                <div class="model-name">llama.cpp @_release.Tag (@_release.Flavor)</div>
+                <div class="model-meta">@Sizes.Gb(_release.TotalBytes) download@(_release.Runtime is null ? "" : ", including the CUDA runtime")@(_release.Published is { } p ? $" · released {p:d MMM yyyy}" : "")</div>
+            </div>
+            @if (_installing)
+            {
+                <div class="progress wide">
+                    <div class="meter"><i style="width:@Percent%"></i></div>
+                    <span>@_step</span>
+                </div>
+            }
+            else if (current)
+            {
+                <span class="chip">Up to date</span>
+            }
+            else
+            {
+                <button class="btn primary" @onclick="InstallAsync">@(Updater.IsInstalled ? "Update" : "Install")</button>
+            }
+        </div>
+        @if (Engine.State is EngineState.Ready or EngineState.Loading && !current && !_installing)
+        {
+            <p class="note">Installing unloads the current model first; load it again afterwards.</p>
+        }
+    }
+    @if (_message is not null)
+    {
+        <div class="notice @(_bad ? "bad" : "ok")"><span>@_message</span></div>
+    }
+</section>
+
+<p class="note">DOG AI installs the CUDA build of llama.cpp that matches your graphics driver (Vulkan on other cards) from the project’s GitHub releases, checks every file against its published checksum, and only replaces the engine once the new one is complete. It goes in @Paths.EngineDirectory.</p>
+
+@code {
+    private EngineRelease? _release;
+    private bool _busy, _installing, _bad;
+    private string? _message, _exe, _step;
+    private long _done;
+
+    private string Percent => _release is null || _release.TotalBytes == 0 ? "0"
+        : (_done * 100.0 / _release.TotalBytes).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private string Source => _exe is null ? "—"
+        : _exe.StartsWith(Paths.EngineDirectory, StringComparison.OrdinalIgnoreCase) ? "Installed by DOG AI"
+        : _exe.Contains("WinGet", StringComparison.OrdinalIgnoreCase) ? "Installed with winget (DOG AI uses it until it has its own copy)"
+        : "Found on this PC";
+
+    protected override void OnInitialized()
+    {
+        _exe = Engine.FindExecutable();
+        Gate.Changed += Refresh;
+        Ctx.Changed += Refresh;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private async Task CheckAsync()
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            _release = await Updater.LatestAsync(Ctx.Hardware.DriverCuda);
+            if (_release is null) Say("No Windows build of llama.cpp suits this PC in the latest release.", bad: true);
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException)
+        {
+            Say(e is HttpRequestException ? "Could not reach GitHub: " + e.Message : e.Message, bad: true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task InstallAsync()
+    {
+        if (_release is null) return;
+        _installing = true;
+        _message = null;
+        _done = 0;
+        _step = "Downloading…";
+        using var work = Session.BeginWork();
+        try
+        {
+            await Engine.UnloadAsync();
+            var release = _release;
+            await Task.Run(() => Updater.InstallAsync(release, n =>
+            {
+                _done = n;
+                _step = n >= release.TotalBytes ? "Unpacking…" : $"{n * 100 / Math.Max(1, release.TotalBytes)}%";
+                _ = InvokeAsync(StateHasChanged);
+            }));
+            _exe = Engine.FindExecutable();
+            Say($"llama.cpp {release.Tag} is installed. Models load with it from now on.");
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            Say("The engine was not changed: " + e.Message, bad: true);
+        }
+        finally
+        {
+            _installing = false;
+        }
+    }
+
+    private void Say(string text, bool bad = false)
+    {
+        _message = text;
+        _bad = bad;
+    }
+
+    public void Dispose()
+    {
+        Gate.Changed -= Refresh;
+        Ctx.Changed -= Refresh;
+    }
+}

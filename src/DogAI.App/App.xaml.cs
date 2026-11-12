@@ -3,6 +3,7 @@ using System.Windows;
 using DogAI.Core;
 using DogAI.Core.Appearance;
 using DogAI.Core.Chat;
+using DogAI.Core.Models;
 using DogAI.Core.Net;
 using DogAI.Engine;
 using DogAI.Core.Settings;
@@ -64,6 +65,7 @@ public partial class App : Application
 
             await _services.MigrateDogDatabaseAsync();
             await EnsureFirstRunDefaultsAsync(_services, paths);
+            await StartModelServicesAsync(_services, log);
             await _services.GetRequiredService<AppearanceState>().LoadAsync();
 
             new MainWindow(_services).Show();
@@ -84,6 +86,15 @@ public partial class App : Application
         services.AddSingleton<OnlineGate>();
         services.AddSingleton<NetworkAudit>();
         services.AddSingleton<HubHttp>();
+        services.AddSingleton<OnlineSession>();
+        services.AddSingleton<HfToken>();
+        services.AddSingleton(sp => new HuggingFaceClient(sp.GetRequiredService<HubHttp>().Client, sp.GetRequiredService<HfToken>()));
+        services.AddSingleton<DownloadManager>();
+        services.AddSingleton(sp => new EngineUpdater(sp.GetRequiredService<HubHttp>().Client, sp.GetRequiredService<AppPaths>()));
+        services.AddSingleton<HardwareProbe>();
+        services.AddSingleton<ModelLauncher>();
+        services.AddSingleton<ModelBenchmark>();
+        services.AddSingleton<DogAI.UI.ModelsContext>();
         services.AddSingleton<ISystemTheme, WindowsSystemTheme>();
         services.AddSingleton<AppearanceState>();
         services.AddSingleton<IDesktopShell, WpfDesktopShell>();
@@ -98,6 +109,24 @@ public partial class App : Application
         services.AddBlazorWebViewDeveloperTools();
 #endif
         return services.BuildServiceProvider();
+    }
+
+    private static async Task StartModelServicesAsync(IServiceProvider services, Microsoft.Extensions.Logging.ILogger log)
+    {
+        var settings = await services.GetRequiredService<ISettingsStore>().LoadAsync();
+        services.GetRequiredService<HfToken>().Load(settings.HfTokenProtected);
+        var engine = services.GetRequiredService<EngineManager>();
+        engine.IdleUnloadAfter = settings.IdleUnloadMinutes > 0 ? TimeSpan.FromMinutes(settings.IdleUnloadMinutes) : null;
+        engine.UnloadedForIdle += () => log.LogInformation("Model unloaded after {Minutes} idle minutes", settings.IdleUnloadMinutes);
+
+        var downloads = services.GetRequiredService<DownloadManager>();
+        var records = services.GetRequiredService<IModelRecordStore>();
+        downloads.Completed += job =>
+        {
+            log.LogInformation("Downloaded {Repo} {Title} to {Path}", job.Repo, job.Title, job.MainPath);
+            _ = records.SaveAsync(new ModelRecord { Path = job.MainPath, Repo = job.Repo, Quant = job.Quant, UseCase = job.UseCase });
+        };
+        await downloads.LoadAsync();
     }
 
     private static async Task EnsureFirstRunDefaultsAsync(IServiceProvider services, AppPaths paths)

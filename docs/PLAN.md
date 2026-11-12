@@ -2,14 +2,25 @@
 
 ## Status (updated 2026-11-12)
 
-- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat).
-- **Next:** M2, the Models section. Nothing in M2 is started.
+- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section).
+- **Next:** M3, Characters. Start with the two items M1 left for it (continue, editable sampler presets).
+- **What M2 delivered:** a Models section with five parts. *Recommended* shows researched picks per use case with a fit badge and the best file for this PC pre-selected. *Browse* searches Hugging Face, shows each repository's files with fit badges and the model card. *Library* lists models from the models folder and any added folders, and can load, benchmark, delete, or make one the default per mode. *Downloads* queues downloads, pauses and resumes them, checks free space first and verifies every file's SHA-256 before using it. *Engine* installs and updates DOG AI's own CUDA build of llama.cpp. The side panel shows hardware, graphics memory, the context size used for fit, and an optional Hugging Face token stored with Windows DPAPI. The status bar now shows tokens per second and graphics memory, and an unused model unloads itself after 30 minutes.
+- **How M2 behaves, decided while building it:**
+  - *Going online* is a button in the Models section, off at start. Leaving the section goes offline, unless a download or engine install is running; then it goes offline when that finishes. "Go offline" pauses running downloads.
+  - *Fit* adds the model file, the memory for the chosen context (read from the model's header where possible), and working memory, then compares with free graphics memory. Memory held by the currently loaded model counts as free, since loading another model releases it. A partial fit gives a layer count, which loading now uses instead of "all layers".
+  - *Benchmark* loads the model with the estimated layer count, steps down if loading fails, measures, and saves the layers and speed for later loads. It tunes GPU layers only; it does not change the context size.
+  - *Stable engine releases*: llama.cpp now marks numbered builds as pre-releases and publishes a stable release that names one build (b12110 on 2026-11-12). DOG AI installs that build, picking the newest CUDA version the driver supports (CUDA 13.4 here) plus its runtime.
+  - *Curated picks* are in `src/DogAI.Core/Models/curated-models.json` (researched 2026-11-12). There is no "refresh" button yet: the only allowed hosts are Hugging Face and GitHub, and there is no online copy of the list. Publishing the JSON in a GitHub repo would make it refreshable. Uncensored role-play fine-tunes were left out of the defaults; they can be found through Browse. Voice picks come with M6.
+- **Left out of M2, still owed:**
+  - Per-mode defaults are saved, but only General uses them (the model picker labels its default); Characters and Story will read them in M3 and M4.
+  - Links in model cards do not open. The confirm-then-open-in-browser prompt is still to do (planned for M7).
+  - Not tried live: a gated model with a token, partial offload of a model bigger than the card, and the 30-minute idle unload. Unit tests cover the logic.
 - **What M1 delivered:** the app starts and stops `llama-server` itself (found from winget for now), loads any GGUF from the models folder or picked by hand, and General mode has streaming chat with stop, regenerate, edit-and-branch, version switching, markdown with code copy buttons, collapsed "thinking", four style presets, per-chat instructions, a context meter with automatic trimming of old turns, and a prompt inspector. Chats are saved in SQLite as a message tree.
 - **Left out of M1 on purpose, still owed by a later milestone:**
   - "Continue" a stopped reply, and editing your own sampler presets (the four built-in ones are fixed). Best done early in M3, where characters need both.
   - Syntax colouring and LaTeX in replies (needs highlight.js and KaTeX bundled). Planned with M7 polish.
-  - Idle auto-unload, VRAM readout and GPU-layer tuning. These come with the hardware probe in M2.
-  - The winget `llama-server` is a Vulkan build. It runs on the 4090, but the CUDA build that M2's engine updater installs should be faster.
+  - ~~Idle auto-unload, VRAM readout and GPU-layer tuning.~~ Done in M2.
+  - ~~The winget `llama-server` is a Vulkan build.~~ M2's Engine tab installs the CUDA build.
 - **Decided after this plan was first written:**
   - The app ships **three switchable looks** instead of one: Workbench (default), Fireside and Playhouse, each in light and dark, chosen in Settings. See `CLAUDE.md` for how they are built. The "Console" proposal was dropped.
   - The logo and Windows icon are the **D-Dog** mark (`src/DogAI.App/Assets/icon.svg`).
@@ -136,7 +147,7 @@ Each ends with a runnable app, passing tests, and a git commit.
 | ✅ | **Design gate** | Four design proposals → three kept as switchable looks; D-Dog icon chosen |
 | M0b ✅ | Shell | Navigation, three looks with light/dark, Settings screen, placeholder mode pages, app icon |
 | M1 ✅ | Engine + General chat | Engine manager, load a GGUF from disk, streaming chat, markdown, message tree, presets, context budgeter, prompt inspector |
-| M2 | Models section | Hardware probe, HF browse, fit badges, download manager, library, curated picks, benchmark, engine updater |
+| M2 ✅ | Models section | Hardware probe, HF browse, fit badges, download manager, library, curated picks, benchmark, engine updater |
 | M3 | Characters | Card import/export, editor, personas, lorebooks, swipes, rolling-summary memory, AI card builder, group chat |
 | M4 | Story | Story Bible, authored mode, CYOA with structured choices and state, branch map, exports |
 | M5 | Documents | Embedding server, ingestion, collections, citations; vector recall added to character and story memory |

@@ -1,0 +1,113 @@
+@implements IDisposable
+@inject ModelsContext Ctx
+@inject OnlineGate Gate
+
+<div class="seg" role="radiogroup" aria-label="Use">
+    @foreach (var (id, label) in Filters)
+    {
+        var active = id == _filter;
+        <label class="@(active ? "active" : "")">
+            <input type="radio" name="usecase" value="@id" checked="@active" @onchange="() => _filter = id" />@label
+        </label>
+    }
+</div>
+
+@foreach (var useCase in CuratedPicks.UseCases.Where(u => _filter == "all" || u == _filter))
+{
+    var picks = Rows.Where(r => r.Pick.UseCase == useCase).ToList();
+    var bestIndex = picks.FindIndex(r => r.Fit?.Kind == FitKind.Full);
+    <section class="group">
+        <h3 class="group-title">@CuratedPicks.Label(useCase)</h3>
+        <div class="models">
+            @for (var i = 0; i < picks.Count; i++)
+            {
+                var row = picks[i];
+                <div class="model has-fit">
+                    <div class="li-text">
+                        <div class="model-name">@row.Pick.Title@if (i == bestIndex) {<span class="rec">Best pick</span>}</div>
+                        <div class="model-meta">@row.Pick.Blurb</div>
+                        <div class="model-meta">@Meta(row)</div>
+                    </div>
+                    <FitBadge Fit="row.Fit" />
+                    <DownloadButton Repo="@row.Pick.Repo" Variant="@(row.Real ? row.Variant : null)" UseCase="@useCase" Primary="@(i == bestIndex)"
+                                    Installed="@(row.Variant is { } v && Installed.Contains(v.Main.Path.Split('/')[^1]))"
+                                    TooLarge="@(row.Fit?.Kind == FitKind.TooLarge)" />
+                </div>
+            }
+        </div>
+    </section>
+}
+
+<p class="note">
+    Picks were researched on @CuratedPicks.Updated and checked against Hugging Face. Sizes marked ≈ are estimates until DOG AI is online and can read the real file list.
+    @if (_error is not null) { <span> Could not fetch file lists: @_error</span> }
+</p>
+
+@code {
+    /// <summary>File names of models already on disk.</summary>
+    [Parameter] public IReadOnlySet<string> Installed { get; set; } = new HashSet<string>();
+
+    private static readonly (string, string)[] Filters =
+        [("all", "All"), ("general", "General"), ("characters", "Characters"), ("story", "Story"), ("embedding", "Document search")];
+
+    private string _filter = "all";
+    private string? _error;
+
+    private sealed record Row(CuratedPick Pick, ModelVariant? Variant, FitResult? Fit, bool Real);
+
+    private IEnumerable<Row> Rows => CuratedPicks.All.Select(pick =>
+    {
+        var variants = _real.GetValueOrDefault(pick.Repo);
+        var real = variants is not null;
+        variants ??= pick.EstimatedVariants();
+        var best = Ctx.Best(variants, pick.EstimatedShape);
+        var fit = best is null
+            ? Ctx.Fit(pick.EstimatedShape(variants.Min(v => v.Size)))
+            : Ctx.Fit(pick.EstimatedShape(best.Size));
+        return new Row(pick, best, fit, real);
+    });
+
+    private readonly Dictionary<string, IReadOnlyList<ModelVariant>> _real = new(StringComparer.OrdinalIgnoreCase);
+
+    private static string Meta(Row row)
+    {
+        if (row.Variant is null) return "No version of this model can run on this PC.";
+        var size = row.Real ? Sizes.Gb(row.Variant.Size) : "≈" + Sizes.Gb(row.Variant.Size);
+        return $"{row.Variant.Quant} · {size}";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Ctx.Changed += Refresh;
+        Gate.Changed += OnGate;
+        await FetchAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    private void OnGate() => InvokeAsync(FetchAsync);
+
+    private async Task FetchAsync()
+    {
+        if (!Gate.IsOnline) return;
+        _error = null;
+        var repos = CuratedPicks.All.Select(p => p.Repo).Distinct(StringComparer.OrdinalIgnoreCase).Where(r => !_real.ContainsKey(r));
+        await Task.WhenAll(repos.Select(async repo =>
+        {
+            try
+            {
+                _real[repo] = await Ctx.VariantsAsync(repo);
+            }
+            catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException)
+            {
+                _error = e.Message;
+            }
+        }));
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        Ctx.Changed -= Refresh;
+        Gate.Changed -= OnGate;
+    }
+}

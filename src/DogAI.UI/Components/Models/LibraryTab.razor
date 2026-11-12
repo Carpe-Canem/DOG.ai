@@ -1,0 +1,268 @@
+@implements IDisposable
+@inject ModelsContext Ctx
+@inject ISettingsStore SettingsStore
+@inject IModelRecordStore Records
+@inject EngineManager Engine
+@inject ModelLauncher Launcher
+@inject ModelBenchmark Bench
+@inject IDesktopShell Desktop
+
+<section class="group">
+    <h3 class="group-title">Folders</h3>
+    <div class="models">
+        @foreach (var folder in Folders)
+        {
+            var f = folder;
+            var main = string.Equals(f, _settings.ModelsDirectory, StringComparison.OrdinalIgnoreCase);
+            <div class="model">
+                <div class="li-text">
+                    <div class="model-name">@f</div>
+                    <div class="model-meta">@(main ? "Downloads go here" : "Added folder")@(Directory.Exists(f) ? "" : " · not found")</div>
+                </div>
+                @if (!main)
+                {
+                    <button class="btn" @onclick="() => RemoveFolderAsync(f)">Remove</button>
+                }
+            </div>
+        }
+    </div>
+    <div class="row"><button class="btn" @onclick="AddFolderAsync">Add a folder…</button></div>
+</section>
+
+@if (_status is not null)
+{
+    <div class="notice @(_statusBad ? "bad" : "ok")"><span>@_status</span></div>
+}
+
+<section class="group">
+    <h3 class="group-title">Installed models</h3>
+    @if (_models is null)
+    {
+        <p class="note">Looking for model files…</p>
+    }
+    else if (_models.Count == 0)
+    {
+        <p class="note">No .gguf files in these folders yet. Download one from Recommended or Browse, or add a folder that already has some.</p>
+    }
+    <div class="models">
+        @foreach (var item in _models ?? [])
+        {
+            var m = item;
+            var record = Record(m.File.Path);
+            var loaded = Same(Engine.ModelPath, m.File.Path) && Engine.State is EngineState.Ready or EngineState.Loading;
+            <div class="model has-fit lib">
+                <div class="li-text">
+                    <div class="model-name">@(m.Info?.DisplayName(m.File.Path) ?? m.File.Name)@if (loaded) {<span class="rec">Loaded</span>}</div>
+                    <div class="model-meta">@Describe(m)</div>
+                    <div class="model-meta path">@m.File.Path</div>
+                    @if (record?.BenchTokensPerSecond is > 0 and var tps)
+                    {
+                        <div class="model-meta">Measured @tps.ToString("0") tok/s writing, @((record.BenchReadPerSecond ?? 0).ToString("N0")) tok/s reading@(record.TunedGpuLayers is >= 0 and var l ? $", {l} layers on the graphics card" : "")</div>
+                    }
+                    @if (DefaultsFor(m.File.Path) is { Length: > 0 } defaults)
+                    {
+                        <div class="chips">@foreach (var d in defaults) {<span class="chip">Default for @CuratedPicks.Label(d)</span>}</div>
+                    }
+                </div>
+                <FitBadge Fit="m.Fit" MeasuredTokensPerSecond="record?.BenchTokensPerSecond" />
+                <div class="actions">
+                    <button class="btn" disabled="@(Busy || loaded)" @onclick="() => LoadAsync(m.File)">Load</button>
+                    <button class="btn" disabled="@Busy" @onclick="() => BenchmarkAsync(m.File)">Benchmark</button>
+                    <select class="field" aria-label="Make default for" value="" @onchange="e => SetDefaultAsync(m.File.Path, e.Value?.ToString())">
+                        <option value="">Default for…</option>
+                        @foreach (var mode in new[] { "general", "characters", "story" })
+                        {
+                            <option value="@mode">@CuratedPicks.Label(mode)</option>
+                        }
+                    </select>
+                    <button class="btn danger" disabled="@Busy" @onclick="() => _confirmDelete = m.File">Delete</button>
+                </div>
+            </div>
+        }
+    </div>
+</section>
+
+@if (_confirmDelete is { } doomed)
+{
+    <Modal Title="Delete this model?" OnClose="() => _confirmDelete = null">
+        <p>This permanently deletes <b>@doomed.Name</b> (@doomed.SizeText@(doomed.Parts.Count > 1 ? $", {doomed.Parts.Count} files" : "")) from <b>@Path.GetDirectoryName(doomed.Path)</b>. It does not go to the Recycle Bin. You can download it again later.</p>
+        <div class="modal-foot">
+            <span></span>
+            <div class="row">
+                <button class="btn" @onclick="() => _confirmDelete = null">Keep it</button>
+                <button class="btn danger" @onclick="DeleteAsync">Delete</button>
+            </div>
+        </div>
+    </Modal>
+}
+
+@code {
+    /// <summary>Raised after the library changes, so the page can refresh its counts.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private sealed record Item(ModelFile File, GgufInfo? Info, FitResult? Fit);
+
+    private AppSettings _settings = new();
+    private List<Item>? _models;
+    private IReadOnlyList<ModelRecord> _records = [];
+    private ModelFile? _confirmDelete;
+    private string? _status;
+    private bool _statusBad;
+    private bool _working;
+
+    private bool Busy => _working || Bench.IsRunning || Engine.State == EngineState.Loading;
+
+    private IEnumerable<string> Folders =>
+        new[] { _settings.ModelsDirectory }.Concat(_settings.ExtraModelFolders).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Engine.Changed += Refresh;
+        Ctx.Changed += OnContext;
+        await ScanAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    private void OnContext() => InvokeAsync(ScanAsync);
+
+    private async Task ScanAsync()
+    {
+        _settings = await SettingsStore.LoadAsync();
+        _records = await Records.AllAsync();
+        var folders = Folders.ToList();
+        var budget = Ctx;
+        _models = await Task.Run(() => ModelLibrary.ScanAll(folders).Select(f =>
+        {
+            var info = GgufReader.TryRead(f.Path);
+            return new Item(f, info, info is null ? null : budget.Fit(info.ToShape(f.SizeBytes)));
+        }).ToList());
+        StateHasChanged();
+    }
+
+    private ModelRecord? Record(string path) =>
+        _records.FirstOrDefault(r => Same(r.Path, Path.GetFullPath(path)));
+
+    private string[] DefaultsFor(string path) =>
+        _settings.DefaultModels.Where(kv => Same(kv.Value, path)).Select(kv => kv.Key).ToArray();
+
+    private static string Describe(Item m) => string.Join(" · ", new[]
+    {
+        m.File.Quant,
+        m.File.SizeText,
+        m.Info?.Architecture,
+        m.Info?.ContextLength is > 0 and var c ? $"trained for {c:N0} tokens" : null,
+        m.Info is null ? "header could not be read" : null,
+    }.Where(s => !string.IsNullOrEmpty(s)));
+
+    private async Task AddFolderAsync()
+    {
+        var folder = await Desktop.PickFolderAsync(_settings.ModelsDirectory);
+        if (folder is null || Folders.Contains(folder, StringComparer.OrdinalIgnoreCase)) return;
+        _settings = await SettingsStore.LoadAsync() with { ExtraModelFolders = [.. _settings.ExtraModelFolders, folder] };
+        await SettingsStore.SaveAsync(_settings);
+        await ScanAsync();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task RemoveFolderAsync(string folder)
+    {
+        _settings = await SettingsStore.LoadAsync();
+        _settings = _settings with { ExtraModelFolders = _settings.ExtraModelFolders.Where(f => !Same(f, folder)).ToList() };
+        await SettingsStore.SaveAsync(_settings);
+        await ScanAsync();
+        await Changed.InvokeAsync();
+    }
+
+    private async Task SetDefaultAsync(string path, string? mode)
+    {
+        if (string.IsNullOrEmpty(mode)) return;
+        _settings = await SettingsStore.LoadAsync();
+        var defaults = new Dictionary<string, string>(_settings.DefaultModels) { [mode] = path };
+        _settings = _settings with { DefaultModels = defaults };
+        await SettingsStore.SaveAsync(_settings);
+        Say($"{Path.GetFileNameWithoutExtension(path)} is now the default model for {CuratedPicks.Label(mode)}.");
+    }
+
+    private async Task LoadAsync(ModelFile file)
+    {
+        _working = true;
+        Say($"Loading {file.Name}…");
+        try
+        {
+            await Launcher.LoadAsync(file.Path, Ctx.Context);
+            if (Engine.IsReady)
+            {
+                await SettingsStore.SaveAsync(await SettingsStore.LoadAsync() with { LastModelPath = file.Path });
+                Say($"{file.Name} is loaded with a {Engine.ContextLength:N0}-token context.");
+            }
+            else Say(Engine.Error ?? "The model could not be loaded.", bad: true);
+        }
+        finally
+        {
+            _working = false;
+        }
+        await Ctx.RefreshAsync();
+    }
+
+    private async Task BenchmarkAsync(ModelFile file)
+    {
+        _working = true;
+        try
+        {
+            var result = await Bench.RunAsync(file, Ctx.Context, s => InvokeAsync(() => Say(s)));
+            Say($"{file.Name}: {result.TokensPerSecond:0} tokens per second writing, {result.ReadPerSecond:N0} reading" +
+                (result.GpuLayers >= 0 ? $", with {result.GpuLayers} layers on the graphics card." : ", fully on the graphics card.") +
+                " These settings are used next time it loads.");
+            _records = await Records.AllAsync();
+        }
+        catch (EngineException e)
+        {
+            Say("The benchmark failed: " + e.Message, bad: true);
+        }
+        finally
+        {
+            _working = false;
+        }
+        await Ctx.RefreshAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_confirmDelete is not { } file) return;
+        _confirmDelete = null;
+        if (Same(Engine.ModelPath, file.Path)) await Engine.UnloadAsync();
+        try
+        {
+            foreach (var part in file.Parts) File.Delete(part);
+            await Records.DeleteAsync(file.Path);
+            _settings = await SettingsStore.LoadAsync();
+            if (_settings.DefaultModels.Values.Any(v => Same(v, file.Path)))
+            {
+                _settings = _settings with { DefaultModels = _settings.DefaultModels.Where(kv => !Same(kv.Value, file.Path)).ToDictionary() };
+                await SettingsStore.SaveAsync(_settings);
+            }
+            Say($"Deleted {file.Name}.");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Say("Could not delete it: " + e.Message, bad: true);
+        }
+        await ScanAsync();
+        await Changed.InvokeAsync();
+    }
+
+    private void Say(string text, bool bad = false)
+    {
+        _status = text;
+        _statusBad = bad;
+        StateHasChanged();
+    }
+
+    private static bool Same(string? a, string? b) => a is not null && b is not null && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    public void Dispose()
+    {
+        Engine.Changed -= Refresh;
+        Ctx.Changed -= OnContext;
+    }
+}

@@ -1,0 +1,108 @@
+@implements IDisposable
+@inject DownloadManager Downloads
+@inject OnlineGate Gate
+@inject ISettingsStore SettingsStore
+
+@* Download control for one variant: shows progress if it is already queued, "Installed" if it is on disk. *@
+@if (Job is { } job && job.Status != DownloadStatus.Done)
+{
+    <div class="progress" title="@StatusText(job)">
+        <div class="meter"><i style="width:@((job.Fraction * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
+        <span>@StatusText(job)</span>
+    </div>
+}
+else if (Installed || Job?.Status == DownloadStatus.Done)
+{
+    <span class="chip">Installed</span>
+}
+else
+{
+    <button class="btn @(Primary ? "primary" : "")" disabled="@(!Gate.IsOnline || Variant is null || TooLarge)"
+            title="@(Gate.IsOnline ? "" : "Go online to download")" @onclick="StartAsync">Download</button>
+}
+@if (_error is not null)
+{
+    <div class="notice bad span-all"><span>@_error</span></div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Repo { get; set; } = "";
+    [Parameter, EditorRequired] public ModelVariant? Variant { get; set; }
+    [Parameter] public string? UseCase { get; set; }
+    [Parameter] public bool Primary { get; set; }
+    [Parameter] public bool Installed { get; set; }
+    [Parameter] public bool TooLarge { get; set; }
+
+    private string? _error;
+
+    private DownloadJob? Job => Variant is null ? null
+        : Downloads.Jobs.LastOrDefault(j => j.Repo.Equals(Repo, StringComparison.OrdinalIgnoreCase) &&
+                                            j.Parts[0].FileName.Equals(FileName(Variant.Main.Path), StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnInitialized()
+    {
+        Downloads.Changed += Refresh;
+        Gate.Changed += Refresh;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Downloads.Changed -= Refresh;
+        Gate.Changed -= Refresh;
+    }
+
+    private async Task StartAsync()
+    {
+        if (Variant is null) return;
+        _error = null;
+        var settings = await SettingsStore.LoadAsync();
+        if (string.IsNullOrWhiteSpace(settings.ModelsDirectory))
+        {
+            _error = "No models folder is set.";
+            return;
+        }
+        var folder = Path.Combine(settings.ModelsDirectory, SafeName(Repo.Split('/')[^1]));
+        try
+        {
+            await Downloads.EnqueueAsync(new DownloadJob
+            {
+                Repo = Repo,
+                Title = Variant.Name,
+                Quant = Variant.Quant,
+                UseCase = UseCase,
+                Folder = folder,
+                Parts = Variant.Parts.Select(p => new DownloadPart
+                {
+                    Url = HuggingFaceClient.ResolveUrl(Repo, p.Path),
+                    FileName = FileName(p.Path),
+                    Size = p.Size,
+                    Sha256 = p.Sha256,
+                }).ToList(),
+            });
+        }
+        catch (Exception e) when (e is DownloadRefusedException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+    }
+
+    public static string StatusText(DownloadJob job) => job.Status switch
+    {
+        DownloadStatus.Queued => "Waiting",
+        DownloadStatus.Running => $"{job.Fraction:P0}" + (job.Remaining is { } left ? $" · {Left(left)} left" : ""),
+        DownloadStatus.Verifying => "Checking file…",
+        DownloadStatus.Paused => $"Paused at {job.Fraction:P0}",
+        DownloadStatus.Failed => "Failed",
+        _ => "Done",
+    };
+
+    public static string Left(TimeSpan t) =>
+        t.TotalHours >= 1 ? $"{(int)t.TotalHours} h {t.Minutes} min" : t.TotalMinutes >= 1 ? $"{(int)Math.Ceiling(t.TotalMinutes)} min" : "under a minute";
+
+    private static string FileName(string path) => path.Split('/')[^1];
+
+    private static string SafeName(string name) =>
+        string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+}

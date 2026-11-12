@@ -1,0 +1,86 @@
+@implements IDisposable
+@inject DownloadManager Downloads
+@inject OnlineGate Gate
+
+@if (Downloads.Jobs.Count == 0)
+{
+    <EmptyState IconName="models" Title="No downloads">
+        Models you download from Recommended or Browse appear here. Each file is checked against the checksum Hugging Face publishes before it is used.
+    </EmptyState>
+}
+else
+{
+    @if (!Gate.IsOnline && Downloads.Jobs.Any(j => j.Status is DownloadStatus.Paused or DownloadStatus.Queued))
+    {
+        <div class="notice"><span>DOG AI is offline. Go online at the top of this page to continue paused downloads.</span></div>
+    }
+    <div class="models">
+        @foreach (var job in Downloads.Jobs)
+        {
+            var j = job;
+            <div class="model has-fit">
+                <div class="li-text">
+                    <div class="model-name">@j.Title</div>
+                    <div class="model-meta">@j.Repo · @Sizes.Gb(j.TotalBytes)@(j.Parts.Count > 1 ? $" in {j.Parts.Count} parts" : "")</div>
+                    <div class="model-meta">@Line(j)</div>
+                    @if (j.Message is { Length: > 0 } message)
+                    {
+                        <div class="model-meta @(j.Status == DownloadStatus.Failed ? "bad-text" : "")">@message</div>
+                    }
+                </div>
+                <div class="progress wide">
+                    <div class="meter"><i style="width:@Percent(j)%"></i></div>
+                    <span>@DownloadButton.StatusText(j)</span>
+                </div>
+                <div class="actions">
+                    @switch (j.Status)
+                    {
+                        case DownloadStatus.Running or DownloadStatus.Queued:
+                            <button class="btn" @onclick="() => Downloads.Pause(j.Id)">Pause</button>
+                            break;
+                        case DownloadStatus.Paused or DownloadStatus.Failed:
+                            <button class="btn" disabled="@(!Gate.IsOnline)" @onclick="() => Downloads.Resume(j.Id)">@(j.Status == DownloadStatus.Failed ? "Retry" : "Resume")</button>
+                            break;
+                    }
+                    @if (j.Status != DownloadStatus.Done)
+                    {
+                        <button class="btn danger" disabled="@(j.Status == DownloadStatus.Verifying)" @onclick="() => Downloads.RemoveAsync(j.Id)">Cancel</button>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+    @if (Downloads.Jobs.Any(j => j.Status == DownloadStatus.Done))
+    {
+        <div class="row"><button class="btn" @onclick="Downloads.ClearFinishedAsync">Clear finished</button></div>
+    }
+    <p class="note">Downloads continue while you use the rest of DOG AI, and the connection closes when the last one finishes. Cancelling deletes the partial file.</p>
+}
+
+@code {
+    private static string Percent(DownloadJob j) =>
+        ((j.Status == DownloadStatus.Verifying ? 1 : j.Fraction) * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string Line(DownloadJob j) => j.Status switch
+    {
+        DownloadStatus.Running => $"{Sizes.Gb(j.BytesDone)} of {Sizes.Gb(j.TotalBytes)}" +
+                                  (j.BytesPerSecond > 0 ? $" · {j.BytesPerSecond / 1024 / 1024:0.0} MB/s" : ""),
+        DownloadStatus.Verifying => $"Checking the file: {Sizes.Gb(j.BytesVerified)} read",
+        DownloadStatus.Done => "Downloaded and checked · " + j.MainPath,
+        _ => $"{Sizes.Gb(j.BytesDone)} of {Sizes.Gb(j.TotalBytes)}",
+    };
+
+    protected override void OnInitialized()
+    {
+        Downloads.Changed += Refresh;
+        Gate.Changed += Refresh;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Downloads.Changed -= Refresh;
+        Gate.Changed -= Refresh;
+    }
+}

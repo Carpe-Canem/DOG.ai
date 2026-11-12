@@ -92,7 +92,7 @@ public sealed class EngineManager : IChatEngine, IDisposable
             StopProcess();
             var info = GgufReader.TryRead(modelPath);
             ModelPath = modelPath;
-            ModelName = string.IsNullOrWhiteSpace(info?.Name) ? Path.GetFileNameWithoutExtension(modelPath) : info.Name;
+            ModelName = info?.DisplayName(modelPath) ?? Path.GetFileNameWithoutExtension(modelPath);
             Error = null;
             Set(EngineState.Loading);
 
