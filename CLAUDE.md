@@ -107,9 +107,10 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - **Links:** `LinkGuard` (in `MainLayout`, inside the `.shell` div so it gets the theme) listens through `chat.js` `watchLinks` and asks before `IDesktopShell.OpenUrl`. Any new modal must also sit inside `.shell`.
 - **Windows extras:** `DogAI.App/WindowsIntegration` (tray icon via WinForms `NotifyIcon`, close-to-tray, the Ctrl+Alt+Space low-level hook on its own thread; text arrives through `Dictation.HeardForOtherPrograms`). Settings: `TrayIcon`, `CloseToTray`, `DictateAnywhere`, all off by default.
 - **Publish:** `dotnet publish src/DogAI.App -p:PublishProfile=win-x64` writes `publish\win-x64`. A target in `DogAI.App.csproj` drops other platforms' native files. Check a publish by running that exe: `tools/walkthrough.ps1 -Exe <path to DogAI.exe>`.
+- **Portable mode:** a `portable.txt` next to DogAI.exe (shipped only in publish output, never in Debug builds) makes `AppPaths.ForProgram` put data in `<exe folder>\data` and models in `<exe folder>\models`, forced on every start. `DOGAI_DATA_DIR` still wins (test runs). Portable runs point the process's TEMP/TMP at `data\temp` (inherited by llama-server and native libraries), and `LlamaServerLocator` uses only `data\engine` (no winget/PATH fallback; `DOGAI_LLAMA_SERVER` still wins). `PortableMove` (Data) rewrites saved paths in the Settings JSON and `ModelRecords` when the folder moved (`data\home.txt` records the last home). Any new setting or table that stores a full path must be added to `PortableMove`. Walkthrough: `tools/walkthrough.ps1 -Exe <copy>\DogAI.exe -Portable`.
 - **Tool quirk when writing code through the shell:** doubled backslashes can be collapsed and `\n` in Python strings can turn into real newlines; use the Edit/Write tools for C# or JS that contains escapes.
 
-Check every new screen in all three skins, dark and light. Say plainly what was and was not looked at. Never point a test run at the real data folder (`%LOCALAPPDATA%\DOG-AI`).
+Check every new screen in all three skins, dark and light. Say plainly what was and was not looked at. Never point a test run at the real data folder (`%LOCALAPPDATA%\DOG-AI`), and never run a portable walkthrough from the owner's real portable folder; copy `publish\win-x64` somewhere temporary first.
 
 ## Machine
 

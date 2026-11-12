@@ -35,6 +35,11 @@
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
 
+  <!-- A published copy is portable: this marker keeps all data next to DogAI.exe. Debug and test builds leave it out. -->
+  <ItemGroup>
+    <None Include="portable.txt" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!--
     The voice packages (Whisper.net) ship native libraries for every platform. A publish keeps only what this app can use: Windows
     64-bit, with the Vulkan one for the graphics card. Nothing here changes a normal build.

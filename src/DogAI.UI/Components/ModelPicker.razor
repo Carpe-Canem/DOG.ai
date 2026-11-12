@@ -3,6 +3,7 @@
 @inject ISettingsStore SettingsStore
 @inject IDesktopShell Desktop
 @inject ModelLauncher Launcher
+@inject AppPaths Paths
 
 <button class="btn model-btn @(Primary ? "primary" : "")" @onclick="OpenAsync" title="Choose which model answers">
     <i class="dot @StateClass"></i><span>@ButtonText</span>
@@ -37,7 +38,14 @@
 
         @if (_engineMissing)
         {
-            <div class="notice bad"><span>The model engine (llama-server) was not found on this PC. Install it with <code>winget install llama.cpp</code>, then try again.</span></div>
+            @if (Paths.IsPortable)
+            {
+                <div class="notice bad"><span>The model engine (llama-server) is not in DOG.ai's folder yet. Get it in <a class="link-text" href="models/engine" @onclick="() => _open = false">Models › Engine</a>, then try again.</span></div>
+            }
+            else
+            {
+                <div class="notice bad"><span>The model engine (llama-server) was not found on this PC. Install it with <code>winget install llama.cpp</code>, then try again.</span></div>
+            }
         }
 
         <div class="models">

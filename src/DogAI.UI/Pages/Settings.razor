@@ -60,6 +60,10 @@
         <h3>About this install</h3>
         <div class="about">
             <div class="kv"><span>Version</span><span>@Version</span></div>
+            @if (Paths.PortableHome is { } home)
+            {
+                <div class="kv"><span>Portable</span><span>Everything is kept in @home</span></div>
+            }
             <div class="kv"><span>Data folder</span><span>@Paths.Root</span></div>
             <div class="kv"><span>Models folder</span><span>@(_settings?.ModelsDirectory ?? "Not set")</span></div>
             <div class="kv"><span>Network</span><span>@(Gate.IsOnline ? "Online" : "Offline")</span></div>

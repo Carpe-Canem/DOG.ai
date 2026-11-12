@@ -8,6 +8,8 @@
 #   -OutDir   where screenshots are written (default: a temp folder, printed at the end)
 #   -Exe      run this DogAI.exe instead of the Debug build (for example the one in publish\win-x64)
 #   -Keep     keep the data folder, e.g. to restart and check that something persisted
+#   -Portable run the exe in portable mode (with -Exe pointing at a folder that has portable.txt): no data folder is
+#             forced, the app keeps its data in its own data\ folder, which is never deleted
 #
 # Build first: dotnet build DogAI.sln
 param(
@@ -18,15 +20,22 @@ param(
     [int]$Height = 860,
     [int]$Port = 9333,
     [string]$Exe,
-    [switch]$Keep
+    [switch]$Keep,
+    [switch]$Portable
 )
 $ErrorActionPreference = 'Stop'
 $exe = if ($Exe) { $Exe } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'src\DogAI.App\bin\Debug\net9.0-windows\DogAI.exe' }
 if (-not (Test-Path $exe)) { throw "Build the solution first; $exe does not exist." }
-$temporary = -not $DataDir
-if ($temporary) { $DataDir = Join-Path ([IO.Path]::GetTempPath()) ("dogai-run-" + [Guid]::NewGuid().ToString('N')) }
-
-$env:DOGAI_DATA_DIR = $DataDir
+if ($Portable) {
+    if (-not (Test-Path (Join-Path (Split-Path $exe -Parent) 'portable.txt'))) { throw "-Portable needs portable.txt next to $exe." }
+    $temporary = $false
+    $DataDir = Join-Path (Split-Path $exe -Parent) 'data'
+    Remove-Item Env:DOGAI_DATA_DIR -ErrorAction SilentlyContinue
+} else {
+    $temporary = -not $DataDir
+    if ($temporary) { $DataDir = Join-Path ([IO.Path]::GetTempPath()) ("dogai-run-" + [Guid]::NewGuid().ToString('N')) }
+    $env:DOGAI_DATA_DIR = $DataDir
+}
 $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=$Port"
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $app = Start-Process $exe -PassThru

@@ -4,7 +4,8 @@ namespace DogAI.Engine;
 
 /// <summary>
 /// Finds the llama-server program. Order: an explicit override, DOG.ai's own copy (installed by the
-/// Models section from milestone 2), then one already on this PC, e.g. from winget.
+/// Models section), then one already on this PC, e.g. from winget. A portable install uses only its own copy,
+/// so it never depends on anything outside its folder.
 /// </summary>
 public sealed class LlamaServerLocator(AppPaths paths)
 {
@@ -13,12 +14,20 @@ public sealed class LlamaServerLocator(AppPaths paths)
 
     public string? Find() => Candidates().FirstOrDefault(File.Exists);
 
+    /// <summary>What to tell the user when <see cref="Find"/> comes back empty.</summary>
+    public string MissingMessage => MissingText(paths.IsPortable);
+
+    public static string MissingText(bool portable) => portable
+        ? "The model engine (llama-server) is not in DOG.ai's folder yet. Get it in Models › Engine."
+        : "The model engine (llama-server) was not found on this PC. Install it with: winget install llama.cpp";
+
     private IEnumerable<string> Candidates()
     {
         if (Environment.GetEnvironmentVariable(OverrideVariable) is { Length: > 0 } explicitPath)
             yield return explicitPath;
 
         yield return Path.Combine(paths.EngineDirectory, FileName);
+        if (paths.IsPortable) yield break;
 
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var packages = Path.Combine(local, "Microsoft", "WinGet", "Packages");

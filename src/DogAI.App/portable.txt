@@ -1,0 +1,10 @@
+This file makes DOG.ai portable.
+
+While it sits next to DogAI.exe, everything DOG.ai keeps stays inside this folder:
+  data\    chats, characters, stories, documents, settings, logs, the model engine, scratch files
+  models\  downloaded models and voice models
+
+Nothing is written to your user profile or anywhere else on the PC. Move or copy the whole folder freely;
+saved paths follow it. To update DOG.ai, copy the new program files over this folder: data\ and models\ are kept.
+
+Delete this file to make DOG.ai keep its data in %LOCALAPPDATA%\DOG-AI instead.

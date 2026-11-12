@@ -98,8 +98,7 @@ public sealed class EngineManager : IChatEngine, IDisposable
 
             if (!File.Exists(modelPath)) throw new EngineException("That model file no longer exists.");
             if (info is null) throw new EngineException("That file is not a model DOG.ai can load (it is not a GGUF file).");
-            var exe = _locator.Find() ?? throw new EngineException(
-                "The model engine (llama-server) was not found on this PC. Install it with: winget install llama.cpp");
+            var exe = _locator.Find() ?? throw new EngineException(_locator.MissingMessage);
 
             var context = Math.Max(512, options.ContextLength);
             if (info.ContextLength is > 0 and var trained) context = Math.Min(context, trained);

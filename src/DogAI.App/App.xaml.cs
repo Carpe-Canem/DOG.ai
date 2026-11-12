@@ -26,9 +26,11 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        var paths = new AppPaths();
+        var paths = AppPaths.ForProgram();
         paths.EnsureCreated();
         WaitForPreviousInstance(e.Args);
+        // Portable: the engines and libraries inherit this, so their scratch files stay in the folder too.
+        paths.UseOwnTempFolder();
 
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Information()
@@ -50,10 +52,12 @@ public partial class App : Application
         {
             // A restore waiting from last time is swapped in now, before anything opens the database.
             if (DatabaseBackup.ApplyPending(paths) is { } restored) Log.Information(restored);
+            // A portable folder that was moved or copied: saved model paths follow it.
+            if (PortableMove.Apply(paths) is { } moved) Log.Information(moved);
 
             _services = BuildServices(paths);
             var log = _services.GetRequiredService<ILogger<App>>();
-            log.LogInformation("DOG.ai starting. Data folder: {Root}", paths.Root);
+            log.LogInformation("DOG.ai starting. Data folder: {Root}{Portable}", paths.Root, paths.IsPortable ? " (portable)" : "");
 
             var audit = _services.GetRequiredService<NetworkAudit>();
             audit.Recorded += entry =>
@@ -213,8 +217,15 @@ public partial class App : Application
     {
         var store = services.GetRequiredService<ISettingsStore>();
         var settings = await store.LoadAsync();
+        // Portable: the models folder is always the one inside the program's folder.
+        if (paths.IsPortable)
+        {
+            var own = paths.SuggestModelsDirectory();
+            if (!string.Equals(settings.ModelsDirectory, own, StringComparison.OrdinalIgnoreCase))
+                await store.SaveAsync(settings with { ModelsDirectory = own });
+        }
         // A restored backup can name a drive this PC does not have; fall back to a folder that exists here.
-        if (settings.ModelsDirectory is null || !DriveExists(settings.ModelsDirectory))
+        else if (settings.ModelsDirectory is null || !DriveExists(settings.ModelsDirectory))
             await store.SaveAsync(settings with { ModelsDirectory = paths.SuggestModelsDirectory() });
     }
 
