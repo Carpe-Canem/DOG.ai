@@ -1,4 +1,4 @@
-﻿namespace DogAI.Core.Settings;
+namespace DogAI.Core.Settings;
 
 /// <summary>User-level settings. Add properties with defaults; older saved settings keep loading.</summary>
 public sealed record AppSettings
@@ -54,6 +54,15 @@ public sealed record AppSettings
     /// <summary>Hands-free listening: 0 needs clear, loud speech; 1 normal; 2 picks up quiet voices.</summary>
     public int HandsFreeSensitivity { get; init; } = 1;
 
+    /// <summary>Show DOG AI's icon in the Windows notification area (tray), with Open and Quit.</summary>
+    public bool TrayIcon { get; init; }
+
+    /// <summary>Closing the window leaves DOG AI running in the tray instead of quitting. Needs <see cref="TrayIcon"/>.</summary>
+    public bool CloseToTray { get; init; }
+
+    /// <summary>Hold Ctrl+Alt+Space in any program to talk, and what you say is typed there when you let go.</summary>
+    public bool DictateAnywhere { get; init; }
+
     /// <summary>Compares lists and dictionaries by content, so two loads of the same settings are equal.</summary>
     public bool Equals(AppSettings? other) =>
         other is not null &&
@@ -63,13 +72,15 @@ public sealed record AppSettings
         SpeechModel == other.SpeechModel && SpeechLanguage == other.SpeechLanguage && Microphone == other.Microphone &&
         Speakers == other.Speakers && Voice == other.Voice && VoiceSpeed.Equals(other.VoiceSpeed) &&
         ReadRepliesAloud == other.ReadRepliesAloud && HandsFreeSensitivity == other.HandsFreeSensitivity &&
+        TrayIcon == other.TrayIcon && CloseToTray == other.CloseToTray && DictateAnywhere == other.DictateAnywhere &&
         ExtraModelFolders.SequenceEqual(other.ExtraModelFolders) &&
         DefaultModels.Count == other.DefaultModels.Count &&
         DefaultModels.All(kv => other.DefaultModels.TryGetValue(kv.Key, out var v) && v == kv.Value);
 
     public override int GetHashCode() => HashCode.Combine(
         HashCode.Combine(ModelsDirectory, Theme, Skin, ContextLength, LastModelPath, IdleUnloadMinutes),
-        HashCode.Combine(SpeechModel, SpeechLanguage, Microphone, Speakers, Voice, VoiceSpeed, ReadRepliesAloud, HandsFreeSensitivity));
+        HashCode.Combine(SpeechModel, SpeechLanguage, Microphone, Speakers, Voice, VoiceSpeed, ReadRepliesAloud, HandsFreeSensitivity),
+        HashCode.Combine(TrayIcon, CloseToTray, DictateAnywhere));
 
     /// <summary>Where voice models are kept: a "voice" folder inside the models folder.</summary>
     public string? VoiceFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, "voice");
@@ -110,6 +121,28 @@ public interface IDesktopShell
 
     /// <summary>Opens a file on this PC in the program Windows uses for it. False if it is not there any more.</summary>
     bool OpenFile(string path);
+
+    /// <summary>Shows the "save file" dialog and returns the chosen path without writing anything (for files too big to hold in memory). Null if cancelled.</summary>
+    Task<string?> PickSavePathAsync(string suggestedName, string filter);
+
+    /// <summary>Shows the "open file" dialog for one file of the kind the filter describes. Null if cancelled.</summary>
+    Task<string?> PickOpenPathAsync(string title, string filter);
+
+    /// <summary>Opens a web address in the user's own browser. Only http and https; false for anything else.</summary>
+    bool OpenUrl(string url);
+
+    /// <summary>Closes DOG AI and starts it again (used to finish a restore).</summary>
+    void Restart();
+}
+
+/// <summary>The parts of DOG AI that live in Windows itself: the tray icon, closing to the tray, and the key that works anywhere.</summary>
+public interface IWindowsIntegration
+{
+    /// <summary>Reads the saved settings and turns each part on or off. Call after changing them.</summary>
+    Task ApplyAsync();
+
+    /// <summary>Empty when everything asked for is working; otherwise what could not be turned on.</summary>
+    string? Problem { get; }
 }
 
 public interface ISettingsStore

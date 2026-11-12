@@ -12,6 +12,7 @@
     <textarea @ref="_input" rows="1" aria-label="Message" @bind="_draft" @bind:event="oninput"
               placeholder="@(Engine.IsReady ? Placeholder : "Load a model to start chatting.")"></textarea>
     <span class="voice-btns">
+        <button class="btn icon" @onclick="() => _picking = true" title="Use a saved prompt"><Icon Name="prompt" Size="18" /></button>
         <button class="btn icon @(Dict.IsOn && !Dict.HandsFree ? "on" : "")" aria-pressed="@Aria(Dict.IsOn && !Dict.HandsFree)" @onclick="ToggleMicAsync"
                 title="@(Dict.IsOn && !Dict.HandsFree ? "Done talking: write it down" : "Talk instead of typing (or hold Ctrl+Space)")"><Icon Name="mic" Size="18" /></button>
         <button class="btn icon @(Dict.HandsFree ? "on" : "")" aria-pressed="@Aria(Dict.HandsFree)" @onclick="ToggleHandsFreeAsync"
@@ -41,6 +42,10 @@
         <button class="btn primary" disabled="@(!Engine.IsReady || (!AllowEmpty && string.IsNullOrWhiteSpace(_draft)))" @onclick="SendAsync">@SendLabel</button>
     }
 </div>
+@if (_picking)
+{
+    <PromptPicker OnPick="InsertPromptAsync" OnCancel="() => _picking = false" />
+}
 @if (VoiceLine is { } line)
 {
     <div class="ctx voice-line @(line.Problem ? "bad-text" : "")" role="status">
@@ -81,6 +86,22 @@
     [Parameter] public RenderFragment? Extra { get; set; }
 
     private bool _drafting;
+    private bool _picking;
+
+    private async Task InsertPromptAsync(string text)
+    {
+        _picking = false;
+        _draft = string.IsNullOrWhiteSpace(_draft) ? text : _draft.TrimEnd() + "\n\n" + text;
+        await Task.Yield();
+        StateHasChanged();
+        try
+        {
+            if (_module is not null) await _module.InvokeVoidAsync("resizeComposer", _input);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
 
     private string _draft = "";
     private ElementReference _input;

@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using DogAI.Core;
@@ -22,6 +22,15 @@ public partial class MainWindow : Window
         var paths = services.GetRequiredService<AppPaths>();
 
         InitializeComponent();
+
+        // With "keep running in the tray" on, closing the window only hides it; Quit in the tray menu really exits.
+        var integration = services.GetRequiredService<WindowsIntegration>();
+        Closing += (_, e) =>
+        {
+            if (!integration.ShouldHideOnClose) return;
+            e.Cancel = true;
+            Hide();
+        };
 
         WebView.BlazorWebViewInitializing += (_, e) =>
         {

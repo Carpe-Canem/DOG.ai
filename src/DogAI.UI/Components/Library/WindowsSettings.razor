@@ -1,0 +1,41 @@
+@* Settings → Windows: the tray icon, closing to the tray, and the hold-to-talk key that works in every program. All off until chosen. *@
+@inject ISettingsStore SettingsStore
+@inject IWindowsIntegration Windows
+
+@if (_s is { } s)
+{
+    <div class="voice-settings">
+        <label class="check">
+            <input type="checkbox" checked="@s.TrayIcon" @onchange="e => SaveAsync(s with { TrayIcon = e.Value is true, CloseToTray = e.Value is true && s.CloseToTray })" />
+            <span>Show DOG AI in the notification area <span class="small">A small icon near the clock: click it to open DOG AI, right-click for Quit.</span></span>
+        </label>
+        <label class="check">
+            <input type="checkbox" checked="@s.CloseToTray" disabled="@(!s.TrayIcon)" @onchange="e => SaveAsync(s with { CloseToTray = e.Value is true })" />
+            <span>Closing the window keeps DOG AI running there <span class="small">Use Quit in the icon's menu to really exit. A loaded model stays loaded until it times out.</span></span>
+        </label>
+        <label class="check">
+            <input type="checkbox" checked="@s.DictateAnywhere" @onchange="e => SaveAsync(s with { DictateAnywhere = e.Value is true })" />
+            <span>Talk into any program: hold <b>Ctrl+Alt+Space</b>, speak, let go
+                <span class="small">What you said is typed where your cursor is, in whatever program has focus. It needs a speech model (Models → Voice). DOG AI watches for this one key combination and nothing else; it keeps no record of keys and sends nothing anywhere.</span></span>
+        </label>
+        @if (_problem is not null)
+        {
+            <div class="notice bad" role="status"><span>@_problem</span></div>
+        }
+    </div>
+}
+
+@code {
+    private AppSettings? _s;
+    private string? _problem;
+
+    protected override async Task OnInitializedAsync() => _s = await SettingsStore.LoadAsync();
+
+    private async Task SaveAsync(AppSettings next)
+    {
+        _s = next;
+        await SettingsStore.SaveAsync(next);
+        await Windows.ApplyAsync();
+        _problem = Windows.Problem;
+    }
+}

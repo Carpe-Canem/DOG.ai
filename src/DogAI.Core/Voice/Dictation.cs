@@ -66,8 +66,24 @@ public sealed class Dictation : IDisposable
     /// <summary>Raised with what was said. <c>send</c> is true in hands-free mode. From a background thread.</summary>
     public event Action<string, bool>? Heard;
 
+    /// <summary>Raised instead of <see cref="Heard"/> when the talking was started with <see cref="StartForOtherProgramsAsync"/>.</summary>
+    public event Action<string>? HeardForOtherPrograms;
+
+    /// <summary>True while the current push to talk is meant for another program (started with the key that works anywhere in Windows).</summary>
+    public bool ForOtherPrograms { get; private set; }
+
     /// <summary>Push to talk: starts recording.</summary>
     public Task StartAsync() => BeginAsync(handsFree: false);
+
+    /// <summary>
+    /// Push to talk whose text goes to <see cref="HeardForOtherPrograms"/> (typed into whatever program has focus), not to the message box.
+    /// </summary>
+    public async Task StartForOtherProgramsAsync()
+    {
+        ForOtherPrograms = true;
+        await BeginAsync(handsFree: false).ConfigureAwait(false);
+        if (!IsOn) ForOtherPrograms = false;
+    }
 
     /// <summary>Hands-free: listens until <see cref="Stop"/>, sending each thing said.</summary>
     public Task StartHandsFreeAsync() => BeginAsync(handsFree: true);
@@ -144,6 +160,7 @@ public sealed class Dictation : IDisposable
         _recording.Clear();
         _activity = null;
         HandsFree = false;
+        ForOtherPrograms = false;
         State = DictationState.Off;
         Level = 0;
     }
@@ -196,7 +213,10 @@ public sealed class Dictation : IDisposable
             var text = Transcript.Clean([heard.Text]);
             var length = TimeSpan.FromSeconds(clip.Length / (double)VoiceActivity.SampleRate);
             if (!ct.IsCancellationRequested && !Transcript.IsLikelyInvented(text, length, heard.NoSpeech))
-                Heard?.Invoke(text, send);
+            {
+                if (ForOtherPrograms) HeardForOtherPrograms?.Invoke(text);
+                else Heard?.Invoke(text, send);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

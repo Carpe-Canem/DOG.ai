@@ -1,4 +1,4 @@
-﻿using Markdig;
+using Markdig;
 using Markdig.Renderers;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
@@ -25,6 +25,7 @@ public static partial class MarkdownRenderer
         .UseEmphasisExtras()
         .UseAutoLinks()
         .UseTaskLists()
+        .UseMathematics()
         .DisableHtml()
         .Build();
 

@@ -1,5 +1,5 @@
 @* One turn in a thread. The page supplies the buttons (Actions) and, while editing, the edit box (Editor). *@
-<div class="msg @(IsUser ? "user" : "ai")">
+<div class="msg @(IsUser ? "user" : "ai")" data-mid="@MessageId">
     @if (AvatarUrl is not null)
     {
         <img class="avatar" src="@AvatarUrl" alt="" />

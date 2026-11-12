@@ -264,6 +264,9 @@ namespace DogAI.Data.Migrations
                     b.Property<long?>("PersonaId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("Pinned")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("PresetId")
                         .IsRequired()
                         .HasMaxLength(40)

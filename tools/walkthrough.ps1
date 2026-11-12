@@ -6,6 +6,7 @@
 #             that the previous step opened (it types the path and presses Enter)
 #   -DataDir  data folder for the run (default: a fresh temp folder, deleted afterwards)
 #   -OutDir   where screenshots are written (default: a temp folder, printed at the end)
+#   -Exe      run this DogAI.exe instead of the Debug build (for example the one in publish\win-x64)
 #   -Keep     keep the data folder, e.g. to restart and check that something persisted
 #
 # Build first: dotnet build DogAI.sln
@@ -16,10 +17,11 @@ param(
     [int]$Width = 1400,
     [int]$Height = 860,
     [int]$Port = 9333,
+    [string]$Exe,
     [switch]$Keep
 )
 $ErrorActionPreference = 'Stop'
-$exe = Join-Path (Split-Path $PSScriptRoot -Parent) 'src\DogAI.App\bin\Debug\net9.0-windows\DogAI.exe'
+$exe = if ($Exe) { $Exe } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'src\DogAI.App\bin\Debug\net9.0-windows\DogAI.exe' }
 if (-not (Test-Path $exe)) { throw "Build the solution first; $exe does not exist." }
 $temporary = -not $DataDir
 if ($temporary) { $DataDir = Join-Path ([IO.Path]::GetTempPath()) ("dogai-run-" + [Guid]::NewGuid().ToString('N')) }

@@ -1,0 +1,75 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject IDesktopShell Desktop
+
+@* Links in replies and model cards are never followed on their own. This asks first, shows the real address, and opens it in the user's own browser. *@
+@if (_url is not null)
+{
+    <Modal Title="Open this link?" OnClose="Close">
+        <p>This leaves DOG AI and opens your web browser. Links written by a model or found in a model card can point anywhere.</p>
+        <p class="link-url">@_url</p>
+        <div class="row">
+            <button class="btn primary" @onclick="OpenAsync">Open in my browser</button>
+            <button class="btn" @onclick="Close">Cancel</button>
+        </div>
+        @if (_failed)
+        {
+            <div class="notice bad"><span>Windows would not open that address.</span></div>
+        }
+    </Modal>
+}
+
+@code {
+    private string? _url;
+    private bool _failed;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<LinkGuard>? _self;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
+            _self = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("watchLinks", _self);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Without the listener a click does nothing (the app's window blocks navigation), which is safe.
+        }
+    }
+
+    [JSInvokable]
+    public Task Ask(string url) => InvokeAsync(() =>
+    {
+        _url = url;
+        _failed = false;
+        StateHasChanged();
+    });
+
+    private void Close() => _url = null;
+
+    private void OpenAsync()
+    {
+        if (_url is null) return;
+        if (Desktop.OpenUrl(_url)) _url = null;
+        else _failed = true;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_module is not null)
+            {
+                await _module.InvokeVoidAsync("unwatchLinks", _self);
+                await _module.DisposeAsync();
+            }
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException or JSException)
+        {
+        }
+        _self?.Dispose();
+    }
+}

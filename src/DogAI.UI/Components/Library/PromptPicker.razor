@@ -1,0 +1,87 @@
+@implements IDisposable
+@inject LibraryCatalog Library
+
+@* Choose a saved prompt, fill in its blanks, and hand back the finished text. *@
+<Modal Title="@(_chosen is null ? "Saved prompts" : _chosen.Name)" Class="prompt-picker" OnClose="OnCancel">
+    @if (_chosen is null)
+    {
+        @if (Library.Prompts.Count == 0)
+        {
+            <p class="small">No saved prompts yet. Make some under <a class="link-text" href="general/library">Assistants and prompts</a>.</p>
+        }
+        <div class="pick-list">
+            @foreach (var p in Library.Prompts)
+            {
+                var prompt = p;
+                <button class="li" @onclick="() => Choose(prompt)">
+                    <span class="li-text">
+                        <span class="li-title">@prompt.Name</span>
+                        <span class="li-sub">@Preview(prompt.Text)</span>
+                    </span>
+                </button>
+            }
+        </div>
+        <p class="small"><a class="link-text" href="general/library">Edit assistants and prompts</a></p>
+    }
+    else
+    {
+        @foreach (var v in _blanks)
+        {
+            var blank = v;
+            <label class="field-block">
+                <span class="field-label">@blank.Name</span>
+                @if (blank.Name.Contains("text", StringComparison.OrdinalIgnoreCase) || blank.Name.Contains("code", StringComparison.OrdinalIgnoreCase))
+                {
+                    <textarea class="field" rows="5" aria-label="@blank.Name" placeholder="@blank.Default" value="@_values[blank.Name]"
+                              @oninput="e => Set(blank.Name, e)"></textarea>
+                }
+                else
+                {
+                    <input class="field" aria-label="@blank.Name" placeholder="@blank.Default" value="@_values[blank.Name]"
+                           @oninput="e => Set(blank.Name, e)" />
+                }
+            </label>
+        }
+        @if (_blanks.Count == 0)
+        {
+            <p class="small">This prompt has no blanks. It is added to your message as it is.</p>
+        }
+        <div class="row">
+            <button class="btn primary" @onclick="UseAsync">Use this prompt</button>
+            <button class="btn" @onclick="() => _chosen = null">Back</button>
+        </div>
+    }
+</Modal>
+
+@code {
+    /// <summary>Called with the finished text.</summary>
+    [Parameter] public EventCallback<string> OnPick { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private PromptEntry? _chosen;
+    private IReadOnlyList<PromptVariable> _blanks = [];
+    private readonly Dictionary<string, string> _values = [];
+
+    protected override void OnInitialized() => Library.Changed += OnChanged;
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Library.Changed -= OnChanged;
+
+    private static string Preview(string text)
+    {
+        var line = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return line.Length <= 90 ? line : line[..87] + "...";
+    }
+
+    private async Task Choose(PromptEntry prompt)
+    {
+        _chosen = prompt;
+        _blanks = PromptVariables.Find(prompt.Text);
+        _values.Clear();
+        foreach (var v in _blanks) _values[v.Name] = "";
+        if (_blanks.Count == 0) await UseAsync();
+    }
+
+    private void Set(string name, ChangeEventArgs e) => _values[name] = e.Value?.ToString() ?? "";
+
+    private Task UseAsync() => OnPick.InvokeAsync(PromptVariables.Fill(_chosen!.Text, _values));
+}

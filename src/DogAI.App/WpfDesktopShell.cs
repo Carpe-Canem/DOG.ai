@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -64,6 +64,38 @@ public sealed class WpfDesktopShell : IDesktopShell
             : new System.Diagnostics.ProcessStartInfo("notepad.exe") { ArgumentList = { full }, UseShellExecute = false };
         System.Diagnostics.Process.Start(start)?.Dispose();
         return true;
+    }
+
+    public Task<string?> PickSavePathAsync(string suggestedName, string filter) =>
+        Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            var dialog = new SaveFileDialog { Title = "Save", Filter = filter, FileName = SafeFileName(suggestedName), OverwritePrompt = true };
+            return dialog.ShowDialog(Application.Current.MainWindow) == true ? dialog.FileName : null;
+        }).Task;
+
+    public Task<string?> PickOpenPathAsync(string title, string filter) => PickFileAsync(title, filter);
+
+    public bool OpenUrl(string url)
+    {
+        // Only web and mail addresses, never a file path or another program's scheme.
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https" or "mailto")) return false;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose();
+            return true;
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    public void Restart()
+    {
+        var self = Environment.ProcessPath;
+        if (self is not null)
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(self) { UseShellExecute = false, ArgumentList = { App.AfterArgument, Environment.ProcessId.ToString() } })?.Dispose();
+        Application.Current.Dispatcher.InvokeAsync(() => Application.Current.Shutdown());
     }
 
     private static Task<string?> PickFileAsync(string title, string filter) =>

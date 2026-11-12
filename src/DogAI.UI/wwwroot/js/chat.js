@@ -77,3 +77,42 @@ export function followThread(force) {
     el._dogPinned = true;
   }
 }
+
+// After a search result opens a chat, bring the message that matched into view and flash it. The chat page loads
+// a moment after the navigation, so keep looking for a couple of seconds.
+export function scrollToMessage(id) {
+  const started = Date.now();
+  const look = () => {
+    const el = document.querySelector(`[data-mid="${id}"], .passage[data-id="${id}"]`);
+    if (el) {
+      el.scrollIntoView({ block: 'center' });
+      el.classList.add('found-flash');
+      setTimeout(() => el.classList.remove('found-flash'), 2200);
+      return;
+    }
+    if (Date.now() - started < 3000) setTimeout(look, 120);
+  };
+  look();
+}
+
+// Web links in replies and model cards never open on their own: one listener on the page hands the click to the
+// confirmation prompt (LinkGuard), which asks before opening the user's browser.
+let linkTarget = null;
+export function watchLinks(dotnet) {
+  linkTarget = dotnet;
+  if (document._dogLinks) return;
+  document._dogLinks = true;
+  document.addEventListener('click', e => {
+    const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
+    if (!a || !linkTarget) return;
+    const href = a.getAttribute('href') || '';
+    if (!/^(https?:|mailto:)/i.test(href)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    linkTarget.invokeMethodAsync('Ask', a.href);
+  }, true);
+}
+
+export function unwatchLinks(dotnet) {
+  if (linkTarget === dotnet) linkTarget = null;
+}

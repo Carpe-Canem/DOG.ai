@@ -5,6 +5,7 @@
 @inject ChatService Chat
 @inject EngineManager Engine
 @inject NavigationManager Nav
+@inject IDesktopShell Desktop
 
 <SectionContent SectionName="title">
     <div class="head-row">
@@ -19,11 +20,12 @@
 <SectionContent SectionName="list">
     <div class="list-head"><h3>Chats</h3><a class="btn" href="general">New chat</a></div>
     <a class="li li-link" href="general/documents"><Icon Name="docs" Size="18" /><span class="li-text"><span class="li-title">Document collections</span></span></a>
+    <a class="li li-link" href="general/library"><Icon Name="prompt" Size="18" /><span class="li-text"><span class="li-title">Assistants and prompts</span></span></a>
     @foreach (var chat in _chats)
     {
         <a class="li @(chat.Id == _conversation.Id ? "active" : "")" href="general/@chat.Id">
             <span class="li-text">
-                <span class="li-title">@chat.Title</span>
+                <span class="li-title">@if (chat.Pinned) {<Icon Name="pin" Size="13" />} @chat.Title</span>
                 <span class="li-sub">@Format.When(chat.UpdatedAt)</span>
             </span>
         </a>
@@ -60,6 +62,7 @@ else
 <SectionContent SectionName="composer"><ChatComposer Path="@_path" OnSend="SendAsync" /></SectionContent>
 
 <SectionContent SectionName="aside">
+    <AssistantPanel Conversation="@_conversation" OnApplied="SaveConversationAsync" />
     <DocumentsPanel Conversation="@_conversation" Kind="general" EnsureConversation="EnsureSavedAsync" />
     <StylePanel Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />
     <div class="panel">
@@ -72,6 +75,10 @@ else
         <div class="panel">
             <h4>This chat</h4>
             <input class="field" aria-label="Chat name" value="@_conversation.Title" @onchange="RenameAsync" />
+            <div class="row">
+                <button class="btn" @onclick="TogglePinAsync">@(_conversation.Pinned ? "Unpin" : "Pin to top")</button>
+                <button class="btn" disabled="@(_path.Count == 0)" @onclick="ExportAsync" title="Save this conversation as a markdown file">Save as markdown</button>
+            </div>
             <div class="row">
                 @if (_confirmDelete)
                 {
@@ -204,6 +211,19 @@ else
     private async Task SaveConversationAsync()
     {
         if (_conversation.Id != 0) await Store.UpdateAsync(_conversation);
+    }
+
+    private async Task TogglePinAsync()
+    {
+        _conversation.Pinned = !_conversation.Pinned;
+        await Store.SetPinnedAsync(_conversation.Id, _conversation.Pinned);
+        _chats = (await Store.ListAsync("general")).ToList();
+    }
+
+    private async Task ExportAsync()
+    {
+        var markdown = ChatExport.ToMarkdown(_conversation, _path);
+        await Desktop.SaveFileAsync(ChatExport.FileName(_conversation.Title), "Markdown (*.md)|*.md", System.Text.Encoding.UTF8.GetBytes(markdown));
     }
 
     private async Task DeleteAsync()

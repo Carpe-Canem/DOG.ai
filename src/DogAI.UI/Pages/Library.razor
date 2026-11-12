@@ -1,0 +1,265 @@
+@page "/general/library"
+@implements IDisposable
+@inject LibraryCatalog Catalog
+@inject PresetCatalog Presets
+@inject ISettingsStore SettingsStore
+@inject EngineManager Engine
+
+<SectionContent SectionName="title">
+    <div class="head-row">
+        <div class="head-text">
+            <h2>Assistants and prompts</h2>
+            <p>Ways to start a chat, and wording you use again</p>
+        </div>
+    </div>
+</SectionContent>
+
+<SectionContent SectionName="list">
+    <div class="list-head"><h3>Assistants</h3><button class="btn" @onclick="NewAssistant">New</button></div>
+    @foreach (var a in Catalog.Assistants)
+    {
+        var assistant = a;
+        <button class="li @(_kind == Kind.Assistant && _assistant.Id == assistant.Id ? "active" : "")" @onclick="() => EditAssistant(assistant)">
+            <span class="li-text">
+                <span class="li-title">@assistant.Name</span>
+                <span class="li-sub">@(assistant.Description.Length > 0 ? assistant.Description : "No description")</span>
+            </span>
+        </button>
+    }
+    @if (Catalog.Assistants.Count == 0)
+    {
+        <p class="list-note">No assistants.</p>
+    }
+    <div class="list-head"><h3>Prompts</h3><button class="btn" @onclick="NewPrompt">New</button></div>
+    @foreach (var p in Catalog.Prompts)
+    {
+        var prompt = p;
+        <button class="li @(_kind == Kind.Prompt && _prompt.Id == prompt.Id ? "active" : "")" @onclick="() => EditPrompt(prompt)">
+            <span class="li-text">
+                <span class="li-title">@prompt.Name</span>
+                <span class="li-sub">@Blanks(prompt)</span>
+            </span>
+        </button>
+    }
+    @if (Catalog.Prompts.Count == 0)
+    {
+        <p class="list-note">No saved prompts.</p>
+    }
+    <p class="list-note"><a class="link-text" href="general">Back to chats</a></p>
+</SectionContent>
+
+@if (_kind == Kind.None)
+{
+    <EmptyState IconName="general" Title="Assistants and prompts">
+        An <b>assistant</b> is a way to start a chat: standing instructions, a style, and a model if you want one. Pick it in a chat's side panel.
+        A <b>prompt</b> is wording you use again, with blanks you fill in when you use it. Choose one from the book button next to the message box.
+        <span class="row center-row empty-action">
+            <button class="btn primary" @onclick="NewAssistant">New assistant</button>
+            <button class="btn" @onclick="NewPrompt">New prompt</button>
+        </span>
+    </EmptyState>
+}
+else if (_kind == Kind.Assistant)
+{
+    <div class="docs-page">
+        <section class="group">
+            <label class="field-block">
+                <span class="field-label">Name</span>
+                <input class="field" aria-label="Assistant name" value="@_assistant.Name" @onchange="e => SetAssistant(nameof(Assistant.Name), e)" placeholder="Coder, Editor, Tutor…" />
+            </label>
+            <label class="field-block">
+                <span class="field-label">Description <span class="small">One line for the list.</span></span>
+                <input class="field" aria-label="Assistant description" value="@_assistant.Description" @onchange="e => SetAssistant(nameof(Assistant.Description), e)" />
+            </label>
+            <label class="field-block">
+                <span class="field-label">Instructions <span class="small">Sent ahead of every chat that starts with this assistant.</span></span>
+                <textarea class="field" rows="8" aria-label="Assistant instructions" value="@_assistant.Instructions"
+                          @onchange="e => SetAssistant(nameof(Assistant.Instructions), e)"></textarea>
+            </label>
+            <label class="field-block">
+                <span class="field-label">Style</span>
+                <select class="field" aria-label="Assistant style" @onchange="e => SetAssistant(nameof(Assistant.PresetId), e)">
+                    <option value="" selected="@(_assistant.PresetId.Length == 0)">Balanced (the default)</option>
+                    @foreach (var preset in Presets.All.Where(p => p.Id != SamplerPresets.DefaultId))
+                    {
+                        <option value="@preset.Id" selected="@(preset.Id == _assistant.PresetId)">@preset.Name</option>
+                    }
+                </select>
+            </label>
+            <label class="field-block">
+                <span class="field-label">Model <span class="small">Optional. When a chat starts with this assistant and another model is loaded, you are asked before it is swapped.</span></span>
+                <select class="field" aria-label="Assistant model" @onchange="e => SetAssistant(nameof(Assistant.ModelPath), e)">
+                    <option value="" selected="@(_assistant.ModelPath is null)">Whichever model is loaded</option>
+                    @foreach (var m in _models)
+                    {
+                        <option value="@m.Path" selected="@(m.Path == _assistant.ModelPath)">@m.Name</option>
+                    }
+                    @if (_assistant.ModelPath is { } missing && _models.All(m => m.Path != missing))
+                    {
+                        <option value="@missing" selected>@System.IO.Path.GetFileName(missing) (not in the library now)</option>
+                    }
+                </select>
+            </label>
+        </section>
+        @Foot(SaveAssistantAsync, _assistant.Id.Length == 0, DeleteAssistantAsync)
+    </div>
+}
+else
+{
+    <div class="docs-page">
+        <section class="group">
+            <label class="field-block">
+                <span class="field-label">Name</span>
+                <input class="field" aria-label="Prompt name" value="@_prompt.Name" @onchange="e => SetPrompt(nameof(PromptEntry.Name), e)" placeholder="Summarise text" />
+            </label>
+            <label class="field-block">
+                <span class="field-label">Text <span class="small">Write a blank as [[name]], or [[name|a default]] to start with a suggestion.</span></span>
+                <textarea class="field" rows="10" aria-label="Prompt text" value="@_prompt.Text" @oninput="e => SetPrompt(nameof(PromptEntry.Text), e)"></textarea>
+            </label>
+            <p class="small">
+                @if (PromptVariables.Find(_prompt.Text) is { Count: > 0 } found)
+                {
+                    <span>Blanks you will fill in: @string.Join(", ", found.Select(v => v.Name)).</span>
+                }
+                else
+                {
+                    <span>No blanks yet. The text is inserted as it is.</span>
+                }
+            </p>
+        </section>
+        @Foot(SavePromptAsync, _prompt.Id.Length == 0, DeletePromptAsync)
+    </div>
+}
+
+@code {
+    private enum Kind { None, Assistant, Prompt }
+
+    private Kind _kind;
+    private Assistant _assistant = new();
+    private PromptEntry _prompt = new();
+    private List<ModelFile> _models = [];
+    private string? _error;
+    private bool _saved;
+    private bool _confirmDelete;
+
+    private RenderFragment Foot(Func<Task> save, bool isNew, Func<Task> delete) => __builder =>
+    {
+        if (_error is not null)
+        {
+            <div class="notice bad"><span>@_error</span></div>
+        }
+        <div class="editor-foot">
+            <div class="row">
+                <button class="btn primary" @onclick="save">@(isNew ? "Create" : "Save")</button>
+                @if (!isNew)
+                {
+                    @if (_confirmDelete)
+                    {
+                        <button class="btn danger" @onclick="delete">Yes, delete it</button>
+                        <button class="btn" @onclick="() => _confirmDelete = false">Keep</button>
+                    }
+                    else
+                    {
+                        <button class="btn" @onclick="() => _confirmDelete = true">Delete</button>
+                    }
+                }
+            </div>
+            @if (_saved)
+            {
+                <span class="small">Saved.</span>
+            }
+        </div>
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Catalog.Changed += OnChanged;
+        var settings = await SettingsStore.LoadAsync();
+        _models = await Task.Run(() => ModelLibrary.ScanAll(new[] { settings.ModelsDirectory }.Concat(settings.ExtraModelFolders))
+            .Where(f => GgufReader.TryRead(f.Path)?.IsEmbedding(f.Path) != true).ToList());
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Catalog.Changed -= OnChanged;
+
+    private static string Blanks(PromptEntry p)
+    {
+        var n = PromptVariables.Find(p.Text).Count;
+        return n == 0 ? "No blanks" : n == 1 ? "1 blank" : n + " blanks";
+    }
+
+    private void Open(Kind kind)
+    {
+        _kind = kind;
+        _error = null;
+        _saved = false;
+        _confirmDelete = false;
+    }
+
+    private void SetAssistant(string field, ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? "";
+        _assistant = field switch
+        {
+            nameof(Assistant.Name) => _assistant with { Name = value },
+            nameof(Assistant.Description) => _assistant with { Description = value },
+            nameof(Assistant.Instructions) => _assistant with { Instructions = value },
+            nameof(Assistant.PresetId) => _assistant with { PresetId = value },
+            nameof(Assistant.ModelPath) => _assistant with { ModelPath = value.Length == 0 ? null : value },
+            _ => _assistant,
+        };
+    }
+
+    private void SetPrompt(string field, ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? "";
+        _prompt = field == nameof(PromptEntry.Name) ? _prompt with { Name = value } : _prompt with { Text = value };
+    }
+
+    private void NewAssistant() { _assistant = new Assistant(); Open(Kind.Assistant); }
+    private void EditAssistant(Assistant a) { _assistant = a; Open(Kind.Assistant); }
+    private void NewPrompt() { _prompt = new PromptEntry(); Open(Kind.Prompt); }
+    private void EditPrompt(PromptEntry p) { _prompt = p; Open(Kind.Prompt); }
+
+    private async Task SaveAssistantAsync()
+    {
+        try
+        {
+            _assistant = await Catalog.SaveAsync(_assistant);
+            _error = null;
+            _saved = true;
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+            _saved = false;
+        }
+    }
+
+    private async Task SavePromptAsync()
+    {
+        try
+        {
+            _prompt = await Catalog.SaveAsync(_prompt);
+            _error = null;
+            _saved = true;
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+            _saved = false;
+        }
+    }
+
+    private async Task DeleteAssistantAsync()
+    {
+        await Catalog.DeleteAssistantAsync(_assistant.Id);
+        _kind = Kind.None;
+    }
+
+    private async Task DeletePromptAsync()
+    {
+        await Catalog.DeletePromptAsync(_prompt.Id);
+        _kind = Kind.None;
+    }
+}

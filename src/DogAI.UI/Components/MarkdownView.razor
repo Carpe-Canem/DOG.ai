@@ -12,7 +12,9 @@
                 <span>@(segment.Language ?? "code")</span>
                 <button @onclick="() => CopyAsync(index, segment.Code!)">@(_copied == index ? "Copied" : "Copy")</button>
             </div>
-            <pre><code>@segment.Code</code></pre>
+            @* The whole <pre> goes in as one piece of markup so enhance.js can colour what is inside it without Blazor
+               losing track of its own nodes. The code is HTML-encoded here; highlight.js re-escapes what it writes. *@
+            @((MarkupString)CodeHtml(segment))
         </div>
     }
     else
@@ -38,6 +40,13 @@
         _rendered = Text;
         _renderedCitations = Citations;
         _segments = MarkdownRenderer.Render(Text, Citations);
+    }
+
+    private static string CodeHtml(MarkdownSegment segment)
+    {
+        var language = segment.Language is null ? "" : new string(segment.Language.Split(' ', 2)[0].Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '+' or '#').ToArray()).ToLowerInvariant();
+        var attribute = language.Length > 0 ? $" data-lang=\"{language}\"" : "";
+        return $"<pre><code{attribute}>{System.Net.WebUtility.HtmlEncode(segment.Code)}</code></pre>";
     }
 
     private async Task CopyAsync(int index, string code)

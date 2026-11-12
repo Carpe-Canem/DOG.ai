@@ -1,0 +1,110 @@
+@inject IBackupService Backup
+@inject IDesktopShell Desktop
+
+<p class="small">
+    A backup is one file with everything you made: chats, stories, characters and their pictures, documents, voices, styles, assistants, prompts and settings.
+    It does <b>not</b> hold models, voice models or the engine (they are large; download them again in Models), and your Hugging Face token is left out.
+</p>
+
+<div class="row">
+    <button class="btn" disabled="@_busy" @onclick="BackUpAsync">@(_busy ? "Working…" : "Back up now…")</button>
+    <button class="btn" disabled="@_busy" @onclick="RestoreAsync">Restore from a backup…</button>
+</div>
+
+@if (_message is not null)
+{
+    <div class="notice @(_problem ? "bad" : "")" role="status"><span>@_message</span></div>
+}
+
+@if (Backup.RestorePending)
+{
+    <div class="notice" role="status">
+        <span>
+            @if (_staged is { } staged)
+            {
+                <text>Ready to restore the backup from @staged.CreatedUtc.ToLocalTime().ToString("d MMM yyyy, HH:mm") (@staged.Chats chats, @staged.Messages messages).</text>
+            }
+            else
+            {
+                <text>A restore is waiting for the next start.</text>
+            }
+            DOG AI has to restart to finish. What is in DOG AI now is kept in a safety copy and is not lost.
+        </span>
+        <span class="row">
+            <button class="btn primary" @onclick="Desktop.Restart">Restart and restore</button>
+            <button class="btn" @onclick="CancelRestore">Cancel restore</button>
+        </span>
+    </div>
+}
+else if (Backup.SafetyCopy is { } safety)
+{
+    <p class="small">The database from before your last restore is kept at <span class="path">@safety</span>.</p>
+}
+
+@code {
+    private bool _busy;
+    private bool _problem;
+    private string? _message;
+    private BackupManifest? _staged;
+
+    private void CancelRestore()
+    {
+        Backup.CancelRestore();
+        _staged = null;
+        _problem = false;
+        _message = "The restore was cancelled. Nothing has changed.";
+    }
+
+    private static string Size(long bytes) => bytes < 1024 * 1024 ? $"{Math.Max(1, bytes / 1024)} KB" : Sizes.Gb(bytes);
+
+    private async Task BackUpAsync()
+    {
+        var name = $"DOG-AI backup {DateTime.Now:yyyy-MM-dd}.zip";
+        var path = await Desktop.PickSavePathAsync(name, "DOG AI backup (*.zip)|*.zip");
+        if (path is null) return;
+        _busy = true;
+        _message = null;
+        try
+        {
+            var made = await Backup.CreateAsync(path);
+            _problem = false;
+            _message = $"Saved {made.Chats} chats and {made.Messages} messages to {path} ({Size(new FileInfo(path).Length)}).";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or System.Data.Common.DbException)
+        {
+            _problem = true;
+            _message = "The backup could not be saved: " + e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RestoreAsync()
+    {
+        var path = await Desktop.PickOpenPathAsync("Choose a DOG AI backup", "DOG AI backup (*.zip)|*.zip|All files (*.*)|*.*");
+        if (path is null) return;
+        _busy = true;
+        _message = null;
+        _staged = null;
+        try
+        {
+            _staged = await Backup.StageAsync(path);
+        }
+        catch (BackupException e)
+        {
+            _problem = true;
+            _message = e.Message;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _problem = true;
+            _message = "That file could not be read: " + e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

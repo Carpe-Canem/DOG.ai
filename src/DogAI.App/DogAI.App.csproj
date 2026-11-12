@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -6,12 +6,20 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- Only for the notification-area icon; the window is WPF. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>DogAI.App</RootNamespace>
     <AssemblyName>DogAI</AssemblyName>
     <Product>DOG AI</Product>
     <Version>0.1.0</Version>
     <ApplicationIcon>Assets\dogai.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WinForms and WPF both define Application, MessageBox and more; the code here means WPF's. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\DogAI.Core\DogAI.Core.csproj" />
@@ -26,5 +34,17 @@
     <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
+
+  <!--
+    The voice packages (Whisper.net) ship native libraries for every platform. A publish keeps only what this app can use: Windows
+    64-bit, with the Vulkan one for the graphics card. Nothing here changes a normal build.
+  -->
+  <Target Name="PruneForeignNativeFiles" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ForeignNative Include="@(ResolvedFileToPublish)"
+                     Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '^runtimes[\/]([a-z]+[\/])?(linux|macos|osx|android|ios|win-arm|win-x86)|^ggml-metal|\.pdb$'))" />
+      <ResolvedFileToPublish Remove="@(ForeignNative)" />
+    </ItemGroup>
+  </Target>
 
 </Project>

@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Windows;
 using DogAI.Core;
 using DogAI.Core.Appearance;
@@ -19,12 +19,16 @@ public partial class App : Application
 {
     private ServiceProvider? _services;
 
+    /// <summary>Given to a restarted DOG AI: wait for this process (the old one) to exit before touching any files.</summary>
+    public const string AfterArgument = "--after";
+
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
         var paths = new AppPaths();
         paths.EnsureCreated();
+        WaitForPreviousInstance(e.Args);
 
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Information()
@@ -44,6 +48,9 @@ public partial class App : Application
 
         try
         {
+            // A restore waiting from last time is swapped in now, before anything opens the database.
+            if (DatabaseBackup.ApplyPending(paths) is { } restored) Log.Information(restored);
+
             _services = BuildServices(paths);
             var log = _services.GetRequiredService<ILogger<App>>();
             log.LogInformation("DOG AI starting. Data folder: {Root}", paths.Root);
@@ -75,8 +82,10 @@ public partial class App : Application
             await StartModelServicesAsync(_services, log);
             await _services.GetRequiredService<AppearanceState>().LoadAsync();
             await _services.GetRequiredService<PresetCatalog>().LoadAsync();
+            await _services.GetRequiredService<DogAI.Core.Library.LibraryCatalog>().LoadAsync();
 
             new MainWindow(_services).Show();
+            await _services.GetRequiredService<WindowsIntegration>().ApplyAsync();
         }
         catch (Exception ex)
         {
@@ -113,7 +122,10 @@ public partial class App : Application
         services.AddSingleton<EmbeddingServer>();
         services.AddSingleton<DogAI.Core.Documents.IEmbedder>(sp => sp.GetRequiredService<EmbeddingServer>());
         services.AddSingleton<DogAI.Core.Documents.DocumentLibrary>();
+        services.AddSingleton<WindowsIntegration>();
+        services.AddSingleton<IWindowsIntegration>(sp => sp.GetRequiredService<WindowsIntegration>());
         services.AddSingleton<PresetCatalog>();
+        services.AddSingleton(sp => new DogAI.Core.Library.LibraryCatalog(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton<ChatService>();
         services.AddSingleton<DogAI.Core.Characters.CardBuilder>();
         services.AddSingleton<DogAI.Core.Stories.StoryBuilder>();
@@ -181,12 +193,42 @@ public partial class App : Application
         services.GetRequiredService<DogAI.Core.Documents.DocumentLibrary>().StartIndexing();
     }
 
+    /// <summary>After a restart for a restore, the old window may still be closing; wait for it (at most 20 seconds).</summary>
+    private static void WaitForPreviousInstance(string[] args)
+    {
+        var at = Array.IndexOf(args, AfterArgument);
+        if (at < 0 || at + 1 >= args.Length || !int.TryParse(args[at + 1], out var pid)) return;
+        try
+        {
+            using var previous = System.Diagnostics.Process.GetProcessById(pid);
+            previous.WaitForExit(TimeSpan.FromSeconds(20));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            // Already gone.
+        }
+    }
+
     private static async Task EnsureFirstRunDefaultsAsync(IServiceProvider services, AppPaths paths)
     {
         var store = services.GetRequiredService<ISettingsStore>();
         var settings = await store.LoadAsync();
-        if (settings.ModelsDirectory is null)
+        // A restored backup can name a drive this PC does not have; fall back to a folder that exists here.
+        if (settings.ModelsDirectory is null || !DriveExists(settings.ModelsDirectory))
             await store.SaveAsync(settings with { ModelsDirectory = paths.SuggestModelsDirectory() });
+    }
+
+    private static bool DriveExists(string folder)
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(folder));
+            return !string.IsNullOrEmpty(root) && Directory.Exists(root);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

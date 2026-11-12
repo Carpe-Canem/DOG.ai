@@ -10,7 +10,8 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
         await using var db = await factory.CreateDbContextAsync(ct);
         return await db.Conversations.AsNoTracking()
             .Where(c => c.Mode == mode)
-            .OrderByDescending(c => c.UpdatedAt)
+            .OrderByDescending(c => c.Pinned)
+            .ThenByDescending(c => c.UpdatedAt)
             .ToListAsync(ct);
     }
 
@@ -50,6 +51,12 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
         await db.Conversations.Where(c => c.Id == conversationId).ExecuteUpdateAsync(s => s
             .SetProperty(c => c.Summary, summary)
             .SetProperty(c => c.SummaryThroughId, throughId), ct);
+    }
+
+    public async Task SetPinnedAsync(long conversationId, bool pinned, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.Conversations.Where(c => c.Id == conversationId).ExecuteUpdateAsync(s => s.SetProperty(c => c.Pinned, pinned), ct);
     }
 
     public async Task SetActiveLeafAsync(long conversationId, long? leafId, CancellationToken ct = default)

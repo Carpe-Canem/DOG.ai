@@ -81,6 +81,9 @@ public sealed class Conversation
     /// </summary>
     public bool RecallEnabled { get; set; } = true;
 
+    /// <summary>Pinned chats are listed first.</summary>
+    public bool Pinned { get; set; }
+
     public bool IsGroup => Mode == GroupMode;
 
     public const string GroupMode = "group";
@@ -148,6 +151,9 @@ public interface IChatStore
     Task UpdateAsync(Conversation conversation, CancellationToken ct = default);
 
     Task SetSummaryAsync(long conversationId, string summary, long? throughId, CancellationToken ct = default);
+
+    /// <summary>Pins a chat to the top of its list, or lets it go. Does not count as using the chat.</summary>
+    Task SetPinnedAsync(long conversationId, bool pinned, CancellationToken ct = default);
 
     /// <summary>Chooses which branch is shown and marks the chat as just used.</summary>
     Task SetActiveLeafAsync(long conversationId, long? leafId, CancellationToken ct = default);
