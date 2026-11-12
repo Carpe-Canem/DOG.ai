@@ -1,4 +1,5 @@
 using System.Text;
+using DogAI.Core.Models;
 
 namespace DogAI.Engine;
 
@@ -15,6 +16,35 @@ public sealed record GgufInfo
     /// <summary>Parameter count as the author labelled it, e.g. "12B".</summary>
     public string? SizeLabel { get; init; }
     public bool HasChatTemplate { get; init; }
+
+    public int? EmbeddingLength { get; init; }
+    public int? HeadCount { get; init; }
+    public int? HeadCountKv { get; init; }
+    public int? KeyLength { get; init; }
+    public int? ValueLength { get; init; }
+    public int? ExpertCount { get; init; }
+    public int? ExpertUsedCount { get; init; }
+
+    /// <summary>Context cache per token of context, or null when the header lacks the numbers.</summary>
+    public long? KvBytesPerToken
+    {
+        get
+        {
+            var key = KeyLength ?? (EmbeddingLength is > 0 && HeadCount is > 0 ? EmbeddingLength / HeadCount : null);
+            return ModelShape.KvPerToken(BlockCount, HeadCountKv ?? HeadCount, key, ValueLength ?? key);
+        }
+    }
+
+    /// <summary>The facts the fit estimate needs, for a model whose weights take <paramref name="weightBytes"/>.</summary>
+    public ModelShape ToShape(long weightBytes) => new()
+    {
+        WeightBytes = weightBytes,
+        Layers = BlockCount,
+        KvBytesPerToken = KvBytesPerToken,
+        TrainedContext = ContextLength,
+        ExpertCount = ExpertCount,
+        ExpertsUsed = ExpertUsedCount,
+    };
 }
 
 /// <summary>Reads the metadata at the start of a GGUF model file without loading the model.</summary>
@@ -65,6 +95,13 @@ public static class GgufReader
                 ContextLength = ToInt(values.GetValueOrDefault($"{arch}.context_length")),
                 BlockCount = ToInt(values.GetValueOrDefault($"{arch}.block_count")),
                 HasChatTemplate = values.ContainsKey("tokenizer.chat_template"),
+                EmbeddingLength = ToInt(values.GetValueOrDefault($"{arch}.embedding_length")),
+                HeadCount = ToInt(values.GetValueOrDefault($"{arch}.attention.head_count")),
+                HeadCountKv = ToInt(values.GetValueOrDefault($"{arch}.attention.head_count_kv")),
+                KeyLength = ToInt(values.GetValueOrDefault($"{arch}.attention.key_length")),
+                ValueLength = ToInt(values.GetValueOrDefault($"{arch}.attention.value_length")),
+                ExpertCount = ToInt(values.GetValueOrDefault($"{arch}.expert_count")),
+                ExpertUsedCount = ToInt(values.GetValueOrDefault($"{arch}.expert_used_count")),
             };
         }
         catch (EndOfStreamException)
@@ -77,7 +114,14 @@ public static class GgufReader
         key.StartsWith("general.", StringComparison.Ordinal) ||
         key == "tokenizer.chat_template" ||
         key.EndsWith(".context_length", StringComparison.Ordinal) ||
-        key.EndsWith(".block_count", StringComparison.Ordinal);
+        key.EndsWith(".block_count", StringComparison.Ordinal) ||
+        key.EndsWith(".embedding_length", StringComparison.Ordinal) ||
+        key.EndsWith(".attention.head_count", StringComparison.Ordinal) ||
+        key.EndsWith(".attention.head_count_kv", StringComparison.Ordinal) ||
+        key.EndsWith(".attention.key_length", StringComparison.Ordinal) ||
+        key.EndsWith(".attention.value_length", StringComparison.Ordinal) ||
+        key.EndsWith(".expert_count", StringComparison.Ordinal) ||
+        key.EndsWith(".expert_used_count", StringComparison.Ordinal);
 
     private static int? ToInt(object? value) => value switch
     {

@@ -21,7 +21,7 @@ public sealed record EngineOptions(int ContextLength = 8192, int GpuLayers = -1)
 /// Owns the llama-server process: starts it for one model on a random port bound to 127.0.0.1,
 /// waits until it is ready, and stops it on unload or exit. One model at a time.
 /// </summary>
-public sealed class EngineManager(LoopbackHttp http, LlamaServerLocator locator) : IChatEngine, IDisposable
+public sealed class EngineManager : IChatEngine, IDisposable
 {
     private static readonly TimeSpan LoadTimeout = TimeSpan.FromMinutes(10);
 
@@ -37,10 +37,40 @@ public sealed class EngineManager(LoopbackHttp http, LlamaServerLocator locator)
     public string? ModelName { get; private set; }
     public int ContextLength { get; private set; }
 
+    /// <summary>Layers placed on the graphics card for the loaded model; -1 means "as many as fit".</summary>
+    public int GpuLayers { get; private set; }
+
+    /// <summary>Process id of the running engine, for measuring its graphics memory.</summary>
+    public int? ProcessId => _process is { } p && !p.HasExited ? p.Id : null;
+
+    /// <summary>Generation speed of the most recent reply, in tokens per second.</summary>
+    public double LastTokensPerSecond { get; private set; }
+
+    /// <summary>When the engine last loaded a model or answered.</summary>
+    public DateTimeOffset LastActivity { get; private set; } = DateTimeOffset.Now;
+
+    /// <summary>Unload the model after this long without use, to free graphics memory. Null never unloads.</summary>
+    public TimeSpan? IdleUnloadAfter { get; set; }
+
     /// <summary>What went wrong, in plain words, when <see cref="State"/> is Failed.</summary>
     public string? Error { get; private set; }
 
     public bool IsReady => State == EngineState.Ready;
+
+    /// <summary>True while a reply or benchmark is being generated; idle unload waits for it.</summary>
+    public bool IsBusy => Volatile.Read(ref _busy) > 0;
+    private int _busy;
+    private readonly Timer _idleTimer;
+
+    private readonly LoopbackHttp _http;
+    private readonly LlamaServerLocator _locator;
+
+    public EngineManager(LoopbackHttp http, LlamaServerLocator locator)
+    {
+        _http = http;
+        _locator = locator;
+        _idleTimer = new Timer(_ => _ = UnloadIfIdleAsync(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
 
     /// <summary>Raised on any state change. May come from a background thread.</summary>
     public event Action? Changed;
@@ -48,7 +78,7 @@ public sealed class EngineManager(LoopbackHttp http, LlamaServerLocator locator)
     /// <summary>Lines the engine prints, for the app log.</summary>
     public event Action<string>? Output;
 
-    public string? FindExecutable() => locator.Find();
+    public string? FindExecutable() => _locator.Find();
 
     /// <summary>Loads a model, replacing any model already loaded. Problems end up in <see cref="Error"/>, not as exceptions.</summary>
     public async Task LoadAsync(string modelPath, EngineOptions options)
@@ -68,7 +98,7 @@ public sealed class EngineManager(LoopbackHttp http, LlamaServerLocator locator)
 
             if (!File.Exists(modelPath)) throw new EngineException("That model file no longer exists.");
             if (info is null) throw new EngineException("That file is not a model DOG AI can load (it is not a GGUF file).");
-            var exe = locator.Find() ?? throw new EngineException(
+            var exe = _locator.Find() ?? throw new EngineException(
                 "The model engine (llama-server) was not found on this PC. Install it with: winget install llama.cpp");
 
             var context = Math.Max(512, options.ContextLength);
@@ -105,9 +135,12 @@ public sealed class EngineManager(LoopbackHttp http, LlamaServerLocator locator)
             process.BeginErrorReadLine();
             _process = process;
 
-            var api = new LlamaApi(http.Client, port, key);
+            var api = new LlamaApi(_http.Client, port, key);
             await WaitUntilReadyAsync(process, api, cts.Token).ConfigureAwait(false);
             ContextLength = await api.ContextLengthAsync(cts.Token).ConfigureAwait(false) ?? context;
+            GpuLayers = options.GpuLayers;
+            LastTokensPerSecond = 0;
+            LastActivity = DateTimeOffset.Now;
             _api = api;
             Set(EngineState.Ready);
         }
@@ -153,11 +186,63 @@ public sealed class EngineManager(LoopbackHttp http, LlamaServerLocator locator)
     public Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default) =>
         Api().ApplyTemplateAsync(messages, ct);
 
-    public IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, CancellationToken ct = default) =>
-        Api().StreamChatAsync(messages, sampler, ct);
+    public async IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var api = Api();
+        Interlocked.Increment(ref _busy);
+        try
+        {
+            await foreach (var delta in api.StreamChatAsync(messages, sampler, ct).ConfigureAwait(false))
+            {
+                if (delta.Stats is { TokensPerSecond: > 0 } stats)
+                {
+                    LastTokensPerSecond = stats.TokensPerSecond;
+                    Changed?.Invoke();
+                }
+                yield return delta;
+            }
+        }
+        finally
+        {
+            LastActivity = DateTimeOffset.Now;
+            Interlocked.Decrement(ref _busy);
+        }
+    }
+
+    /// <summary>
+    /// Measures the loaded model: reads a fixed prompt and writes <paramref name="tokens"/> tokens,
+    /// returning the engine's own timings.
+    /// </summary>
+    public async Task<BenchmarkTimings> BenchmarkAsync(int tokens = 160, CancellationToken ct = default)
+    {
+        var api = Api();
+        Interlocked.Increment(ref _busy);
+        try
+        {
+            return await api.BenchmarkAsync(tokens, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            LastActivity = DateTimeOffset.Now;
+            Interlocked.Decrement(ref _busy);
+        }
+    }
+
+    private async Task UnloadIfIdleAsync()
+    {
+        if (IdleUnloadAfter is not { } limit || State != EngineState.Ready || IsBusy) return;
+        if (DateTimeOffset.Now - LastActivity < limit) return;
+        await UnloadAsync().ConfigureAwait(false);
+        UnloadedForIdle?.Invoke();
+    }
+
+    /// <summary>Raised after the model was unloaded because it sat unused.</summary>
+    public event Action? UnloadedForIdle;
 
     public void Dispose()
     {
+        _idleTimer.Dispose();
         _loadCts?.Cancel();
         StopProcess();
         _job.Dispose();

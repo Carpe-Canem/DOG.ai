@@ -111,6 +111,55 @@ namespace DogAI.Data.Migrations
                     b.ToTable("Conversations");
                 });
 
+            modelBuilder.Entity("DogAI.Core.Models.ModelRecord", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("BenchAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("BenchReadPerSecond")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("BenchTokensPerSecond")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Quant")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Repo")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TunedContext")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TunedGpuLayers")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UseCase")
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Path")
+                        .IsUnique();
+
+                    b.ToTable("ModelRecords");
+                });
+
             modelBuilder.Entity("DogAI.Data.SettingEntry", b =>
                 {
                     b.Property<string>("Key")

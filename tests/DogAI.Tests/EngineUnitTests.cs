@@ -69,6 +69,27 @@ public class GgufReaderTests
     }
 
     [Fact]
+    public void Reads_what_the_fit_estimate_needs()
+    {
+        var info = GgufReader.Read(Header(w =>
+        {
+            Str(w, "llama.embedding_length"); w.Write(4u); w.Write(4096u);
+            Str(w, "llama.attention.head_count"); w.Write(4u); w.Write(32u);
+            Str(w, "llama.attention.head_count_kv"); w.Write(4u); w.Write(8u);
+            Str(w, "llama.expert_count"); w.Write(4u); w.Write(64u);
+            Str(w, "llama.expert_used_count"); w.Write(4u); w.Write(4u);
+        }, pairs: 11));
+
+        Assert.Equal(8, info.HeadCountKv);
+        // 32 layers × 8 heads × (128 + 128) × 2 bytes, with 128 = 4096 / 32.
+        Assert.Equal(128 * 1024, info.KvBytesPerToken);
+        var shape = info.ToShape(5_000_000_000);
+        Assert.Equal(32, shape.Layers);
+        Assert.Equal(64, shape.ExpertCount);
+        Assert.Equal(32768, shape.TrainedContext);
+    }
+
+    [Fact]
     public void Rejects_a_header_that_is_cut_short()
     {
         var bytes = Header().ToArray();
@@ -88,7 +109,12 @@ public class ModelLibraryTests
             foreach (var name in new[] { "b-model.gguf", "sub/a-model.gguf", "mmproj-vision.gguf", "big-00001-of-00002.gguf", "big-00002-of-00002.gguf", "notes.txt" })
                 File.WriteAllText(Path.Combine(dir, name), "x");
 
-            Assert.Equal(["a-model", "b-model", "big-00001-of-00002"], ModelLibrary.Scan(dir).Select(m => m.Name));
+            var models = ModelLibrary.Scan(dir);
+            Assert.Equal(["a-model", "b-model", "big"], models.Select(m => m.Name));
+            var big = models.Single(m => m.Name == "big");
+            Assert.Equal(2, big.Parts.Count);
+            Assert.Equal(2, big.SizeBytes);
+            Assert.EndsWith("big-00001-of-00002.gguf", big.Path);
             Assert.Empty(ModelLibrary.Scan(Path.Combine(dir, "missing")));
             Assert.Empty(ModelLibrary.Scan(null));
         }

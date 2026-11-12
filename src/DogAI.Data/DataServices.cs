@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DogAI.Core;
 using DogAI.Core.Chat;
+using DogAI.Core.Models;
 using DogAI.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +16,8 @@ public static class DataServices
             o.UseSqlite($"Data Source={sp.GetRequiredService<AppPaths>().DatabaseFile}"));
         services.AddSingleton<ISettingsStore, SqliteSettingsStore>();
         services.AddSingleton<IChatStore, SqliteChatStore>();
+        services.AddSingleton<IModelRecordStore, SqliteModelRecordStore>();
+        services.AddSingleton<IDocumentStore>(sp => (SqliteSettingsStore)sp.GetRequiredService<ISettingsStore>());
         return services;
     }
 
@@ -27,32 +30,82 @@ public static class DataServices
     }
 }
 
-public sealed class SqliteSettingsStore(IDbContextFactory<DogDbContext> factory) : ISettingsStore
+public sealed class SqliteSettingsStore(IDbContextFactory<DogDbContext> factory) : ISettingsStore, IDocumentStore
 {
     private const string Key = "app";
 
-    public async Task<AppSettings> LoadAsync(CancellationToken ct = default)
+    public async Task<AppSettings> LoadAsync(CancellationToken ct = default) =>
+        await LoadAsync<AppSettings>(Key, ct) ?? new AppSettings();
+
+    public Task SaveAsync(AppSettings settings, CancellationToken ct = default) => SaveAsync(Key, settings, ct);
+
+    public async Task<T?> LoadAsync<T>(string key, CancellationToken ct = default) where T : class
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var entry = await db.Settings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == Key, ct);
-        if (entry is null) return new AppSettings();
+        var entry = await db.Settings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == key, ct);
+        if (entry is null) return null;
         try
         {
-            return JsonSerializer.Deserialize<AppSettings>(entry.Json) ?? new AppSettings();
+            return JsonSerializer.Deserialize<T>(entry.Json);
         }
         catch (JsonException)
         {
-            return new AppSettings();
+            return null;
         }
     }
 
-    public async Task SaveAsync(AppSettings settings, CancellationToken ct = default)
+    public async Task SaveAsync<T>(string key, T value, CancellationToken ct = default) where T : class
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        var json = JsonSerializer.Serialize(settings);
-        var entry = await db.Settings.FirstOrDefaultAsync(s => s.Key == Key, ct);
-        if (entry is null) db.Settings.Add(new SettingEntry { Key = Key, Json = json });
+        var json = JsonSerializer.Serialize(value);
+        var entry = await db.Settings.FirstOrDefaultAsync(s => s.Key == key, ct);
+        if (entry is null) db.Settings.Add(new SettingEntry { Key = key, Json = json });
         else entry.Json = json;
         await db.SaveChangesAsync(ct);
     }
+}
+
+public sealed class SqliteModelRecordStore(IDbContextFactory<DogDbContext> factory) : IModelRecordStore
+{
+    public async Task<IReadOnlyList<ModelRecord>> AllAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.ModelRecords.AsNoTracking().ToListAsync(ct);
+    }
+
+    public async Task<ModelRecord?> FindAsync(string path, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var key = Normalize(path);
+        return await db.ModelRecords.AsNoTracking().FirstOrDefaultAsync(m => m.Path == key, ct);
+    }
+
+    public async Task SaveAsync(ModelRecord record, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        record.Path = Normalize(record.Path);
+        var existing = await db.ModelRecords.FirstOrDefaultAsync(m => m.Path == record.Path, ct);
+        if (existing is null)
+        {
+            record.Id = 0;
+            if (record.AddedAt == default) record.AddedAt = DateTime.UtcNow;
+            db.ModelRecords.Add(record);
+        }
+        else
+        {
+            record.Id = existing.Id;
+            db.Entry(existing).CurrentValues.SetValues(record);
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task DeleteAsync(string path, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var key = Normalize(path);
+        await db.ModelRecords.Where(m => m.Path == key).ExecuteDeleteAsync(ct);
+    }
+
+    /// <summary>Windows paths are case-insensitive; store one spelling so lookups match.</summary>
+    private static string Normalize(string path) => Path.GetFullPath(path).ToLowerInvariant();
 }

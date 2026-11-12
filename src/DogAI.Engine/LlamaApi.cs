@@ -7,6 +7,9 @@ using DogAI.Core.Chat;
 
 namespace DogAI.Engine;
 
+/// <summary>Speeds the engine measured for one benchmark run.</summary>
+public sealed record BenchmarkTimings(double GenerateTokensPerSecond, double ReadTokensPerSecond, int TokensGenerated);
+
 /// <summary>Thrown when the model engine reports a problem or cannot be used.</summary>
 public sealed class EngineException(string message) : Exception(message);
 
@@ -115,6 +118,31 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
 
         if (completionTokens > 0 || promptTokens > 0)
             yield return new ChatDelta(null, null, new GenerationStats(promptTokens, completionTokens, speed));
+    }
+
+    /// <summary>A fixed, model-neutral prompt; the reply text itself is thrown away.</summary>
+    private const string BenchmarkPrompt =
+        "Write a long, detailed description of a walk through an old harbour town at dawn: the boats, the market, " +
+        "the smells, the sounds and the people. Keep going without stopping.";
+
+    public async Task<BenchmarkTimings> BenchmarkAsync(int tokens, CancellationToken ct)
+    {
+        var body = new JsonObject
+        {
+            ["prompt"] = BenchmarkPrompt,
+            ["n_predict"] = tokens,
+            ["ignore_eos"] = true,
+            ["cache_prompt"] = false,
+            ["temperature"] = 0.7,
+            ["stream"] = false,
+        };
+        using var response = await http.SendAsync(Request(HttpMethod.Post, "completion", body), ct).ConfigureAwait(false);
+        var json = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        var t = json["timings"];
+        return new BenchmarkTimings(
+            t?["predicted_per_second"]?.GetValue<double>() ?? 0,
+            t?["prompt_per_second"]?.GetValue<double>() ?? 0,
+            t?["predicted_n"]?.GetValue<int>() ?? 0);
     }
 
     private HttpRequestMessage Request(HttpMethod method, string path, JsonNode? body = null)

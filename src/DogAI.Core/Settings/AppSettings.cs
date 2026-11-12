@@ -17,6 +17,30 @@ public sealed record AppSettings
 
     /// <summary>The model file loaded most recently, offered again next time.</summary>
     public string? LastModelPath { get; init; }
+
+    /// <summary>More folders whose .gguf files appear in the library, besides <see cref="ModelsDirectory"/>.</summary>
+    public IReadOnlyList<string> ExtraModelFolders { get; init; } = [];
+
+    /// <summary>The model each mode starts with, by mode id ("general", "characters", "story").</summary>
+    public IReadOnlyDictionary<string, string> DefaultModels { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Unload a model nobody has used for this many minutes, freeing graphics memory. 0 keeps it loaded.</summary>
+    public int IdleUnloadMinutes { get; init; } = 30;
+
+    /// <summary>Hugging Face access token for gated models, encrypted for this Windows user (DPAPI). Null when none.</summary>
+    public string? HfTokenProtected { get; init; }
+
+    /// <summary>Compares lists and dictionaries by content, so two loads of the same settings are equal.</summary>
+    public bool Equals(AppSettings? other) =>
+        other is not null &&
+        ModelsDirectory == other.ModelsDirectory && Theme == other.Theme && Skin == other.Skin &&
+        ContextLength == other.ContextLength && LastModelPath == other.LastModelPath &&
+        IdleUnloadMinutes == other.IdleUnloadMinutes && HfTokenProtected == other.HfTokenProtected &&
+        ExtraModelFolders.SequenceEqual(other.ExtraModelFolders) &&
+        DefaultModels.Count == other.DefaultModels.Count &&
+        DefaultModels.All(kv => other.DefaultModels.TryGetValue(kv.Key, out var v) && v == kv.Value);
+
+    public override int GetHashCode() => HashCode.Combine(ModelsDirectory, Theme, Skin, ContextLength, LastModelPath, IdleUnloadMinutes);
 }
 
 /// <summary>The few things the UI needs from Windows itself. Implemented by the WPF host.</summary>
