@@ -12,14 +12,14 @@ public static class KokoroVoices
     private static readonly Dictionary<char, (string Label, string Lang)> Languages = new()
     {
         ['a'] = ("American English", "en-us"),
-        ['b'] = ("British English", "en-gb"),
+        ['b'] = ("British English", "en"), // espeak-ng's plain "en" is British; it has no "en-gb"
         ['e'] = ("Spanish", "es"),
         ['f'] = ("French", "fr"),
         ['h'] = ("Hindi", "hi"),
         ['i'] = ("Italian", "it"),
         ['j'] = ("Japanese", "ja"),
         ['p'] = ("Brazilian Portuguese", "pt-br"),
-        ['z'] = ("Mandarin Chinese", "zh"),
+        ['z'] = ("Mandarin Chinese", "cmn"),
     };
 
     /// <summary>"af_heart" → "Heart (American English, female)".</summary>
@@ -31,7 +31,8 @@ public static class KokoroVoices
         return details.Length == 0 ? own : $"{own} ({details})";
     }
 
-    /// <summary>The language code Kokoro expects for this voice ("en-us", "fr"…), or null when unknown.</summary>
+    /// <summary>The espeak-ng language this voice pronounces with ("en-us", "en" for British, "cmn"…), or null when unknown.
+    /// It must be a name in the pack's espeak-ng-data/lang folder, or nothing can be said.</summary>
     public static string? Language(string name) => Split(name).Lang;
 
     /// <summary>The language name shown in pickers ("American English"), or null when unknown.</summary>

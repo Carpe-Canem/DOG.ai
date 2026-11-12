@@ -33,7 +33,8 @@ public sealed class VoiceTextTests
     {
         Assert.Equal("Heart (American English, female)", KokoroVoices.Describe("af_heart"));
         Assert.Equal("George (British English, male)", KokoroVoices.Describe("bm_george"));
-        Assert.Equal("en-gb", KokoroVoices.Language("bf_emma"));
+        Assert.Equal("en", KokoroVoices.Language("bf_emma"));
+        Assert.Equal("cmn", KokoroVoices.Language("zf_xiaobei"));
         Assert.Equal("odd", KokoroVoices.Describe("odd"));
     }
 

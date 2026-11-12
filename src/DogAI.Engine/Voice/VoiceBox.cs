@@ -80,10 +80,18 @@ public sealed class VoiceBox : ISpeechSynthesizer, IDisposable
             return await Task.Run(() =>
             {
                 var tts = Load(pack, voice.Speaker);
-                var audio = tts.Generate(text, speed, speaker);
-                if (audio.NumSamples <= 0 || audio.SampleRate <= 0)
-                    throw new VoiceUnavailableException("The voice could not say that text.");
-                return new AudioClip(audio.Samples, audio.SampleRate);
+                // When the voice cannot pronounce the text, sherpa-onnx returns an empty result whose properties throw.
+                try
+                {
+                    var audio = tts.Generate(text, speed, speaker);
+                    if (audio is null || audio.NumSamples <= 0 || audio.SampleRate <= 0)
+                        throw new VoiceUnavailableException($"The voice \"{VoiceCatalog.Title(pack.Name)}\" could not say that text.");
+                    return new AudioClip(audio.Samples, audio.SampleRate);
+                }
+                catch (NullReferenceException e)
+                {
+                    throw new VoiceUnavailableException($"The voice \"{VoiceCatalog.Title(pack.Name)}\" could not say that text.", e);
+                }
             }, ct).ConfigureAwait(false);
         }
         finally
@@ -139,8 +147,8 @@ public sealed class VoiceBox : ISpeechSynthesizer, IDisposable
         var lexicons = language switch
         {
             "en-us" => new[] { "lexicon-us-en.txt", "lexicon-zh.txt" },
-            "en-gb" => ["lexicon-gb-en.txt", "lexicon-zh.txt"],
-            "zh" => ["lexicon-zh.txt", "lexicon-us-en.txt"],
+            "en" => ["lexicon-gb-en.txt", "lexicon-zh.txt"],
+            "cmn" => ["lexicon-zh.txt", "lexicon-us-en.txt"],
             _ => [],
         };
         var config = new OfflineTtsConfig();
@@ -151,7 +159,7 @@ public sealed class VoiceBox : ISpeechSynthesizer, IDisposable
         if (Directory.Exists(In("dict"))) config.Model.Kokoro.DictDir = In("dict");
         config.Model.Kokoro.Lexicon = string.Join(',', lexicons.Select(In).Where(File.Exists));
         config.Model.Kokoro.Lang = language;
-        if (language == "zh")
+        if (language == "cmn")
             config.RuleFsts = string.Join(',', new[] { "phone-zh.fst", "date-zh.fst", "number-zh.fst" }.Select(In).Where(File.Exists));
         return config;
     }

@@ -149,6 +149,11 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
         {
             Problem = e.Message;
         }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            // A voice library failing in a way it does not describe: still say so rather than go quiet.
+            Problem = "Reading aloud stopped because of an unexpected problem: " + e.Message;
+        }
         finally
         {
             bool removed;
