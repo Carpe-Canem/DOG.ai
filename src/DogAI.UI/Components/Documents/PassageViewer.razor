@@ -27,7 +27,7 @@
         </div>
         <div class="passage-view">@_before<mark>@_passage</mark>@_after</div>
         <div class="modal-foot">
-            <span class="small">@(doc.SourcePath is { } p && File.Exists(p) ? p : "The original file has moved or been deleted; DOG AI keeps its text.")</span>
+            <span class="small">@(doc.SourcePath is { } p && File.Exists(p) ? p : "The original file has moved or been deleted; DOG.ai keeps its text.")</span>
             <div class="row">
                 @if (doc.SourcePath is { } path && File.Exists(path))
                 {

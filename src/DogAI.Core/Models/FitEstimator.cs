@@ -41,7 +41,7 @@ public sealed record ModelShape
         ExpertCount is > 1 && ExpertsUsed is > 0 ? Math.Min(1, 0.2 + 0.8 * ExpertsUsed.Value / ExpertCount.Value) : 1;
 }
 
-/// <summary>How much memory DOG AI may plan to use, and how fast it is.</summary>
+/// <summary>How much memory DOG.ai may plan to use, and how fast it is.</summary>
 /// <param name="VramBytes">Graphics memory available to a model, after other programs.</param>
 /// <param name="RamBytes">System memory available for the part of a model that does not fit on the card.</param>
 public sealed record FitBudget(long VramBytes, long RamBytes, double GpuGBps, double RamGBps)
@@ -52,7 +52,7 @@ public sealed record FitBudget(long VramBytes, long RamBytes, double GpuGBps, do
     /// <summary>Kept free in system memory so Windows and the app itself stay responsive.</summary>
     public const long RamMargin = 4 * Sizes.GiB;
 
-    /// <param name="engineVramBytes">Graphics memory DOG AI's own engine holds now; it is given back when another model loads.</param>
+    /// <param name="engineVramBytes">Graphics memory DOG.ai's own engine holds now; it is given back when another model loads.</param>
     public static FitBudget From(HardwareProfile hw, long engineVramBytes = 0)
     {
         var gpu = hw.MainGpu;

@@ -414,7 +414,7 @@ public sealed class DownloadManager : IDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
-    private const string OfflineMessage = "Paused because DOG AI went offline. Go online in the Models section to continue.";
+    private const string OfflineMessage = "Paused because DOG.ai went offline. Go online in the Models section to continue.";
 
     public void Dispose()
     {

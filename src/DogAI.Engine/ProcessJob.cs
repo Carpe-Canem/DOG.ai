@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace DogAI.Engine;
 
 /// <summary>
-/// A Windows job object set to end its processes when DOG AI ends, however it ends. Without it a
+/// A Windows job object set to end its processes when DOG.ai ends, however it ends. Without it a
 /// crash or a forced close would leave llama-server running and holding the graphics card's memory.
 /// </summary>
 internal sealed class ProcessJob : IDisposable

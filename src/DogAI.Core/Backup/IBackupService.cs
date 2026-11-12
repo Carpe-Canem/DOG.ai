@@ -13,7 +13,7 @@ public interface IBackupService
     Task<BackupManifest> CreateAsync(string zipPath, CancellationToken ct = default);
 
     /// <summary>
-    /// Checks a backup and queues it. It takes effect the next time DOG AI starts, never while it runs.
+    /// Checks a backup and queues it. It takes effect the next time DOG.ai starts, never while it runs.
     /// Throws <see cref="BackupException"/> with a plain reason if the file is not a usable backup.
     /// </summary>
     Task<BackupManifest> StageAsync(string zipPath, CancellationToken ct = default);

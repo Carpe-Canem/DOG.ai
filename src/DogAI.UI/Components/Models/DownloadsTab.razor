@@ -12,7 +12,7 @@ else
 {
     @if (!Gate.IsOnline && Downloads.Jobs.Any(j => j.Status is DownloadStatus.Paused or DownloadStatus.Queued))
     {
-        <div class="notice"><span>DOG AI is offline. Go online at the top of this page to continue paused downloads.</span></div>
+        <div class="notice"><span>DOG.ai is offline. Go online at the top of this page to continue paused downloads.</span></div>
     }
     <div class="models">
         @foreach (var job in Downloads.Jobs)
@@ -54,7 +54,7 @@ else
     {
         <div class="row"><button class="btn" @onclick="Downloads.ClearFinishedAsync">Clear finished</button></div>
     }
-    <p class="note">Downloads continue while you use the rest of DOG AI, and the connection closes when the last one finishes. Cancelling deletes the partial file.</p>
+    <p class="note">Downloads continue while you use the rest of DOG.ai, and the connection closes when the last one finishes. Cancelling deletes the partial file.</p>
 }
 
 @code {

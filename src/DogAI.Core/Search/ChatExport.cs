@@ -6,7 +6,7 @@ namespace DogAI.Core.Search;
 /// <summary>Writes the branch of a chat that is on screen as a markdown file.</summary>
 public static class ChatExport
 {
-    public static string ToMarkdown(Conversation conversation, IReadOnlyList<ChatMessage> branch, string userName = "You", string assistantName = "DOG AI",
+    public static string ToMarkdown(Conversation conversation, IReadOnlyList<ChatMessage> branch, string userName = "You", string assistantName = "DOG.ai",
         Func<ChatMessage, string?>? speaker = null)
     {
         var text = new StringBuilder();

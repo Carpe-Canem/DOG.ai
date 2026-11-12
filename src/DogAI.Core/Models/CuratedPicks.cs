@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace DogAI.Core.Models;
 
-/// <summary>A model DOG AI recommends for one use case.</summary>
+/// <summary>A model DOG.ai recommends for one use case.</summary>
 /// <param name="Params">Parameter count in billions, for estimating sizes before the file list is fetched.</param>
 /// <param name="Experts">Mixture-of-experts model: much faster than its size suggests.</param>
 public sealed record CuratedPick(string UseCase, string Repo, string Title, double Params, string Blurb, bool Experts = false)

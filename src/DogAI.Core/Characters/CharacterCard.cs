@@ -115,7 +115,7 @@ public static class CharacterCard
         return root.ToJsonString(indented ? Pretty : null);
     }
 
-    /// <summary>The card as Character Card V3 JSON, keeping every field DOG AI does not edit.</summary>
+    /// <summary>The card as Character Card V3 JSON, keeping every field DOG.ai does not edit.</summary>
     public static string ToV3Json(Character c, bool indented = false)
     {
         var data = Fields(c);

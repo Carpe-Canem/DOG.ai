@@ -20,7 +20,7 @@ public enum DictationState
 /// Talking instead of typing. <b>Push to talk</b>: <see cref="StartAsync"/> records until <see cref="FinishAsync"/>,
 /// then the words go into the message box. <b>Hands-free</b>: <see cref="StartHandsFreeAsync"/> keeps the microphone
 /// on; each time the user stops talking, what they said is sent. Hands-free does not listen while
-/// <see cref="Paused"/> says so (a reply is being written or read aloud), so DOG AI never hears itself.
+/// <see cref="Paused"/> says so (a reply is being written or read aloud), so DOG.ai never hears itself.
 /// </summary>
 public sealed class Dictation : IDisposable
 {

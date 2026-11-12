@@ -13,7 +13,7 @@ public enum LorePosition
 
 /// <summary>
 /// One piece of world info: text that is added to the prompt when one of its keys shows up in recent messages.
-/// Follows the Character Card V2 "character_book" entry. Fields DOG AI does not edit are kept in <see cref="Raw"/>.
+/// Follows the Character Card V2 "character_book" entry. Fields DOG.ai does not edit are kept in <see cref="Raw"/>.
 /// </summary>
 public sealed class LoreEntry
 {
@@ -48,7 +48,7 @@ public sealed class LoreEntry
 
 /// <summary>
 /// A character's lorebook (the card's embedded "character_book"). Read from and written back to the
-/// card's <see cref="Character.ExtraJson"/>, so other apps get it back unchanged apart from DOG AI's edits.
+/// card's <see cref="Character.ExtraJson"/>, so other apps get it back unchanged apart from DOG.ai's edits.
 /// </summary>
 public sealed class Lorebook
 {
@@ -170,7 +170,7 @@ public sealed class Lorebook
         return book;
     }
 
-    /// <summary>The book as Character Card V2 "character_book" JSON, keeping fields DOG AI does not edit.</summary>
+    /// <summary>The book as Character Card V2 "character_book" JSON, keeping fields DOG.ai does not edit.</summary>
     public JsonObject ToJson()
     {
         var root = (JsonObject)Raw.DeepClone();

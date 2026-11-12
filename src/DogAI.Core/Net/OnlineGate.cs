@@ -1,7 +1,7 @@
 namespace DogAI.Core.Net;
 
 /// <summary>
-/// The single switch that decides whether DOG AI may reach the internet.
+/// The single switch that decides whether DOG.ai may reach the internet.
 /// Off by default; only the Models section turns it on.
 /// </summary>
 public sealed class OnlineGate

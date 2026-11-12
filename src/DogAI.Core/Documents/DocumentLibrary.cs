@@ -51,7 +51,7 @@ public sealed class DocumentLibrary(ICollectionStore store, IEmbedder embedder)
     {
         var info = new FileInfo(path);
         if (!info.Exists) throw new DocumentReadException("The file is not there any more.");
-        if (info.Length > TextExtractor.MaxFileBytes) throw new DocumentReadException("It is larger than 200 MB, which is more than DOG AI reads.");
+        if (info.Length > TextExtractor.MaxFileBytes) throw new DocumentReadException("It is larger than 200 MB, which is more than DOG.ai reads.");
         byte[] bytes;
         try
         {

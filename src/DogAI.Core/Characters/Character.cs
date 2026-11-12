@@ -23,7 +23,7 @@ public sealed class Character
     /// <summary>Sample exchanges showing how the character talks, usually in "&lt;START&gt;" blocks.</summary>
     public string ExampleMessages { get; set; } = "";
 
-    /// <summary>Replaces DOG AI's default role-play instruction when set.</summary>
+    /// <summary>Replaces DOG.ai's default role-play instruction when set.</summary>
     public string SystemPrompt { get; set; } = "";
 
     /// <summary>Instructions placed after the chat history.</summary>
@@ -36,7 +36,7 @@ public sealed class Character
     public List<string> Tags { get; set; } = [];
 
     /// <summary>
-    /// Card parts DOG AI does not edit (extensions, the embedded lorebook, V3-only fields), kept as JSON
+    /// Card parts DOG.ai does not edit (extensions, the embedded lorebook, V3-only fields), kept as JSON
     /// so exporting gives them back unchanged.
     /// </summary>
     public string ExtraJson { get; set; } = "";

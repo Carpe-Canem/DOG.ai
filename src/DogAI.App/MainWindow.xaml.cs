@@ -76,7 +76,7 @@ public partial class MainWindow : Window
         core.WebResourceRequested += (_, e) =>
         {
             if (OriginPolicy.IsAppUri(e.Request.Uri)) return;
-            e.Response = core.Environment.CreateWebResourceResponse(null, 403, "Blocked by DOG AI", "");
+            e.Response = core.Environment.CreateWebResourceResponse(null, 403, "Blocked by DOG.ai", "");
             _audit.Record("webview", StripQuery(e.Request.Uri), allowed: false, "outside app origin");
         };
         core.NavigationStarting += (_, e) =>

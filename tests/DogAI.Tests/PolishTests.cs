@@ -131,7 +131,7 @@ public sealed class SearchTextTests
         var md = ChatExport.ToMarkdown(chat, [
             new ChatMessage { Role = ChatRole.User, Content = "How?" },
             new ChatMessage { Role = ChatRole.Assistant, Content = "Boil water." }]);
-        Assert.Equal("# Tea: how?\n\n> Instructions: Be brief.\n\n**You:**\n\nHow?\n\n**DOG AI:**\n\nBoil water.\n", md);
+        Assert.Equal("# Tea: how?\n\n> Instructions: Be brief.\n\n**You:**\n\nHow?\n\n**DOG.ai:**\n\nBoil water.\n", md);
         Assert.Equal("Tea how.md", ChatExport.FileName("Tea: how?"));
         Assert.Equal("chat.md", ChatExport.FileName("???"));
     }
@@ -411,7 +411,7 @@ public sealed class DatabaseFeatureTests : IDisposable
             z.CreateEntry(DatabaseBackup.DatabaseEntry).Open().Dispose();
         }
         var error = await Assert.ThrowsAsync<BackupException>(() => DatabaseBackup.StageAsync(_paths, sneaky));
-        Assert.Contains("not a DOG AI backup", error.Message);
+        Assert.Contains("not a DOG.ai backup", error.Message);
 
         var wrongApp = Path.Combine(_root, "wrong.zip");
         using (var z = ZipFile.Open(wrongApp, ZipArchiveMode.Create))
@@ -457,7 +457,7 @@ public sealed class DatabaseFeatureTests : IDisposable
         ZipFile.CreateFromDirectory(work, tampered);
 
         var error = await Assert.ThrowsAsync<BackupException>(() => DatabaseBackup.StageAsync(_paths, tampered));
-        Assert.Contains("newer DOG AI", error.Message);
+        Assert.Contains("newer DOG.ai", error.Message);
         Assert.False(DatabaseBackup.HasPending(_paths));
     }
 

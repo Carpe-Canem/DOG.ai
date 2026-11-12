@@ -3,7 +3,7 @@ using DogAI.Core.Models;
 
 namespace DogAI.Engine;
 
-/// <summary>The facts DOG AI reads from a model file's header.</summary>
+/// <summary>The facts DOG.ai reads from a model file's header.</summary>
 public sealed record GgufInfo
 {
     public string? Name { get; init; }

@@ -253,7 +253,7 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
         }
         catch (JsonException)
         {
-            throw new EngineException("The model engine sent an answer DOG AI could not read.");
+            throw new EngineException("The model engine sent an answer DOG.ai could not read.");
         }
     }
 

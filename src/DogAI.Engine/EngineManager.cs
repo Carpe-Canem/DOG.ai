@@ -97,7 +97,7 @@ public sealed class EngineManager : IChatEngine, IDisposable
             Set(EngineState.Loading);
 
             if (!File.Exists(modelPath)) throw new EngineException("That model file no longer exists.");
-            if (info is null) throw new EngineException("That file is not a model DOG AI can load (it is not a GGUF file).");
+            if (info is null) throw new EngineException("That file is not a model DOG.ai can load (it is not a GGUF file).");
             var exe = _locator.Find() ?? throw new EngineException(
                 "The model engine (llama-server) was not found on this PC. Install it with: winget install llama.cpp");
 
@@ -263,7 +263,7 @@ public sealed class EngineManager : IChatEngine, IDisposable
             ct.ThrowIfCancellationRequested();
             if (process.HasExited) throw new EngineException(ExitMessage("The model engine stopped while loading the model."));
             if (await api.HealthAsync(ct).ConfigureAwait(false) == true) return;
-            if (clock.Elapsed > LoadTimeout) throw new EngineException("The model took more than ten minutes to load, so DOG AI gave up.");
+            if (clock.Elapsed > LoadTimeout) throw new EngineException("The model took more than ten minutes to load, so DOG.ai gave up.");
             await Task.Delay(250, ct).ConfigureAwait(false);
         }
     }

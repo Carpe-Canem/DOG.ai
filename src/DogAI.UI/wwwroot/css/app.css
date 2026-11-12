@@ -1,4 +1,4 @@
-/* DOG AI stylesheet.
+/* DOG.ai stylesheet.
    Structure: (1) tokens per skin and theme, (2) shared components that only use tokens,
    (3) per-skin layout and signature overrides. New screens should need only section 2. */
 
@@ -580,3 +580,4 @@ button.li { background: none; border: 0; color: inherit; font: inherit; cursor: 
 .math[data-math] { overflow-x: auto; overflow-y: hidden; max-width: 100%; }
 div.math[data-math] { margin: .6em 0; text-align: center; }
 .katex { font-size: 1.08em; }
+.word .ai { color: var(--accent); }

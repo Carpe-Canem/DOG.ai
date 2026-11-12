@@ -61,7 +61,7 @@ public sealed class VoiceActivity
         return (IReadOnlyList<float[]>?)done ?? [];
     }
 
-    /// <summary>Forgets everything heard so far (used while DOG AI itself is speaking).</summary>
+    /// <summary>Forgets everything heard so far (used while DOG.ai itself is speaking).</summary>
     public void Reset()
     {
         _frame.Clear();

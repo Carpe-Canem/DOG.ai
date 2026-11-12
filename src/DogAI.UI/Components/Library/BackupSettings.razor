@@ -28,7 +28,7 @@
             {
                 <text>A restore is waiting for the next start.</text>
             }
-            DOG AI has to restart to finish. What is in DOG AI now is kept in a safety copy and is not lost.
+            DOG.ai has to restart to finish. What is in DOG.ai now is kept in a safety copy and is not lost.
         </span>
         <span class="row">
             <button class="btn primary" @onclick="Desktop.Restart">Restart and restore</button>
@@ -60,7 +60,7 @@ else if (Backup.SafetyCopy is { } safety)
     private async Task BackUpAsync()
     {
         var name = $"DOG-AI backup {DateTime.Now:yyyy-MM-dd}.zip";
-        var path = await Desktop.PickSavePathAsync(name, "DOG AI backup (*.zip)|*.zip");
+        var path = await Desktop.PickSavePathAsync(name, "DOG.ai backup (*.zip)|*.zip");
         if (path is null) return;
         _busy = true;
         _message = null;
@@ -83,7 +83,7 @@ else if (Backup.SafetyCopy is { } safety)
 
     private async Task RestoreAsync()
     {
-        var path = await Desktop.PickOpenPathAsync("Choose a DOG AI backup", "DOG AI backup (*.zip)|*.zip|All files (*.*)|*.*");
+        var path = await Desktop.PickOpenPathAsync("Choose a DOG.ai backup", "DOG.ai backup (*.zip)|*.zip|All files (*.*)|*.*");
         if (path is null) return;
         _busy = true;
         _message = null;

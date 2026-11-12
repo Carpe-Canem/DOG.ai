@@ -10,7 +10,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>DogAI.App</RootNamespace>
     <AssemblyName>DogAI</AssemblyName>
-    <Product>DOG AI</Product>
+    <Product>DOG.ai</Product>
     <Version>0.1.0</Version>
     <ApplicationIcon>Assets\dogai.ico</ApplicationIcon>
   </PropertyGroup>

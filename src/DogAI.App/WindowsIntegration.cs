@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 namespace DogAI.App;
 
 /// <summary>
-/// The parts of DOG AI that live in Windows itself, each off until asked for in Settings:
+/// The parts of DOG.ai that live in Windows itself, each off until asked for in Settings:
 /// a notification-area (tray) icon, closing the window to the tray, and a key that works in every program.
 ///
 /// The key is Ctrl+Alt+Space, held to talk. It needs a low-level keyboard hook, because Windows' simpler hot key call only says a
@@ -71,12 +71,12 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
         if (_tray is not null) return;
 
         var menu = new System.Windows.Forms.ContextMenuStrip();
-        menu.Items.Add("Open DOG AI", null, (_, _) => ShowWindow());
+        menu.Items.Add("Open DOG.ai", null, (_, _) => ShowWindow());
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => Quit());
         _tray = new System.Windows.Forms.NotifyIcon
         {
-            Text = "DOG AI",
+            Text = "DOG.ai",
             Icon = Environment.ProcessPath is { } exe ? System.Drawing.Icon.ExtractAssociatedIcon(exe) : System.Drawing.SystemIcons.Application,
             ContextMenuStrip = menu,
             Visible = true,
@@ -154,14 +154,14 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
             }
             UnhookWindowsHookEx(_hook);
             _hook = IntPtr.Zero;
-        }) { IsBackground = true, Name = "DOG AI key watcher" };
+        }) { IsBackground = true, Name = "DOG.ai key watcher" };
         _hookThread.Start();
         ready.Wait(TimeSpan.FromSeconds(3));
 
         if (failure is not null)
         {
             _hookThread = null;
-            Problem = "Windows would not let DOG AI watch for Ctrl+Alt+Space (" + failure + ").";
+            Problem = "Windows would not let DOG.ai watch for Ctrl+Alt+Space (" + failure + ").";
             _log.LogWarning("{Problem}", Problem);
         }
     }
@@ -199,7 +199,7 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
             var message = (int)wParam;
             var down = message is WmKeyDown or WmSysKeyDown;
             var up = message is WmKeyUp or WmSysKeyUp;
-            // The text DOG AI types is sent as Unicode characters (key code 0xE7), never as Space, so it cannot set this off again.
+            // The text DOG.ai types is sent as Unicode characters (key code 0xE7), never as Space, so it cannot set this off again.
             {
                 if (key.VkCode == VkSpace && down)
                 {
@@ -234,7 +234,7 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
 
     private static bool Held(int vk) => (GetAsyncKeyState(vk) & 0x8000) != 0;
 
-    /// <summary>Inside DOG AI the message box has its own Ctrl+Space; the global key is for other programs.</summary>
+    /// <summary>Inside DOG.ai the message box has its own Ctrl+Space; the global key is for other programs.</summary>
     private static bool OwnWindowHasFocus()
     {
         var window = GetForegroundWindow();
@@ -258,7 +258,7 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
         }
         var array = inputs.ToArray();
         var sent = SendInput((uint)array.Length, array, Marshal.SizeOf<Input>());
-        if (sent != array.Length) _log.LogWarning("Typed {Sent} of {Total} key events into the focused program (it may be running with more rights than DOG AI)", sent, array.Length);
+        if (sent != array.Length) _log.LogWarning("Typed {Sent} of {Total} key events into the focused program (it may be running with more rights than DOG.ai)", sent, array.Length);
     }
 
     private static Input Unicode(char ch, bool up) => new()

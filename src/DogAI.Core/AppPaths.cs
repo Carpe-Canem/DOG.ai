@@ -1,6 +1,6 @@
 namespace DogAI.Core;
 
-/// <summary>Where DOG AI keeps its files. Everything the app writes lives under <see cref="Root"/>, except models.</summary>
+/// <summary>Where DOG.ai keeps its files. Everything the app writes lives under <see cref="Root"/>, except models.</summary>
 public sealed class AppPaths
 {
     /// <summary>Set this environment variable to relocate all app data (portable installs, tests).</summary>
@@ -21,7 +21,7 @@ public sealed class AppPaths
     public string LogsDirectory => Path.Combine(Root, "logs");
     public string WebViewDataDirectory => Path.Combine(Root, "webview");
 
-    /// <summary>Where DOG AI's own copy of the model engine goes once the Models section installs one.</summary>
+    /// <summary>Where DOG.ai's own copy of the model engine goes once the Models section installs one.</summary>
     public string EngineDirectory => Path.Combine(Root, "engine");
 
     public void EnsureCreated()

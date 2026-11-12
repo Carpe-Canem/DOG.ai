@@ -54,7 +54,7 @@ public static class TextExtractor
 
     public static ExtractedText Read(string fileName, byte[] bytes)
     {
-        if (bytes.LongLength > MaxFileBytes) throw new DocumentReadException("It is larger than 200 MB, which is more than DOG AI reads.");
+        if (bytes.LongLength > MaxFileBytes) throw new DocumentReadException("It is larger than 200 MB, which is more than DOG.ai reads.");
         var extension = Path.GetExtension(fileName);
         ExtractedText result;
         if (extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase) || StartsWith(bytes, "%PDF-"u8))
@@ -66,10 +66,10 @@ public static class TextExtractor
         else
             result = ReadText(bytes, MarkdownExtensions.Contains(extension) ? "markdown" : CodeExtensions.Contains(extension) ? "code" : "text");
 
-        if (result.Text.Length > MaxChars) throw new DocumentReadException("It has more than 20 million characters of text, which is more than DOG AI reads.");
+        if (result.Text.Length > MaxChars) throw new DocumentReadException("It has more than 20 million characters of text, which is more than DOG.ai reads.");
         if (result.Text.Trim().Length == 0)
             throw new DocumentReadException(result.Kind == "pdf"
-                ? "This PDF has no text in it. It is probably scanned pages (pictures of text), which DOG AI cannot read."
+                ? "This PDF has no text in it. It is probably scanned pages (pictures of text), which DOG.ai cannot read."
                 : "There is no text in it.");
         return result;
     }
@@ -188,7 +188,7 @@ public static class TextExtractor
         var probe = bytes.AsSpan(0, Math.Min(bytes.Length, 8192));
         var utf16 = StartsWith(bytes, [0xFF, 0xFE]) || StartsWith(bytes, [0xFE, 0xFF]);
         if (!utf16 && probe.IndexOf((byte)0) >= 0)
-            throw new DocumentReadException("It does not look like a text file, and DOG AI reads only PDF, Word (.docx), and text or code files.");
+            throw new DocumentReadException("It does not look like a text file, and DOG.ai reads only PDF, Word (.docx), and text or code files.");
         string text;
         using (var reader = new StreamReader(new MemoryStream(bytes), new UTF8Encoding(false, false), detectEncodingFromByteOrderMarks: true))
             text = reader.ReadToEnd();

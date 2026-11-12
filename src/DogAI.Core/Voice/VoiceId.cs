@@ -1,6 +1,6 @@
 namespace DogAI.Core.Voice;
 
-/// <summary>The kinds of voice DOG AI can speak with.</summary>
+/// <summary>The kinds of voice DOG.ai can speak with.</summary>
 public enum VoiceKind
 {
     /// <summary>A voice that comes with Windows. Always there, no download.</summary>

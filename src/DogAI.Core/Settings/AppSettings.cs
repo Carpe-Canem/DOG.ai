@@ -33,7 +33,7 @@ public sealed record AppSettings
     /// <summary>Speech recognition model: a file name in the voice folder. Null uses the first one found.</summary>
     public string? SpeechModel { get; init; }
 
-    /// <summary>Language spoken to DOG AI, as a code ("en", "de"…), or "auto" to let the model tell.</summary>
+    /// <summary>Language spoken to DOG.ai, as a code ("en", "de"…), or "auto" to let the model tell.</summary>
     public string SpeechLanguage { get; init; } = "auto";
 
     /// <summary>Microphone by its Windows name. Null uses the Windows default.</summary>
@@ -54,10 +54,10 @@ public sealed record AppSettings
     /// <summary>Hands-free listening: 0 needs clear, loud speech; 1 normal; 2 picks up quiet voices.</summary>
     public int HandsFreeSensitivity { get; init; } = 1;
 
-    /// <summary>Show DOG AI's icon in the Windows notification area (tray), with Open and Quit.</summary>
+    /// <summary>Show DOG.ai's icon in the Windows notification area (tray), with Open and Quit.</summary>
     public bool TrayIcon { get; init; }
 
-    /// <summary>Closing the window leaves DOG AI running in the tray instead of quitting. Needs <see cref="TrayIcon"/>.</summary>
+    /// <summary>Closing the window leaves DOG.ai running in the tray instead of quitting. Needs <see cref="TrayIcon"/>.</summary>
     public bool CloseToTray { get; init; }
 
     /// <summary>Hold Ctrl+Alt+Space in any program to talk, and what you say is typed there when you let go.</summary>
@@ -131,11 +131,11 @@ public interface IDesktopShell
     /// <summary>Opens a web address in the user's own browser. Only http and https; false for anything else.</summary>
     bool OpenUrl(string url);
 
-    /// <summary>Closes DOG AI and starts it again (used to finish a restore).</summary>
+    /// <summary>Closes DOG.ai and starts it again (used to finish a restore).</summary>
     void Restart();
 }
 
-/// <summary>The parts of DOG AI that live in Windows itself: the tray icon, closing to the tray, and the key that works anywhere.</summary>
+/// <summary>The parts of DOG.ai that live in Windows itself: the tray icon, closing to the tray, and the key that works anywhere.</summary>
 public interface IWindowsIntegration
 {
     /// <summary>Reads the saved settings and turns each part on or off. Call after changing them.</summary>

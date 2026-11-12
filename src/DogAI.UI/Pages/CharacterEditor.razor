@@ -144,7 +144,7 @@
 
         <details class="card-text" open="@(_c.SystemPrompt.Length > 0 || _c.PostHistoryInstructions.Length > 0)">
             <summary>Advanced</summary>
-            @Area("Main instruction", $"Replaces DOG AI's default role-play instruction. Leave empty to use the default. Write {{{{original}}}} to include the default inside your own.", () => _c.SystemPrompt, v => _c.SystemPrompt = v, 4)
+            @Area("Main instruction", $"Replaces DOG.ai's default role-play instruction. Leave empty to use the default. Write {{{{original}}}} to include the default inside your own.", () => _c.SystemPrompt, v => _c.SystemPrompt = v, 4)
             @Area("Final instruction", "A reminder added after everything else, such as \"Keep replies short\".", () => _c.PostHistoryInstructions, v => _c.PostHistoryInstructions = v, 3)
         </details>
 

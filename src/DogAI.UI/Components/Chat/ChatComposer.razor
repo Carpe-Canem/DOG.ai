@@ -145,7 +145,7 @@
         Dict.Heard += OnHeard;
         Reader.Changed += OnVoiceChanged;
         Voice.Changed += OnVoiceChanged;
-        // Hands-free does not listen while a reply is written or read aloud, so DOG AI never hears itself.
+        // Hands-free does not listen while a reply is written or read aloud, so DOG.ai never hears itself.
         Dict.Paused = () => Chat.IsBusy || Reader.IsSpeaking;
     }
 

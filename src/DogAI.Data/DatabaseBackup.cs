@@ -118,23 +118,23 @@ public static class DatabaseBackup
                 // Only the two files a backup holds, at the top level. Anything else (or a path that climbs out) is not one of ours.
                 foreach (var e in zip.Entries)
                     if (e.FullName != ManifestEntry && e.FullName != DatabaseEntry)
-                        throw new BackupException("This file is not a DOG AI backup (it holds files a backup never has).");
+                        throw new BackupException("This file is not a DOG.ai backup (it holds files a backup never has).");
                 var manifestEntry = zip.GetEntry(ManifestEntry);
                 var databaseEntry = zip.GetEntry(DatabaseEntry);
-                if (manifestEntry is null || databaseEntry is null) throw new BackupException("This file is not a DOG AI backup (a part is missing).");
-                if (manifestEntry.Length > 64 * 1024) throw new BackupException("This file is not a DOG AI backup.");
+                if (manifestEntry is null || databaseEntry is null) throw new BackupException("This file is not a DOG.ai backup (a part is missing).");
+                if (manifestEntry.Length > 64 * 1024) throw new BackupException("This file is not a DOG.ai backup.");
 
                 await using (var stream = manifestEntry.Open())
                     manifest = await JsonSerializer.DeserializeAsync<BackupManifest>(stream, cancellationToken: ct)
-                        ?? throw new BackupException("This file is not a DOG AI backup.");
-                if (manifest.App != AppName) throw new BackupException("This file is not a DOG AI backup.");
-                if (manifest.Format > FormatVersion) throw new BackupException("This backup was made by a newer DOG AI. Update DOG AI, then restore it.");
+                        ?? throw new BackupException("This file is not a DOG.ai backup.");
+                if (manifest.App != AppName) throw new BackupException("This file is not a DOG.ai backup.");
+                if (manifest.Format > FormatVersion) throw new BackupException("This backup was made by a newer DOG.ai. Update DOG.ai, then restore it.");
 
                 databaseEntry.ExtractToFile(extracted, overwrite: true);
             }
             catch (Exception e) when (e is InvalidDataException or JsonException)
             {
-                throw new BackupException("This file is not a DOG AI backup (it could not be read as one).");
+                throw new BackupException("This file is not a DOG.ai backup (it could not be read as one).");
             }
 
             await CheckDatabaseAsync(extracted, ct);
@@ -150,7 +150,7 @@ public static class DatabaseBackup
         }
     }
 
-    /// <summary>Throws unless the file is a healthy DOG AI database no newer than this version can read.</summary>
+    /// <summary>Throws unless the file is a healthy DOG.ai database no newer than this version can read.</summary>
     private static async Task CheckDatabaseAsync(string file, CancellationToken ct)
     {
         try
@@ -159,7 +159,7 @@ public static class DatabaseBackup
             await db.OpenAsync(ct);
             if (await Scalar<string>(db, "PRAGMA integrity_check", ct) != "ok") throw new BackupException("The database inside this backup is damaged.");
             if (await Scalar<long?>(db, "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('__EFMigrationsHistory', 'Conversations', 'Settings')", ct) != 3)
-                throw new BackupException("This file is not a DOG AI backup (its database is not DOG AI's).");
+                throw new BackupException("This file is not a DOG.ai backup (its database is not DOG.ai's).");
 
             var known = KnownMigrations();
             await using var command = db.CreateCommand();
@@ -167,7 +167,7 @@ public static class DatabaseBackup
             await using var reader = await command.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
                 if (!known.Contains(reader.GetString(0)))
-                    throw new BackupException("This backup was made by a newer DOG AI. Update DOG AI, then restore it.");
+                    throw new BackupException("This backup was made by a newer DOG.ai. Update DOG.ai, then restore it.");
         }
         catch (SqliteException)
         {

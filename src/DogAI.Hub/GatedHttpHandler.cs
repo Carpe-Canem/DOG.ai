@@ -3,7 +3,7 @@ using DogAI.Core.Net;
 namespace DogAI.Hub;
 
 /// <summary>
-/// Every outbound request in DOG AI passes through here. It refuses to send unless the
+/// Every outbound request in DOG.ai passes through here. It refuses to send unless the
 /// online gate is open and the destination is on the allow-list, and it re-checks on redirects.
 /// </summary>
 public sealed class GatedHttpHandler(OnlineGate gate, NetworkAudit audit, HttpMessageHandler inner) : DelegatingHandler(inner)
@@ -46,7 +46,7 @@ public sealed class GatedHttpHandler(OnlineGate gate, NetworkAudit audit, HttpMe
         if (!gate.IsOnline)
         {
             audit.Record("hub", target, allowed: false, "offline");
-            throw new OfflineException("DOG AI is offline. Go online from the Models section to allow this.");
+            throw new OfflineException("DOG.ai is offline. Go online from the Models section to allow this.");
         }
         if (!OriginPolicy.IsAllowedHubUri(uri))
         {

@@ -1,7 +1,7 @@
 namespace DogAI.Core.Models;
 
 /// <summary>
-/// What DOG AI remembers about one installed model file: where it came from and how it ran
+/// What DOG.ai remembers about one installed model file: where it came from and how it ran
 /// when benchmarked. Files found on disk without a record still show in the library.
 /// </summary>
 public sealed class ModelRecord

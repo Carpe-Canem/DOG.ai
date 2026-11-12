@@ -99,7 +99,7 @@ public sealed class CardBuilder(IChatEngine engine)
             AlternateGreetings = Strings(o, "alternate_greetings"),
             ExampleMessages = Str(o, "mes_example").Trim(),
             Tags = Strings(o, "tags").Select(t => t.ToLowerInvariant()).Distinct().Take(10).ToList(),
-            Creator = "DOG AI card builder",
+            Creator = "DOG.ai card builder",
         };
     }
 

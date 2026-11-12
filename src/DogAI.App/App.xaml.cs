@@ -19,7 +19,7 @@ public partial class App : Application
 {
     private ServiceProvider? _services;
 
-    /// <summary>Given to a restarted DOG AI: wait for this process (the old one) to exit before touching any files.</summary>
+    /// <summary>Given to a restarted DOG.ai: wait for this process (the old one) to exit before touching any files.</summary>
     public const string AfterArgument = "--after";
 
     protected override async void OnStartup(StartupEventArgs e)
@@ -42,7 +42,7 @@ public partial class App : Application
         DispatcherUnhandledException += (_, args) =>
         {
             Log.Fatal(args.Exception, "Unhandled UI exception");
-            MessageBox.Show(args.Exception.Message, "DOG AI hit a problem", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(args.Exception.Message, "DOG.ai hit a problem", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
 
@@ -53,7 +53,7 @@ public partial class App : Application
 
             _services = BuildServices(paths);
             var log = _services.GetRequiredService<ILogger<App>>();
-            log.LogInformation("DOG AI starting. Data folder: {Root}", paths.Root);
+            log.LogInformation("DOG.ai starting. Data folder: {Root}", paths.Root);
 
             var audit = _services.GetRequiredService<NetworkAudit>();
             audit.Recorded += entry =>
@@ -90,7 +90,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Fatal(ex, "Startup failed");
-            MessageBox.Show(ex.Message, "DOG AI could not start", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(ex.Message, "DOG.ai could not start", MessageBoxButton.OK, MessageBoxImage.Error);
             Shutdown(1);
         }
     }

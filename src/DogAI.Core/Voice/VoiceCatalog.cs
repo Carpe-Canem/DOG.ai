@@ -3,7 +3,7 @@ namespace DogAI.Core.Voice;
 /// <summary>What a recommended voice download is for.</summary>
 public enum VoiceModelUse
 {
-    /// <summary>Speech recognition: talking to DOG AI (Whisper).</summary>
+    /// <summary>Speech recognition: talking to DOG.ai (Whisper).</summary>
     Listening,
 
     /// <summary>A voice for reading replies aloud (Kokoro, Piper).</summary>
@@ -22,7 +22,7 @@ public sealed record VoiceDownload(VoiceModelUse Use, string Repo, string Title,
 }
 
 /// <summary>
-/// The voice models DOG AI recommends (researched 2026-11-12; sizes and licences checked on Hugging Face). Piper
+/// The voice models DOG.ai recommends (researched 2026-11-12; sizes and licences checked on Hugging Face). Piper
 /// voices whose recordings are licensed for non-commercial use only, or whose licence is unclear, are left out.
 /// </summary>
 public static class VoiceCatalog

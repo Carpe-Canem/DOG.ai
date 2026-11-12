@@ -10,14 +10,14 @@ namespace DogAI.Hub;
 /// <summary>A downloadable file in a llama.cpp release.</summary>
 public sealed record ReleaseAsset(string Name, string Url, long Size, string? Sha256);
 
-/// <summary>The engine build DOG AI would install: the program, plus the CUDA runtime it needs if any.</summary>
+/// <summary>The engine build DOG.ai would install: the program, plus the CUDA runtime it needs if any.</summary>
 public sealed record EngineRelease(string Tag, string Flavor, ReleaseAsset Program, ReleaseAsset? Runtime, DateTime? Published)
 {
     public long TotalBytes => Program.Size + (Runtime?.Size ?? 0);
 }
 
 /// <summary>
-/// Installs and updates DOG AI's own copy of llama.cpp from its GitHub releases: the CUDA build
+/// Installs and updates DOG.ai's own copy of llama.cpp from its GitHub releases: the CUDA build
 /// matching the graphics driver on NVIDIA cards, otherwise the Vulkan build. Files are hash-checked,
 /// unpacked to a side folder, and swapped in only when complete, so a failed update leaves the old engine.
 /// </summary>
@@ -28,7 +28,7 @@ public sealed partial class EngineUpdater(HttpClient http, AppPaths paths)
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    /// <summary>The build tag DOG AI installed, e.g. "b12110". Null when it has not installed one.</summary>
+    /// <summary>The build tag DOG.ai installed, e.g. "b12110". Null when it has not installed one.</summary>
     public string? InstalledTag
     {
         get
@@ -54,7 +54,7 @@ public sealed partial class EngineUpdater(HttpClient http, AppPaths paths)
             latest.Assets.FirstOrDefault(a => a.Name.Equals("nightly-tag.txt", StringComparison.OrdinalIgnoreCase)) is { } pointer)
         {
             var tag = (await GetStringAsync(pointer.BrowserDownloadUrl, ct).ConfigureAwait(false)).Trim();
-            if (!TagPattern().IsMatch(tag)) throw new HubException("The llama.cpp release pointed to a build DOG AI does not recognise.");
+            if (!TagPattern().IsMatch(tag)) throw new HubException("The llama.cpp release pointed to a build DOG.ai does not recognise.");
             release = await GetAsync<ApiRelease>($"{Api}/tags/{tag}", ct).ConfigureAwait(false)
                 ?? throw new HubException($"GitHub did not return llama.cpp build {tag}.");
         }

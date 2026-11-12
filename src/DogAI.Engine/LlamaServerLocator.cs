@@ -3,7 +3,7 @@ using DogAI.Core;
 namespace DogAI.Engine;
 
 /// <summary>
-/// Finds the llama-server program. Order: an explicit override, DOG AI's own copy (installed by the
+/// Finds the llama-server program. Order: an explicit override, DOG.ai's own copy (installed by the
 /// Models section from milestone 2), then one already on this PC, e.g. from winget.
 /// </summary>
 public sealed class LlamaServerLocator(AppPaths paths)

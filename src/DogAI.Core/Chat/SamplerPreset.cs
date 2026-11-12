@@ -19,15 +19,15 @@ public sealed record SamplerPreset(string Id, string Name, string Description)
     public double XtcProbability { get; init; }
     public double XtcThreshold { get; init; } = 0.1;
 
-    /// <summary>Most tokens to write. Null means no limit. Set by DOG AI for its own jobs (summaries), never saved with a style.</summary>
+    /// <summary>Most tokens to write. Null means no limit. Set by DOG.ai for its own jobs (summaries), never saved with a style.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public int? MaxTokens { get; init; }
 
-    /// <summary>A JSON schema the answer must follow (structured output). Set by DOG AI for its own jobs, never saved with a style.</summary>
+    /// <summary>A JSON schema the answer must follow (structured output). Set by DOG.ai for its own jobs, never saved with a style.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string? JsonSchema { get; init; }
 
-    /// <summary>Text at which to stop writing. Set by DOG AI for its own jobs, never saved with a style.</summary>
+    /// <summary>Text at which to stop writing. Set by DOG.ai for its own jobs, never saved with a style.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public IReadOnlyList<string>? Stop { get; init; }
 }
