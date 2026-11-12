@@ -25,7 +25,7 @@ public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher,
             status("Working out how much fits on the graphics card…");
             var plan = await launcher.PlanAsync(file, context, ct).ConfigureAwait(false);
             if (plan is { Kind: FitKind.TooLarge })
-                throw new ModelTooLargeException(LoadDecision.Decide(file.Name, context, plan, await launcher.BudgetAsync(ct).ConfigureAwait(false), null).Refusal!);
+                throw new ModelRefusedException(LoadDecision.Decide(file.Name, context, plan, await launcher.BudgetAsync(ct).ConfigureAwait(false), null).Refusal!);
             var layerCount = plan?.Layers ?? 0;
             var layers = plan is { Kind: FitKind.Partial } ? plan.GpuLayers : -1;
 

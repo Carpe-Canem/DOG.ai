@@ -220,7 +220,7 @@
             }
             else Say(Engine.Error ?? "The model could not be loaded.", bad: true);
         }
-        catch (ModelTooLargeException e)
+        catch (ModelRefusedException e)
         {
             Say(e.Message, bad: true);
         }
@@ -246,7 +246,7 @@
         {
             Say("The benchmark failed: " + e.Message, bad: true);
         }
-        catch (ModelTooLargeException e)
+        catch (ModelRefusedException e)
         {
             Say(e.Message, bad: true);
         }

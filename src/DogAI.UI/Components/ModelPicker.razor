@@ -129,8 +129,9 @@
         var models = await Task.Run(() => ModelLibrary.ScanAll(folders).Where(f => GgufReader.TryRead(f.Path)?.IsEmbedding(f.Path) != true).ToList());
 
         // A model picked from elsewhere last time stays on offer.
-        if (_settings.LastModelPath is { } last && models.All(m => !SamePath(m.Path, last)) && File.Exists(last))
-            models.Insert(0, new ModelFile(last, GgufReader.TryRead(last)?.DisplayName(last) ?? Path.GetFileNameWithoutExtension(last), new FileInfo(last).Length));
+        if (_settings.LastModelPath is { } last && models.All(m => !SamePath(m.Path, last)) && File.Exists(last)
+            && GgufReader.TryRead(last) is var lastInfo && lastInfo?.IsEmbedding(last) != true)
+            models.Insert(0, new ModelFile(last, lastInfo?.DisplayName(last) ?? Path.GetFileNameWithoutExtension(last), new FileInfo(last).Length));
 
         // The mode's own default model goes first.
         _models = models.OrderByDescending(m => IsDefault(m.Path)).ToList();
@@ -150,7 +151,7 @@
         {
             await Launcher.LoadAsync(path, _settings.ContextLength);
         }
-        catch (ModelTooLargeException e)
+        catch (ModelRefusedException e)
         {
             _refused = e.Message;
             return;
