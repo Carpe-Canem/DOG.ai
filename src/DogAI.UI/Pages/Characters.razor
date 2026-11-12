@@ -65,6 +65,7 @@ else if (_conversation.Id == 0)
                 <div class="row">
                     <button class="btn primary" disabled="@_busy" @onclick="StartChatAsync">New chat</button>
                     <a class="btn" href="characters/@c.Id/edit">Edit</a>
+                    <a class="btn" href="characters/@c.Id/lore" title="Facts about the world that are added to the prompt when their keywords come up">Lore@(_loreCount > 0 ? $" ({_loreCount})" : "")</a>
                     <button class="btn" @onclick="ExportPngAsync" title="A picture with the card inside, which other apps can import">Save as card</button>
                     <button class="btn" @onclick="ExportJsonAsync">Save as JSON</button>
                     @if (_confirmDelete)
@@ -140,7 +141,7 @@ else
 @if (_conversation.Id != 0 && _character is not null)
 {
     <SectionContent SectionName="composer">
-        <ChatComposer Path="@_path" OnSend="SendAsync" Placeholder="@($"Message {_character.Name}. Enter sends, Shift+Enter adds a line.")" />
+        <ChatComposer Path="@_path" OnSend="SendAsync" Impersonate="ImpersonateAsync" Placeholder="@($"Message {_character.Name}. Enter sends, Shift+Enter adds a line.")" />
     </SectionContent>
 
     <SectionContent SectionName="aside">
@@ -166,6 +167,33 @@ else
             <h4>Extra instructions</h4>
             <textarea class="field" rows="5" aria-label="Extra instructions" placeholder="Optional. Added to the character's card for this chat only."
                       value="@_conversation.SystemPrompt" @onchange="SetInstructionsAsync"></textarea>
+        </div>
+        <div class="panel">
+            <h4>Author's note</h4>
+            <textarea class="field" rows="3" aria-label="Author's note" placeholder="Optional. A short reminder kept near the end of the chat, such as the mood or the weather. Sent with every reply."
+                      value="@_conversation.AuthorsNote" @onchange="SetAuthorsNoteAsync"></textarea>
+            <label class="small inline-select">
+                Placed
+                <select class="field" aria-label="Where the note goes" value="@_conversation.AuthorsNoteDepth" @onchange="SetNoteDepthAsync">
+                    @foreach (var depth in NoteDepths)
+                    {
+                        <option value="@depth">@(depth == 0 ? "with the newest message" : $"{depth} message{(depth == 1 ? "" : "s")} back")</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <div class="panel">
+            <h4>Memory</h4>
+            <label class="check"><input type="checkbox" checked="@_conversation.MemoryEnabled" @onchange="SetMemoryAsync" /> Summarise older messages when the chat outgrows the model's context</label>
+            @if (SummaryState is { } summary)
+            {
+                <p class="small">@summary</p>
+                @if (_conversation.Summary.Length > 0)
+                {
+                    <textarea class="field" rows="6" aria-label="Summary of earlier messages" value="@_conversation.Summary" @onchange="EditSummaryAsync"></textarea>
+                    <div class="row"><button class="btn" disabled="@Streaming" @onclick="ForgetSummaryAsync" title="Write a fresh summary when one is next needed">Forget summary</button></div>
+                }
+            }
         </div>
         <div class="panel">
             <h4>This chat</h4>
@@ -206,6 +234,24 @@ else
     private string? _notice;
     private string? _saved;
     private ActiveReply? _seenActive;
+    private int _loreCount;
+
+    private static readonly int[] NoteDepths = [0, 1, 2, 4, 6, 8];
+
+    /// <summary>A line saying what the summary covers, or why there is none. Null while memory is off.</summary>
+    private string? SummaryState
+    {
+        get
+        {
+            if (!_conversation.MemoryEnabled) return null;
+            if (_conversation.Summary.Length == 0)
+                return "No summary yet. One is written when older messages stop fitting in the context.";
+            var at = _conversation.SummaryThroughId is { } id ? _path.ToList().FindIndex(m => m.Id == id) : -1;
+            return at < 0
+                ? "This summary was written for another version of the chat and is not used here. A new one is written when needed."
+                : $"Covers the first {at + 1} message{(at == 0 ? "" : "s")}. It is sent instead of the ones left out; you can correct it.";
+        }
+    }
 
     private bool Streaming => Chat.Active is { } a && a.ConversationId == _conversation.Id && _conversation.Id != 0;
 
@@ -252,6 +298,7 @@ else
             return;
         }
         _character = character;
+        _loreCount = character is null ? 0 : Lorebook.For(character).Entries.Count;
         _chats = chats;
         _personas = personas;
         _conversation = conversation ?? new Conversation();
@@ -305,6 +352,55 @@ else
         {
             _notice = e.Message;
         }
+    }
+
+    private async Task<string> ImpersonateAsync()
+    {
+        if (_conversation.Id == 0) return "";
+        _notice = null;
+        try
+        {
+            return await Chat.ImpersonateAsync(_conversation.Id);
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            _notice = e.Message;
+            return "";
+        }
+    }
+
+    private async Task SetAuthorsNoteAsync(ChangeEventArgs e)
+    {
+        _conversation.AuthorsNote = e.Value?.ToString()?.Trim() ?? "";
+        await Store.UpdateAsync(_conversation);
+    }
+
+    private async Task SetNoteDepthAsync(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var depth)) return;
+        _conversation.AuthorsNoteDepth = depth;
+        await Store.UpdateAsync(_conversation);
+    }
+
+    private async Task SetMemoryAsync(ChangeEventArgs e)
+    {
+        _conversation.MemoryEnabled = e.Value is true;
+        await Store.UpdateAsync(_conversation);
+    }
+
+    private async Task EditSummaryAsync(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString()?.Trim() ?? "";
+        _conversation.Summary = text;
+        if (text.Length == 0) _conversation.SummaryThroughId = null;
+        await Store.SetSummaryAsync(_conversation.Id, text, _conversation.SummaryThroughId);
+    }
+
+    private async Task ForgetSummaryAsync()
+    {
+        await Chat.ForgetSummaryAsync(_conversation.Id);
+        _conversation.Summary = "";
+        _conversation.SummaryThroughId = null;
     }
 
     private async Task SetPersonaAsync(ChangeEventArgs e)

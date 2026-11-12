@@ -17,7 +17,7 @@
         var isUser = m.Role == ChatRole.User;
         var isLast = ReferenceEquals(m, Visible[^1]);
         // In character chats the last reply always shows its arrows; the right one past the newest writes another.
-        var swipe = Swipes && isLast && !isUser && Streaming is null;
+        var swipe = Swipes && isLast && !isUser && StreamingReply is null;
         <MessageView IsUser="@isUser" Name="@(isUser ? UserName : AssistantName ?? m.ModelName ?? "Model")"
                      Content="@m.Content" Reasoning="@m.Reasoning" AvatarUrl="@(isUser ? UserAvatar : AssistantAvatar)" Letter="@Letter"
                      Editor="@(_editingId == m.Id ? EditBox(m) : null)">
@@ -76,8 +76,15 @@
     }
     @if (Streaming is { } reply)
     {
-        <MessageView Name="@(AssistantName ?? Engine.ModelName ?? "Model")" AvatarUrl="@AssistantAvatar" Letter="@Letter"
-                     Content="@reply.Content" Reasoning="@reply.Reasoning" Streaming="true" />
+        @if (reply.Kind == ReplyKind.Reply)
+        {
+            <MessageView Name="@(AssistantName ?? Engine.ModelName ?? "Model")" AvatarUrl="@AssistantAvatar" Letter="@Letter"
+                         Content="@reply.Content" Reasoning="@reply.Reasoning" Streaming="true" />
+        }
+        @if (reply.Status is { } status)
+        {
+            <p class="small status-line">@status…</p>
+        }
     }
     @if (Problem is { } problem)
     {
@@ -99,6 +106,14 @@
             @if (inspected.TrimmedMessages is > 0)
             {
                 <div class="kv"><span>Older messages left out to fit</span><span>@inspected.TrimmedMessages</span></div>
+            }
+            @if (inspected.MemoryUsed is { } memory)
+            {
+                <div class="kv"><span>Summary of earlier messages</span><span>covers @memory</span></div>
+            }
+            @if (inspected.LoreUsed is { } lore)
+            {
+                <div class="kv"><span>Lore entries included</span><span>@lore.ReplaceLineEndings(", ")</span></div>
             }
         </div>
         <div class="code">
@@ -138,12 +153,15 @@
     /// <summary>The reply being written in this chat, if any.</summary>
     private ActiveReply? Streaming => Chat.Active is { } a && a.ConversationId == Conversation.Id && Conversation.Id != 0 ? a : null;
 
+    /// <summary>A reply being written into the thread (not a draft going to the message box).</summary>
+    private ActiveReply? StreamingReply => Streaming is { Kind: ReplyKind.Reply } a ? a : null;
+
     /// <summary>The branch on screen. While a reply streams it ends where that reply goes.</summary>
     private IReadOnlyList<ChatMessage> Visible
     {
         get
         {
-            if (Streaming is not { } reply) return Path;
+            if (StreamingReply is not { } reply) return Path;
             if (reply.ContinuingId is { } continuing)
             {
                 var at = IndexOf(Path, continuing);
@@ -169,9 +187,9 @@
     {
         // Jump to the end when a chat opens or a reply starts. Otherwise follow only if the reader is already at
         // the end, so flipping versions or a reply finishing never pulls someone away from what they are reading.
-        var force = Conversation.Id != _shownConversation || (Streaming is not null && !ReferenceEquals(Streaming, _shownActive));
+        var force = Conversation.Id != _shownConversation || (StreamingReply is not null && !ReferenceEquals(StreamingReply, _shownActive));
         _shownConversation = Conversation.Id;
-        _shownActive = Streaming;
+        _shownActive = StreamingReply;
         try
         {
             _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");

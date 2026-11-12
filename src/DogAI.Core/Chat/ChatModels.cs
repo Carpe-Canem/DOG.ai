@@ -30,6 +30,21 @@ public sealed class Conversation
     /// <summary>The last message of the branch currently shown. Null while the chat is empty.</summary>
     public long? ActiveLeafId { get; set; }
 
+    /// <summary>A reminder placed a few messages from the end of the prompt (Characters). Empty means none.</summary>
+    public string AuthorsNote { get; set; } = "";
+
+    /// <summary>How many messages from the end the author's note goes.</summary>
+    public int AuthorsNoteDepth { get; set; } = PromptLayout.DefaultAuthorsNoteDepth;
+
+    /// <summary>Rolling summary of older turns that no longer fit in the prompt. Empty means none yet.</summary>
+    public string Summary { get; set; } = "";
+
+    /// <summary>The last message <see cref="Summary"/> covers. The summary is used only while this message is on the branch shown.</summary>
+    public long? SummaryThroughId { get; set; }
+
+    /// <summary>Whether older turns are summarised when the chat outgrows the context window.</summary>
+    public bool MemoryEnabled { get; set; } = true;
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
@@ -66,6 +81,12 @@ public sealed class ChatMessage
 
     /// <summary>How many earlier messages were left out of the prompt to fit the context window.</summary>
     public int? TrimmedMessages { get; set; }
+
+    /// <summary>Names of the lore entries that were in the prompt, one per line. Null when none.</summary>
+    public string? LoreUsed { get; set; }
+
+    /// <summary>Which turns the summary in the prompt covered, as "1–40". Null when no summary was used.</summary>
+    public string? MemoryUsed { get; set; }
 }
 
 public interface IChatStore
@@ -74,8 +95,13 @@ public interface IChatStore
     Task<Conversation?> GetAsync(long id, CancellationToken ct = default);
     Task<Conversation> CreateAsync(Conversation conversation, CancellationToken ct = default);
 
-    /// <summary>Saves title, instructions, preset and persona. The active branch is changed only through <see cref="SetActiveLeafAsync"/>.</summary>
+    /// <summary>
+    /// Saves title, instructions, preset, persona, author's note and the memory switch. The active branch and the
+    /// summary are changed only through <see cref="SetActiveLeafAsync"/> and <see cref="SetSummaryAsync"/>.
+    /// </summary>
     Task UpdateAsync(Conversation conversation, CancellationToken ct = default);
+
+    Task SetSummaryAsync(long conversationId, string summary, long? throughId, CancellationToken ct = default);
 
     /// <summary>Chooses which branch is shown and marks the chat as just used.</summary>
     Task SetActiveLeafAsync(long conversationId, long? leafId, CancellationToken ct = default);

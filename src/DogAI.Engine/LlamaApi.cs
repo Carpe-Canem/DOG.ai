@@ -56,19 +56,29 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
         return json["prompt"]?.GetValue<string>() ?? "";
     }
 
-    private static JsonObject SamplerBody(SamplerPreset sampler) => new()
+    private static JsonObject SamplerBody(SamplerPreset sampler)
     {
-        ["stream"] = true,
-        ["cache_prompt"] = true,
-        ["temperature"] = sampler.Temperature,
-        ["top_p"] = sampler.TopP,
-        ["top_k"] = sampler.TopK,
-        ["min_p"] = sampler.MinP,
-        ["repeat_penalty"] = sampler.RepeatPenalty,
-        ["dry_multiplier"] = sampler.DryMultiplier,
-        ["xtc_probability"] = sampler.XtcProbability,
-        ["xtc_threshold"] = sampler.XtcThreshold,
-    };
+        var body = new JsonObject
+        {
+            ["stream"] = true,
+            ["cache_prompt"] = true,
+            ["temperature"] = sampler.Temperature,
+            ["top_p"] = sampler.TopP,
+            ["top_k"] = sampler.TopK,
+            ["min_p"] = sampler.MinP,
+            ["repeat_penalty"] = sampler.RepeatPenalty,
+            ["dry_multiplier"] = sampler.DryMultiplier,
+            ["xtc_probability"] = sampler.XtcProbability,
+            ["xtc_threshold"] = sampler.XtcThreshold,
+        };
+        // "max_tokens" for chat completions, "n_predict" for /completion; each endpoint ignores the other.
+        if (sampler.MaxTokens is { } max)
+        {
+            body["max_tokens"] = max;
+            body["n_predict"] = max;
+        }
+        return body;
+    }
 
     /// <summary>
     /// Streams a continuation of raw prompt text through the native /completion endpoint, which (unlike chat
@@ -78,7 +88,7 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
     {
         var body = SamplerBody(sampler);
         body["prompt"] = prompt;
-        body["n_predict"] = -1;
+        body["n_predict"] ??= -1;
 
         using var response = await http.SendAsync(
             Request(HttpMethod.Post, "completion", body), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);

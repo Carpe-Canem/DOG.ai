@@ -261,6 +261,15 @@ img.avatar { object-fit: cover; padding: 0; }
 .editor-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding-bottom: 8px; }
 .editor-foot .row { margin-top: 0; }
 label.check { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+.lore-settings { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
+.lore-entry summary { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.lore-entry summary .small { overflow-wrap: anywhere; }
+.lore-entry.off { opacity: .65; }
+.lore-flags { display: flex; gap: 6px 18px; flex-wrap: wrap; }
+.lore-numbers { display: grid; grid-template-columns: 2fr 1fr 1fr auto; gap: 10px; align-items: end; }
+.inline-select { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.inline-select .field { flex: 1; min-width: 0; }
+.status-line { margin: 0 0 8px; }
 .persona-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
 .persona { display: flex; gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); min-width: 0; }
 .persona:hover { border-color: var(--muted); }

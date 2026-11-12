@@ -4,8 +4,16 @@ using DogAI.Core.Characters;
 
 namespace DogAI.Core.Chat;
 
+/// <summary>What is being written: a reply in the chat, or a draft of the user's own next message (impersonate).</summary>
+public enum ReplyKind
+{
+    Reply = 0,
+    Draft = 1,
+}
+
 /// <summary>The reply being written right now. Read from the UI while it streams.</summary>
-public sealed class ActiveReply(long conversationId, long? parentId, long? continuingId = null, string? startText = null, string? startReasoning = null)
+public sealed class ActiveReply(long conversationId, long? parentId, long? continuingId = null, string? startText = null, string? startReasoning = null,
+    ReplyKind kind = ReplyKind.Reply)
 {
     private readonly StringBuilder _content = new(startText ?? "");
     private readonly StringBuilder _reasoning = new(startReasoning ?? "");
@@ -18,6 +26,11 @@ public sealed class ActiveReply(long conversationId, long? parentId, long? conti
 
     /// <summary>When continuing a stopped reply: that reply's id. Its text so far is already in <see cref="Content"/>.</summary>
     public long? ContinuingId { get; } = continuingId;
+
+    public ReplyKind Kind { get; } = kind;
+
+    /// <summary>What is happening before the text starts, e.g. "Summarising older messages". Null while writing.</summary>
+    public string? Status { get; internal set; }
 
     public string Content { get { lock (_lock) return _content.ToString(); } }
     public string Reasoning { get { lock (_lock) return _reasoning.ToString(); } }
@@ -44,6 +57,10 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
 
     private readonly PresetCatalog _presets = presets ?? new PresetCatalog();
     private readonly Dictionary<long, (int Hash, int Tokens)> _tokenCache = [];
+    private readonly Dictionary<string, int> _textTokenCache = [];
+
+    /// <summary>Per chat: after a summary attempt gave nothing usable, the branch length at which to try again.</summary>
+    private readonly Dictionary<long, int> _summaryRetryAt = [];
     private string? _tokenCacheModel;
     private CancellationTokenSource? _cts;
 
@@ -197,17 +214,81 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
         await GenerateAsync(conversationId, question.Id);
     }
 
+    /// <summary>
+    /// Writes a draft of the user's next message in a character chat ("impersonate"). Nothing is saved: the text
+    /// is returned for the message box, where the user can change it before sending. Empty when stopped early.
+    /// </summary>
+    public async Task<string> ImpersonateAsync(long conversationId, CancellationToken ct = default)
+    {
+        EnsureCanStart();
+        var conversation = await store.GetAsync(conversationId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
+        var leaf = new MessageTree(await store.GetMessagesAsync(conversationId, ct)).ResolveLeaf(conversation.ActiveLeafId);
+
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var active = new ActiveReply(conversationId, leaf, kind: ReplyKind.Draft);
+        Begin(active, cts);
+        string? error = null;
+        try
+        {
+            var token = cts.Token;
+            var path = new MessageTree(await store.GetMessagesAsync(conversationId, token)).PathTo(leaf);
+            var (layout, names) = await PrepareAsync(conversation, path, active, token);
+            layout.FinalInstruction = ""; // the card's final instruction is about the character's replies
+            layout.Directive = CharacterPrompt.Fill(CharacterPrompt.ImpersonateDirective, names.Character, names.User);
+            layout.Add(PromptPartKind.Instruction, CharacterPrompt.Fill(CharacterPrompt.ImpersonateHint, names.Character, names.User));
+            var built = await BuildPromptAsync(layout, path, PromptEnd.UserTurn, token);
+            var preset = _presets.Get(conversation.PresetId);
+            // Writing inside an open user turn makes the model speak as the user; asking it to is the fallback.
+            var stream = built.OpenUserTurn ? engine.StreamCompletionAsync(built.Text, preset, token) : engine.StreamChatAsync(built.Prompt, preset, token);
+            await StreamAsync(stream, active, null, 0, token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+        }
+        catch (Exception e)
+        {
+            error = e.Message;
+        }
+        finally
+        {
+            End(conversationId, error);
+            cts.Dispose();
+        }
+        return active.Content.Trim();
+    }
+
+    /// <summary>Forgets the chat's summary; it is written again from scratch when next needed.</summary>
+    public async Task ForgetSummaryAsync(long conversationId, CancellationToken ct = default)
+    {
+        await store.SetSummaryAsync(conversationId, "", null, ct);
+        _summaryRetryAt.Remove(conversationId);
+        Changed?.Invoke();
+    }
+
+    private void Begin(ActiveReply active, CancellationTokenSource cts)
+    {
+        _cts = cts;
+        Active = active;
+        LastError = null;
+        Changed?.Invoke();
+    }
+
+    private void End(long conversationId, string? error)
+    {
+        Active = null;
+        _cts = null;
+        if (error is not null) LastError = (conversationId, error);
+        Changed?.Invoke();
+    }
+
     /// <param name="questionId">The message the reply follows.</param>
     /// <param name="continuing">When set, the reply to make longer instead of writing a new one.</param>
     private async Task GenerateAsync(long conversationId, long? questionId, ChatMessage? continuing = null)
     {
         var cts = new CancellationTokenSource();
         var active = new ActiveReply(conversationId, questionId, continuing?.Id, continuing?.Content, continuing?.Reasoning);
-        _cts = cts;
-        Active = active;
-        LastError = null;
         await store.SetActiveLeafAsync(conversationId, continuing?.Id ?? questionId);
-        Changed?.Invoke();
+        Begin(active, cts);
 
         var reply = continuing ?? new ChatMessage
         {
@@ -227,31 +308,18 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
             reply.PresetId = preset.Id;
             reply.ModelName = engine.ModelName;
 
-            var system = await SystemPromptAsync(conversation, ct);
-            var (prompt, promptText, promptTokens, trimmed) = await BuildPromptAsync(system, path, continuing is not null, ct);
-            reply.PromptText = promptText;
-            reply.PromptTokens = promptTokens;
-            reply.TrimmedMessages = trimmed;
+            var (layout, _) = await PrepareAsync(conversation, path, active, ct);
+            var built = await BuildPromptAsync(layout, path, continuing is not null ? PromptEnd.Continue : PromptEnd.Reply, ct);
+            reply.PromptText = built.Text;
+            reply.PromptTokens = built.Tokens;
+            reply.TrimmedMessages = built.Trimmed;
+            reply.LoreUsed = built.Has(PromptPartKind.LoreBefore) || built.Has(PromptPartKind.LoreAfter) ? string.Join("\n", layout.LoreNames) : null;
+            reply.MemoryUsed = built.Has(PromptPartKind.Memory) ? layout.MemoryCovers : null;
 
             var stream = continuing is null
-                ? engine.StreamChatAsync(prompt, preset, ct)
-                : engine.StreamCompletionAsync(promptText, preset, ct);
-            var lastRaise = Stopwatch.StartNew();
-            await foreach (var delta in stream.ConfigureAwait(false))
-            {
-                active.Append(delta);
-                if (delta.Stats is { } stats)
-                {
-                    if (stats.PromptTokens > 0) reply.PromptTokens = stats.PromptTokens;
-                    reply.CompletionTokens = tokensBefore + stats.CompletionTokens;
-                    reply.TokensPerSecond = stats.TokensPerSecond;
-                }
-                if (lastRaise.Elapsed >= UiInterval)
-                {
-                    lastRaise.Restart();
-                    Changed?.Invoke();
-                }
-            }
+                ? engine.StreamChatAsync(built.Prompt, preset, ct)
+                : engine.StreamCompletionAsync(built.Text, preset, ct);
+            await StreamAsync(stream, active, reply, tokensBefore, ct);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -286,65 +354,264 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
         }
         finally
         {
-            Active = null;
-            _cts = null;
+            End(conversationId, error);
             cts.Dispose();
-            if (error is not null) LastError = (conversationId, error);
-            Changed?.Invoke();
         }
     }
 
-    /// <summary>The standing instructions: the chat's own, or for a character chat the card, persona and the chat's own.</summary>
-    private async Task<string> SystemPromptAsync(Conversation conversation, CancellationToken ct)
+    /// <summary>Feeds a stream into the active reply, recording speed figures on <paramref name="reply"/> when given.</summary>
+    private async Task StreamAsync(IAsyncEnumerable<ChatDelta> stream, ActiveReply active, ChatMessage? reply, int tokensBefore, CancellationToken ct)
     {
-        if (conversation.CharacterId is not { } characterId || characters is null) return conversation.SystemPrompt;
-        var character = await characters.GetAsync(characterId, ct);
-        if (character is null) return conversation.SystemPrompt;
+        active.Status = null;
+        Changed?.Invoke();
+        var lastRaise = Stopwatch.StartNew();
+        await foreach (var delta in stream.WithCancellation(ct).ConfigureAwait(false))
+        {
+            active.Append(delta);
+            if (delta.Stats is { } stats && reply is not null)
+            {
+                if (stats.PromptTokens > 0) reply.PromptTokens = stats.PromptTokens;
+                reply.CompletionTokens = tokensBefore + stats.CompletionTokens;
+                reply.TokensPerSecond = stats.TokensPerSecond;
+            }
+            if (lastRaise.Elapsed >= UiInterval)
+            {
+                lastRaise.Restart();
+                Changed?.Invoke();
+            }
+        }
+    }
+
+    private readonly record struct Names(string Character, string User);
+
+    /// <summary>
+    /// The prompt parts for this chat. General chats get their instructions. Character chats get the card, persona,
+    /// the lore that fired (within its budget), the author's note and, when older turns no longer fit, the rolling
+    /// summary, which is brought up to date first if it has fallen behind.
+    /// </summary>
+    private async Task<(PromptLayout Layout, Names Names)> PrepareAsync(Conversation conversation, IReadOnlyList<ChatMessage> path, ActiveReply active, CancellationToken ct)
+    {
+        if (conversation.CharacterId is not { } characterId || characters is null || await characters.GetAsync(characterId, ct) is not { } character)
+            return (PromptLayout.Plain(conversation.SystemPrompt), new Names("Assistant", "User"));
+
         var persona = await characters.PersonaForAsync(conversation.PersonaId, ct);
-        return CharacterPrompt.Build(character, persona, conversation.SystemPrompt);
+        var names = new Names(character.Name, persona?.Name is { Length: > 0 } n ? n : "User");
+        var lore = await PickLoreAsync(Lorebook.For(character), path, ct);
+        PromptLayout Make(string memory) => CharacterPrompt.Layout(character, persona, conversation.SystemPrompt, lore,
+            conversation.AuthorsNote, conversation.AuthorsNoteDepth, memory);
+
+        var layout = Make("");
+        if (!conversation.MemoryEnabled) return (layout, names);
+
+        // Summarise only when older turns are being left out, and only the turns that are.
+        var plain = await BuildPromptAsync(layout, path, PromptEnd.Reply, ct);
+        if (plain.Trimmed == 0) return (layout, names);
+
+        var (summary, through) = ValidSummary(conversation, path);
+        var waiting = _summaryRetryAt.TryGetValue(conversation.Id, out var retryAt) && path.Count < retryAt;
+        if (through < plain.Trimmed - 1 && !waiting)
+        {
+            // Run a little ahead of what is trimmed, so the summary is not rewritten after every message.
+            var target = Math.Min(plain.Trimmed - 1 + SummaryLead, Math.Max(plain.Trimmed - 1, path.Count - 1 - SummaryKeepsOut));
+            active.Status = "Summarising older messages";
+            Changed?.Invoke();
+            (summary, through) = await SummariseAsync(conversation, path, summary, through + 1, target, names, ct);
+            // If the model gave nothing usable, try again a few messages later rather than before every reply.
+            if (through < target) _summaryRetryAt[conversation.Id] = path.Count + SummaryLead;
+            else _summaryRetryAt.Remove(conversation.Id);
+        }
+        if (summary.Length == 0) return (layout, names);
+        layout = Make(summary);
+        layout.MemoryCovers = through == 0 ? "the first message" : $"the first {through + 1} messages";
+        return (layout, names);
+    }
+
+    /// <summary>How many messages past the trimmed ones a fresh summary also covers.</summary>
+    private const int SummaryLead = 8;
+
+    /// <summary>The newest messages are never summarised; they are always in the prompt anyway.</summary>
+    private const int SummaryKeepsOut = 4;
+
+    private const int SummaryMaxTokens = 1024;
+
+    /// <summary>The chat's summary and the index on <paramref name="path"/> of the last message it covers; ("", -1) when it is missing or belongs to another branch.</summary>
+    private static (string Summary, int Through) ValidSummary(Conversation conversation, IReadOnlyList<ChatMessage> path)
+    {
+        if (conversation.Summary.Trim().Length == 0 || conversation.SummaryThroughId is not { } id) return ("", -1);
+        for (var i = 0; i < path.Count; i++)
+            if (path[i].Id == id) return (conversation.Summary.Trim(), i);
+        return ("", -1);
     }
 
     /// <summary>
-    /// Picks the messages that fit, then checks the real size using the model's own template and
-    /// tokenizer, dropping further old turns until the prompt leaves room for a reply.
-    /// When <paramref name="continuation"/> is set, the last message of <paramref name="path"/> is a reply to
-    /// carry on: the prompt is the template up to where that reply starts, followed by its text so far.
+    /// Folds messages <paramref name="from"/>..<paramref name="to"/> of the path into the summary, in chunks small
+    /// enough for the context window, saving after each. Keeps the old summary if the model gives nothing.
     /// </summary>
-    private async Task<(List<PromptMessage> Prompt, string Text, int Tokens, int Trimmed)> BuildPromptAsync(
-        string systemPrompt, IReadOnlyList<ChatMessage> path, bool continuation, CancellationToken ct)
+    private async Task<(string Summary, int Through)> SummariseAsync(Conversation conversation, IReadOnlyList<ChatMessage> path,
+        string summary, int from, int to, Names names, CancellationToken ct)
     {
+        var through = from - 1;
+        var chunkBudget = Math.Max(256, engine.ContextLength / 2 - SummaryMaxTokens);
+        // Low temperature for accuracy, with repetition penalties because small models easily loop when summarising.
+        var preset = SamplerPresets.Get("precise") with { MaxTokens = SummaryMaxTokens, RepeatPenalty = 1.1, DryMultiplier = 0.8 };
+        while (through < to)
+        {
+            var lines = new StringBuilder();
+            var used = await CountTextAsync(summary, ct);
+            var end = through;
+            while (end < to)
+            {
+                var m = path[end + 1];
+                var cost = await CountAsync(m, ct) + 4;
+                if (end > through && used + cost > chunkBudget) break;
+                lines.Append(m.Role == ChatRole.User ? names.User : names.Character).Append(": ").Append(m.Content.Trim()).Append("\n\n");
+                used += cost;
+                end++;
+            }
+
+            var task = CharacterPrompt.Fill(string.Format(CharacterPrompt.SummaryTask, summary.Length > 0 ? "updated " : ""), names.Character, names.User);
+            var prompt = new List<PromptMessage>
+            {
+                new("system", CharacterPrompt.SummarySystem),
+                new("user", (summary.Length > 0 ? "[Summary so far]\n" + summary + "\n\n" : "")
+                            + "[Messages]\n" + lines.ToString().TrimEnd() + "\n\n" + task),
+            };
+            var text = new StringBuilder();
+            var written = 0;
+            await foreach (var delta in engine.StreamChatAsync(prompt, preset, ct).WithCancellation(ct).ConfigureAwait(false))
+            {
+                if (delta.Content is not null) text.Append(delta.Content);
+                if (delta.Stats is { } stats) written = stats.CompletionTokens;
+            }
+            // Keep what there was if the model gave nothing (e.g. a reasoning model that spent its tokens thinking),
+            // ran into the length limit (a summary that never ends is usually stuck in a loop), or wrote junk.
+            var result = text.ToString().Trim();
+            if (written >= SummaryMaxTokens || !CharacterPrompt.IsUsableSummary(result)) break;
+            summary = result;
+            through = end;
+            await store.SetSummaryAsync(conversation.Id, summary, path[through].Id, ct);
+            conversation.Summary = summary;
+            conversation.SummaryThroughId = path[through].Id;
+        }
+        return (summary, through);
+    }
+
+    /// <summary>The fired lore entries that fit the lore budget: the book's own, at most a quarter of the context window.</summary>
+    private async Task<IReadOnlyList<LoreEntry>> PickLoreAsync(Lorebook book, IReadOnlyList<ChatMessage> path, CancellationToken ct)
+    {
+        if (book.Entries.Count == 0) return [];
+        var matched = LoreMatcher.Match(book, path.Select(m => m.Content).ToList());
+        var budget = Math.Min(book.TokenBudget is > 0 and { } b ? b : int.MaxValue, engine.ContextLength / 4);
+        var picked = new List<LoreEntry>();
+        var used = 0;
+        foreach (var entry in matched)
+        {
+            var tokens = await CountTextAsync(entry.Content, ct);
+            if (used + tokens > budget) continue;
+            picked.Add(entry);
+            used += tokens;
+        }
+        return picked;
+    }
+
+    /// <summary>How the prompt ends: ready for a reply, inside a reply being continued, or inside an open user turn (impersonate).</summary>
+    private enum PromptEnd
+    {
+        Reply,
+        Continue,
+        UserTurn,
+    }
+
+    /// <summary>Stands in for the user's text when finding where a user turn starts in the rendered template.</summary>
+    private const string UserTurnMark = "@@DOGAI-USER-TURN-7f3a@@";
+
+    /// <param name="OpenUserTurn">True when <see cref="Text"/> ends inside an empty user turn, for raw completion.</param>
+    private sealed record BuiltPrompt(List<PromptMessage> Prompt, string Text, int Tokens, int Trimmed, IReadOnlyList<PromptPart> Parts, bool OpenUserTurn = false)
+    {
+        public bool Has(PromptPartKind kind) => Parts.Any(p => p.Kind == kind);
+    }
+
+    /// <summary>
+    /// Picks the messages that fit, then checks the real size using the model's own template and tokenizer,
+    /// dropping further old turns until the prompt leaves room for a reply. If even the newest message does not fit,
+    /// the least important parts go next (examples, then memory, then lore); the instruction and card always stay.
+    /// With <see cref="PromptEnd.Continue"/>, the last message of <paramref name="path"/> is a reply to carry on: the
+    /// prompt is the template up to where that reply starts, followed by its text so far. With <see cref="PromptEnd.UserTurn"/>,
+    /// the text ends where a new user turn starts, found by rendering a marker in its place; when the chat already ends
+    /// with the user (or the template hides the marker), the layout's directive asks for the user's turn instead.
+    /// </summary>
+    private async Task<BuiltPrompt> BuildPromptAsync(PromptLayout layout, IReadOnlyList<ChatMessage> path, PromptEnd end, CancellationToken ct)
+    {
+        var continuation = end == PromptEnd.Continue;
         if (_tokenCacheModel != engine.ModelName)
         {
             _tokenCache.Clear();
+            _textTokenCache.Clear();
             _tokenCacheModel = engine.ModelName;
         }
 
-        var system = systemPrompt.Trim();
-        var systemTokens = system.Length == 0 ? 0 : await engine.CountTokensAsync(system, ct) + ContextBudgeter.PerMessageOverhead;
+        var parts = layout.Parts.ToList();
+        var partTokens = new Dictionary<PromptPart, int>();
+        foreach (var part in parts) partTokens[part] = await CountTextAsync(part.Text, ct);
+        var inserted = layout.InsertedText().Trim();
+        var insertedTokens = inserted.Length == 0 ? 0 : await CountTextAsync(inserted, ct) + ContextBudgeter.PerMessageOverhead;
+        int Fixed() => (parts.Count == 0 ? 0 : parts.Sum(p => partTokens[p]) + 2 * (parts.Count - 1) + ContextBudgeter.PerMessageOverhead) + insertedTokens;
+
         var items = new List<BudgetItem>(path.Count);
         foreach (var message in path)
             items.Add(new BudgetItem(message.Role, await CountAsync(message, ct)));
 
+        bool DropPart()
+        {
+            if (!parts.Any(p => p.DropOrder > 0)) return false;
+            var order = parts.Where(p => p.DropOrder > 0).Min(p => p.DropOrder);
+            parts.RemoveAll(p => p.DropOrder == order);
+            return true;
+        }
+
         var budget = engine.ContextLength - ContextBudgeter.ReplyReserve(engine.ContextLength);
-        var fit = ContextBudgeter.Fit(budget, systemTokens, items);
+        var fit = ContextBudgeter.Fit(budget, Fixed(), items);
+        while (fit.UsedTokens > budget && DropPart())
+            fit = ContextBudgeter.Fit(budget, Fixed(), items);
+
         while (true)
         {
-            var prompt = new List<PromptMessage>();
-            if (system.Length > 0) prompt.Add(new PromptMessage("system", system));
             var included = path.Skip(fit.FirstIncluded).ToList();
-
+            var history = new List<PromptMessage>();
             // A character chat opens with the character speaking; give the template the user turn it expects first.
             if (included.Count > 0 && included[0].Role == ChatRole.Assistant)
-                prompt.Add(new PromptMessage("user", CharacterPrompt.ChatStart));
-            prompt.AddRange((continuation ? included[..^1] : included).Select(m =>
+                history.Add(new PromptMessage("user", CharacterPrompt.ChatStart));
+            history.AddRange((continuation ? included[..^1] : included).Select(m =>
                 new PromptMessage(m.Role == ChatRole.User ? "user" : "assistant", m.Content)));
 
-            var text = await engine.RenderPromptAsync(prompt, ct);
-            if (continuation) text += included[^1].Content;
+            var system = layout.SystemText(parts);
+            string text;
+            List<PromptMessage> prompt;
+            var open = false;
+            if (end == PromptEnd.UserTurn && (history.Count == 0 || history[^1].Role == "assistant"))
+            {
+                prompt = layout.Arrange(system, history, directive: false);
+                var rendered = await engine.RenderPromptAsync([.. prompt, new PromptMessage("user", UserTurnMark)], ct);
+                var cut = rendered.IndexOf(UserTurnMark, StringComparison.Ordinal);
+                open = cut >= 0;
+                text = open ? rendered[..cut] : "";
+            }
+            else
+            {
+                prompt = [];
+                text = "";
+            }
+            if (!open)
+            {
+                prompt = layout.Arrange(system, history);
+                text = await engine.RenderPromptAsync(prompt, ct);
+                if (continuation) text += included[^1].Content;
+            }
             var tokens = await engine.CountTokensAsync(text, ct);
+            if (tokens <= budget) return new BuiltPrompt(prompt, text, tokens, fit.Trimmed, parts, open);
             var next = ContextBudgeter.DropOldest(fit, items);
-            if (tokens <= budget || next == fit) return (prompt, text, tokens, fit.Trimmed);
-            fit = next;
+            if (next != fit) fit = next;
+            else if (!DropPart()) return new BuiltPrompt(prompt, text, tokens, fit.Trimmed, parts, open);
         }
     }
 
@@ -354,6 +621,17 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
         if (_tokenCache.TryGetValue(message.Id, out var cached) && cached.Hash == hash) return cached.Tokens;
         var tokens = await engine.CountTokensAsync(message.Content, ct);
         _tokenCache[message.Id] = (hash, tokens);
+        return tokens;
+    }
+
+    /// <summary>Counts any text, remembering recent results (card parts and lore repeat on every reply).</summary>
+    private async Task<int> CountTextAsync(string text, CancellationToken ct)
+    {
+        if (text.Length == 0) return 0;
+        if (_textTokenCache.TryGetValue(text, out var cached)) return cached;
+        var tokens = await engine.CountTokensAsync(text, ct);
+        if (_textTokenCache.Count > 500) _textTokenCache.Clear();
+        _textTokenCache[text] = tokens;
         return tokens;
     }
 }

@@ -331,6 +331,186 @@ public sealed class ChatServiceTests : IDisposable
         Assert.Equal("Precise (copy)", PresetCatalog.CopyOf(SamplerPresets.Get("precise")).Name);
     }
 
+    [Fact]
+    public async Task Lore_that_fires_goes_into_the_prompt_and_is_recorded()
+    {
+        var rex = await SaveCharacterAsync();
+        var book = new Lorebook();
+        book.Entries.Add(new LoreEntry { Name = "Bones", Keys = ["bone"], Content = "{{char}} hides bones under the oak." });
+        book.Entries.Add(new LoreEntry { Name = "Barn", Keys = ["barn"], Content = "The barn burned down last year." });
+        book.SaveTo(rex);
+        await _characters.SaveAsync(rex);
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+
+        await _chat.SendAsync(chat.Id, "Where is your bone?");
+
+        var system = _engine.Prompts[^1][0].Content;
+        Assert.Contains("Rex hides bones under the oak.", system);
+        Assert.DoesNotContain("barn", system);
+        Assert.Equal("Bones", (await ShownAsync(chat.Id))[^1].LoreUsed);
+    }
+
+    [Fact]
+    public async Task The_authors_note_and_final_instruction_go_into_user_turns()
+    {
+        var rex = await SaveCharacterAsync();
+        rex.PostHistoryInstructions = "Reply in one line.";
+        await _characters.SaveAsync(rex);
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        chat.AuthorsNote = "It is snowing.";
+        chat.AuthorsNoteDepth = 0;
+        await _store.UpdateAsync(chat);
+
+        await _chat.SendAsync(chat.Id, "Hi");
+
+        var prompt = _engine.Prompts[^1];
+        Assert.Equal(["system", "user", "assistant", "user"], prompt.Select(m => m.Role));
+        Assert.DoesNotContain("one line", prompt[0].Content);
+        Assert.Equal("Hi\n\n[Author's note: It is snowing.]\n\nReply in one line.", prompt[^1].Content);
+        // The saved message is what the user wrote, without the notes.
+        Assert.Equal("Hi", (await ShownAsync(chat.Id))[^2].Content);
+    }
+
+    [Fact]
+    public async Task Impersonate_drafts_the_users_turn_without_saving_anything()
+    {
+        var rex = await SaveCharacterAsync();
+        await _characters.SavePersonaAsync(new Persona { Name = "Sam" });
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        var before = await _store.GetMessagesAsync(chat.Id);
+        _engine.Reply = _ => FakeEngine.Say("  *pats Rex* ", "Good dog.  ");
+
+        var draft = await _chat.ImpersonateAsync(chat.Id);
+
+        Assert.Equal("*pats Rex* Good dog.", draft);
+        Assert.Equal(before.Count, (await _store.GetMessagesAsync(chat.Id)).Count);
+        // The chat ends with Rex's greeting, so the model writes straight into an open user turn.
+        Assert.Empty(_engine.Prompts);
+        Assert.EndsWith("<assistant> *wags* Hello, Sam! <user> ", _engine.Completions[^1]);
+        Assert.DoesNotContain("DOGAI", _engine.Completions[^1]);
+        Assert.False(_chat.IsBusy);
+    }
+
+    [Fact]
+    public async Task Impersonate_after_an_unanswered_message_asks_for_the_users_turn_instead()
+    {
+        var rex = await SaveCharacterAsync();
+        await _characters.SavePersonaAsync(new Persona { Name = "Sam" });
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        _engine.IsReady = true;
+        _engine.Reply = _ => FakeEngine.Say("");
+        await _chat.SendAsync(chat.Id, "Sit!"); // the empty reply is not saved, so the chat ends with the user
+
+        _engine.Reply = _ => FakeEngine.Say("Stay!");
+        Assert.Equal("Stay!", await _chat.ImpersonateAsync(chat.Id));
+        var prompt = _engine.Prompts[^1];
+        Assert.Equal("user", prompt[^1].Role);
+        Assert.Contains("Write Sam's next message", prompt[^1].Content);
+        Assert.StartsWith("Sit!", prompt[^1].Content);
+    }
+
+    [Fact]
+    public async Task A_summary_that_only_repeats_the_request_is_thrown_away()
+    {
+        var rex = await SaveCharacterAsync();
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        _engine.ContextLength = 400;
+        var words = string.Join(' ', Enumerable.Repeat("word", 38));
+        var summaryCalls = 0;
+        _engine.Reply = _ =>
+        {
+            if (!IsSummaryRequest()) return FakeEngine.Say(words);
+            summaryCalls++;
+            return FakeEngine.Say("[Task: write an summary of the story so far between Rex and User]");
+        };
+
+        for (var i = 0; i < 6; i++) await _chat.SendAsync(chat.Id, words);
+
+        Assert.Equal("", (await _store.GetAsync(chat.Id))!.Summary);
+        Assert.Null((await ShownAsync(chat.Id))[^1].MemoryUsed);
+        Assert.Equal(1, summaryCalls); // not retried before every reply
+    }
+
+    [Fact]
+    public async Task Older_turns_that_no_longer_fit_are_summarised_and_the_summary_is_used()
+    {
+        var rex = await SaveCharacterAsync();
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        _engine.ContextLength = 400; // 300 tokens for the prompt; each turn below is about 40
+        var words = string.Join(' ', Enumerable.Repeat("word", 38));
+        _engine.Reply = _ => IsSummaryRequest() ? FakeEngine.Say("SUMMARY", " of the story") : FakeEngine.Say(words);
+
+        for (var i = 0; i < 6; i++) await _chat.SendAsync(chat.Id, $"turn {i} " + words);
+
+        var saved = (await _store.GetAsync(chat.Id))!;
+        Assert.Equal("SUMMARY of the story", saved.Summary);
+        Assert.NotNull(saved.SummaryThroughId);
+        var last = (await ShownAsync(chat.Id))[^1];
+        Assert.Contains("SUMMARY of the story", last.PromptText);
+        Assert.NotNull(last.MemoryUsed);
+        Assert.True(last.TrimmedMessages > 0);
+        // The summary request named both sides and left out the newest turns.
+        var request = _engine.Prompts.Last(p => p[0].Content.Contains("summarise stories"));
+        Assert.Contains("Rex:", request[1].Content);
+        Assert.DoesNotContain("turn 5", request[1].Content);
+    }
+
+    [Fact]
+    public async Task A_summary_from_another_branch_is_not_used()
+    {
+        var rex = await SaveCharacterAsync();
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        var greeting = (await ShownAsync(chat.Id))[0];
+        await _chat.SendAsync(chat.Id, "Hi");
+        var messages = await _store.GetMessagesAsync(chat.Id);
+        await _store.SetSummaryAsync(chat.Id, "OLD BRANCH SUMMARY", messages.Last().Id);
+
+        // Switch to the other greeting: the summary's last message is not on this branch.
+        var other = new MessageTree(messages).Siblings(greeting)[1];
+        await _chat.SelectBranchAsync(chat.Id, other.Id);
+        _engine.ContextLength = 120; // small enough that the start of this branch is trimmed
+        _engine.Reply = _ => IsSummaryRequest() ? FakeEngine.Say("NEW") : FakeEngine.Say(string.Join(' ', Enumerable.Repeat("w", 40)));
+        await _chat.SendAsync(chat.Id, string.Join(' ', Enumerable.Repeat("x", 40)));
+        await _chat.SendAsync(chat.Id, string.Join(' ', Enumerable.Repeat("y", 40)));
+
+        Assert.All(_engine.Prompts, p => Assert.DoesNotContain("OLD BRANCH SUMMARY", p[0].Content));
+    }
+
+    [Fact]
+    public async Task Memory_can_be_switched_off()
+    {
+        var rex = await SaveCharacterAsync();
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        chat.MemoryEnabled = false;
+        await _store.UpdateAsync(chat);
+        _engine.ContextLength = 300;
+        var words = string.Join(' ', Enumerable.Repeat("word", 38));
+        _engine.Reply = _ => FakeEngine.Say(words);
+
+        for (var i = 0; i < 5; i++) await _chat.SendAsync(chat.Id, words);
+
+        Assert.DoesNotContain(_engine.Prompts, p => p[0].Content.Contains("summarise stories"));
+        Assert.Equal("", (await _store.GetAsync(chat.Id))!.Summary);
+    }
+
+    [Fact]
+    public async Task When_even_the_newest_message_barely_fits_examples_go_before_the_card()
+    {
+        var rex = await SaveCharacterAsync();
+        rex.ExampleMessages = string.Join(' ', Enumerable.Repeat("example", 60));
+        await _characters.SaveAsync(rex);
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        _engine.ContextLength = 200; // 150 for the prompt
+
+        await _chat.SendAsync(chat.Id, string.Join(' ', Enumerable.Repeat("q", 60)));
+
+        var system = _engine.Prompts[^1][0].Content;
+        Assert.DoesNotContain("example example", system);
+        Assert.Contains("loyal dog", system);
+    }
+
+    private bool IsSummaryRequest() => _engine.Prompts.Count > 0 && _engine.Prompts[^1][0].Content.Contains("summarise stories");
+
     private async Task<Character> SaveCharacterAsync() => await _characters.SaveAsync(new Character
     {
         Name = "Rex",

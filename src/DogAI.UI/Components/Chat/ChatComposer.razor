@@ -14,6 +14,11 @@
     }
     else
     {
+        @if (Impersonate is not null)
+        {
+            <button class="btn" disabled="@(!Engine.IsReady || !string.IsNullOrWhiteSpace(_draft))" @onclick="ImpersonateAsync"
+                    title="The model writes your next message here, for you to change before sending">Write mine</button>
+        }
         <button class="btn primary" disabled="@(!Engine.IsReady || string.IsNullOrWhiteSpace(_draft))" @onclick="SendAsync">Send</button>
     }
 </div>
@@ -33,6 +38,11 @@
 
     /// <summary>Called with the trimmed text. The box is cleared first.</summary>
     [Parameter] public EventCallback<string> OnSend { get; set; }
+
+    /// <summary>When set, a "Write mine" button asks the model to draft the user's message (character chats).</summary>
+    [Parameter] public Func<Task<string>>? Impersonate { get; set; }
+
+    private bool _drafting;
 
     private string _draft = "";
     private ElementReference _input;
@@ -69,6 +79,31 @@
         }
     }
 
+    protected override void OnInitialized() => Chat.Changed += OnChatChanged;
+
+    // While the model drafts the user's message, show it growing in the box.
+    private void OnChatChanged()
+    {
+        if (!_drafting || Chat.Active is not { Kind: ReplyKind.Draft } draft) return;
+        _draft = draft.Content.TrimStart();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ImpersonateAsync()
+    {
+        if (Impersonate is null || Chat.IsBusy) return;
+        _drafting = true;
+        _draft = "";
+        try
+        {
+            _draft = await Impersonate();
+        }
+        finally
+        {
+            _drafting = false;
+        }
+    }
+
     [JSInvokable]
     public Task SubmitFromKeyboard() => InvokeAsync(async () =>
     {
@@ -79,13 +114,14 @@
     private async Task SendAsync()
     {
         var text = _draft.Trim();
-        if (text.Length == 0 || Chat.IsBusy || !Engine.IsReady) return;
+        if (text.Length == 0 || Chat.IsBusy || _drafting || !Engine.IsReady) return;
         _draft = "";
         await OnSend.InvokeAsync(text);
     }
 
     public async ValueTask DisposeAsync()
     {
+        Chat.Changed -= OnChatChanged;
         _self?.Dispose();
         try
         {

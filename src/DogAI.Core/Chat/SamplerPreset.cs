@@ -18,6 +18,10 @@ public sealed record SamplerPreset(string Id, string Name, string Description)
     /// <summary>XTC: sometimes removes the most obvious words for more surprising prose. 0 = off.</summary>
     public double XtcProbability { get; init; }
     public double XtcThreshold { get; init; } = 0.1;
+
+    /// <summary>Most tokens to write. Null means no limit. Set by DOG AI for its own jobs (summaries), never saved with a style.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int? MaxTokens { get; init; }
 }
 
 public static class SamplerPresets

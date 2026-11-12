@@ -151,6 +151,12 @@ namespace DogAI.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("LoreUsed")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MemoryUsed")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ModelName")
                         .HasColumnType("TEXT");
 
@@ -198,11 +204,21 @@ namespace DogAI.Data.Migrations
                     b.Property<long?>("ActiveLeafId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AuthorsNote")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AuthorsNoteDepth")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("CharacterId")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("MemoryEnabled")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Mode")
                         .IsRequired()
@@ -216,6 +232,13 @@ namespace DogAI.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("SummaryThroughId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("SystemPrompt")
                         .IsRequired()

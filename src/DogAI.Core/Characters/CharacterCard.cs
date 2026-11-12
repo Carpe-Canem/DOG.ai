@@ -147,6 +147,15 @@ public static class CharacterCard
     /// <summary>The lorebook embedded in the card, as JSON, or null when it has none.</summary>
     public static string? EmbeddedLorebookJson(Character c) => Extra(c)["character_book"]?.ToJsonString();
 
+    /// <summary>The card's kept-aside JSON with the embedded lorebook replaced (or removed when <paramref name="book"/> is null).</summary>
+    public static string WithEmbeddedLorebook(Character c, JsonObject? book)
+    {
+        var extra = Extra(c);
+        if (book is null) extra.Remove("character_book");
+        else extra["character_book"] = book.DeepClone();
+        return extra.Count == 0 ? "" : extra.ToJsonString();
+    }
+
     private static JsonObject Fields(Character c) => new()
     {
         ["name"] = c.Name,
