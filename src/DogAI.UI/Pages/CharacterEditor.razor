@@ -5,6 +5,9 @@
 @inject EngineManager Engine
 @inject PresetCatalog Presets
 @inject NavigationManager Nav
+@inject CardBuilder Builder
+@inject ChatService Chat
+@implements IDisposable
 
 <SectionContent SectionName="title">
     <div class="head-row">
@@ -12,6 +15,10 @@
             <h2>@(CharacterId is null ? "New character" : $"Edit {(_c.Name.Length > 0 ? _c.Name : "character")}")</h2>
             <p>Everything here is sent to the model except the creator's notes</p>
         </div>
+        @if (CharacterId is null)
+        {
+            <ModelPicker Mode="characters" />
+        }
     </div>
 </SectionContent>
 
@@ -20,6 +27,39 @@
 @if (_loaded)
 {
     <div class="editor">
+        @if (CharacterId is null)
+        {
+            <div class="card-text builder">
+                <label class="field-block">
+                    <span class="field-label">Let the model draft it <span class="small">Describe the character in a sentence or two. The loaded model fills in the card below for you to change before saving.</span></span>
+                    <textarea class="field" rows="2" @bind="_idea" @bind:event="oninput" disabled="@(_draftCts is not null)"
+                              placeholder="For example: a retired sea captain who runs a lighthouse café and hides a smuggling past"></textarea>
+                </label>
+                <div class="row">
+                    @if (_draftCts is not null)
+                    {
+                        <button class="btn" @onclick="() => _draftCts?.Cancel()">Stop</button>
+                        <span class="small">Writing the card… @_draftLength.ToString("N0") characters so far</span>
+                    }
+                    else
+                    {
+                        <button class="btn primary" disabled="@(!Engine.IsReady || Chat.IsBusy || string.IsNullOrWhiteSpace(_idea))" @onclick="DraftAsync">Draft the card</button>
+                        @if (!Engine.IsReady)
+                        {
+                            <span class="small">Load a model first, with the model button at the top.</span>
+                        }
+                        else if (Chat.IsBusy)
+                        {
+                            <span class="small">Waiting for a chat reply to finish.</span>
+                        }
+                        else if (_drafted)
+                        {
+                            <span class="small">Drafted. Read it through, change what you like, then create the character.</span>
+                        }
+                    }
+                </div>
+            </div>
+        }
         <div class="editor-top">
             <div class="picture-pick">
                 @if (Format.PictureUrl("edit", _c.Id, _pictureStamp, _c.Avatar) is { } picture)
@@ -32,6 +72,10 @@
                 }
                 <div class="row">
                     <button class="btn" @onclick="PickPictureAsync">@(_c.Avatar is null ? "Add picture" : "Change")</button>
+                    @if (_c.Image is not null)
+                    {
+                        <button class="btn" @onclick="() => _cropping = true" title="Choose the part shown in lists and chats">Crop</button>
+                    }
                     @if (_c.Avatar is not null)
                     {
                         <button class="btn" @onclick="RemovePicture">Remove</button>
@@ -102,8 +146,74 @@
     </div>
 }
 
+@if (_cropping && _c.Image is { } fullPicture)
+{
+    <AvatarCropper Picture="fullPicture" OnDone="CroppedAsync" OnCancel="() => _cropping = false" />
+}
+
 @code {
     [Parameter] public long? CharacterId { get; set; }
+
+    private string _idea = "";
+    private CancellationTokenSource? _draftCts;
+    private int _draftLength;
+    private bool _drafted;
+    private DateTime _lastProgress;
+
+    protected override void OnInitialized()
+    {
+        Engine.Changed += Refresh;
+        Chat.Changed += Refresh;
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>Asks the model for a card and puts it in the form, unsaved. A picture already chosen is kept.</summary>
+    private async Task DraftAsync()
+    {
+        _error = null;
+        _drafted = false;
+        _draftLength = 0;
+        using var cts = new CancellationTokenSource();
+        _draftCts = cts;
+        try
+        {
+            var draft = await Builder.DraftAsync(_idea, text =>
+            {
+                _draftLength = text.Length;
+                if (DateTime.UtcNow - _lastProgress < TimeSpan.FromMilliseconds(150)) return;
+                _lastProgress = DateTime.UtcNow;
+                Refresh();
+            }, cts.Token);
+            draft.Image = _c.Image;
+            draft.Avatar = _c.Avatar;
+            draft.PresetId = _c.PresetId;
+            _c = draft;
+            _tags = string.Join(", ", _c.Tags);
+            _drafted = true;
+            Measure();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _draftCts = null;
+        }
+    }
+
+    public void Dispose()
+    {
+        _draftCts?.Cancel();
+        Engine.Changed -= Refresh;
+        Chat.Changed -= Refresh;
+    }
+
+    private bool _cropping;
 
     private Character _c = new();
     private string _tags = "";
@@ -183,11 +293,19 @@
             if (new FileInfo(path).Length > CharacterCard.MaxFileBytes) throw new InvalidOperationException("That picture is too large.");
             (_c.Image, _c.Avatar) = await Desktop.PreparePictureAsync(await File.ReadAllBytesAsync(path));
             _pictureStamp = DateTime.UtcNow;
+            _cropping = true; // a new picture: let the user choose the part shown, starting from the usual guess
         }
         catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             _error = e.Message;
         }
+    }
+
+    private void CroppedAsync(byte[] avatar)
+    {
+        _c.Avatar = avatar;
+        _pictureStamp = DateTime.UtcNow;
+        _cropping = false;
     }
 
     private void RemovePicture()

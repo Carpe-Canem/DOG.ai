@@ -85,7 +85,15 @@
     </div>
 </div>
 
+@if (_picked is { } picked)
+{
+    <AvatarCropper Picture="picked" OnDone="Cropped" OnCancel="() => _picked = null" />
+}
+
 @code {
+    /// <summary>A picture just chosen, while its square is picked. Personas keep only the avatar, so cropping happens now.</summary>
+    private byte[]? _picked;
+
     private List<Persona> _personas = [];
     private Persona _form = new() { Name = "" };
     private DateTime _stamp = DateTime.UtcNow;
@@ -110,6 +118,13 @@
         _savedNote = false;
     }
 
+    private void Cropped(byte[] avatar)
+    {
+        _form.Avatar = avatar;
+        _stamp = DateTime.UtcNow;
+        _picked = null;
+    }
+
     private void New() => Select(new Persona { Name = "" });
 
     private async Task PickPictureAsync()
@@ -120,7 +135,7 @@
         try
         {
             if (new FileInfo(path).Length > CharacterCard.MaxFileBytes) throw new InvalidOperationException("That picture is too large.");
-            (_, _form.Avatar) = await Desktop.PreparePictureAsync(await File.ReadAllBytesAsync(path));
+            (_picked, _form.Avatar) = await Desktop.PreparePictureAsync(await File.ReadAllBytesAsync(path));
             _stamp = DateTime.UtcNow;
         }
         catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException)

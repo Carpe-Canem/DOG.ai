@@ -69,6 +69,9 @@ public interface IDesktopShell
     /// around the top centre, where faces usually are on character art. Throws if the picture cannot be read.
     /// </summary>
     Task<(byte[] Png, byte[] Avatar)> PreparePictureAsync(byte[] picture);
+
+    /// <summary>Cuts the given square out of a picture and returns it as a small avatar PNG.</summary>
+    Task<byte[]> CropAvatarAsync(byte[] picture, Core.Characters.AvatarCrop crop);
 }
 
 public interface ISettingsStore

@@ -295,3 +295,35 @@ public sealed class SummaryCheckTests
     public void The_request_repeated_back_is_rejected() =>
         Assert.False(CharacterPrompt.IsUsableSummary("[Task: write an updated summary of the story so far between Rex and Sam]"));
 }
+
+public sealed class AvatarCropTests
+{
+    [Fact]
+    public void The_default_square_is_centred_across_and_a_little_below_the_top()
+    {
+        Assert.Equal(new AvatarCrop(0, 100, 400), AvatarCrop.Default(400, 800));
+        Assert.Equal(new AvatarCrop(200, 0, 400), AvatarCrop.Default(800, 400));
+    }
+
+    [Fact]
+    public void A_square_is_kept_inside_the_picture()
+    {
+        Assert.Equal(new AvatarCrop(300, 0, 100), new AvatarCrop(350, -20, 100).Within(400, 300));
+        Assert.Equal(new AvatarCrop(50, 0, 300), new AvatarCrop(50, 50, 999).Within(400, 300));
+        Assert.Equal(AvatarCrop.MinSide, new AvatarCrop(0, 0, 3).Within(400, 300).Side);
+    }
+
+    [Fact]
+    public void Resizing_keeps_the_centre()
+    {
+        var resized = new AvatarCrop(100, 100, 200).Resized(100, 1000, 1000);
+        Assert.Equal(new AvatarCrop(150, 150, 100), resized);
+    }
+
+    [Fact]
+    public void Reads_the_size_from_a_png_header()
+    {
+        Assert.Equal((12, 12), AvatarCrop.PngSize(PngText.SolidSquare(12, 1, 2, 3)));
+        Assert.Null(AvatarCrop.PngSize([1, 2, 3]));
+    }
+}

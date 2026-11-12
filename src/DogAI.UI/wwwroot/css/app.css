@@ -270,6 +270,14 @@ label.check { display: flex; align-items: center; gap: 8px; font-weight: 400; }
 .inline-select { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .inline-select .field { flex: 1; min-width: 0; }
 .status-line { margin: 0 0 8px; }
+.cropper { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.crop-stage { position: relative; display: inline-block; line-height: 0; overflow: hidden; border-radius: min(var(--r), 10px); background: var(--surface2); touch-action: none; user-select: none; }
+.crop-stage img { max-width: min(560px, 60vw); max-height: 60vh; display: block; }
+.crop-square { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .55); border-radius: 4px; cursor: move; }
+.crop-square:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.crop-side { flex: 1; min-width: 200px; display: grid; gap: 10px; align-content: start; }
+.crop-side input[type=range] { accent-color: var(--accent); width: 100%; }
+.crop-preview { width: 120px; height: 120px; border-radius: 50%; background-repeat: no-repeat; border: 1px solid var(--line); background-color: var(--surface2); }
 .persona-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
 .persona { display: flex; gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); min-width: 0; }
 .persona:hover { border-color: var(--muted); }

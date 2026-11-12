@@ -60,29 +60,41 @@ public sealed class WpfDesktopShell : IDesktopShell
 
     public Task<(byte[] Png, byte[] Avatar)> PreparePictureAsync(byte[] picture) => Task.Run(() =>
     {
-        BitmapSource frame;
+        var frame = Decode(picture);
+        // Keep a PNG as it is (it may be a card); convert anything else so it can carry a card when exported.
+        var png = Core.Characters.PngText.IsPng(picture) ? picture : Encode(frame);
+        return (png, Avatar(frame, Core.Characters.AvatarCrop.Default(frame.PixelWidth, frame.PixelHeight)));
+    });
+
+    public Task<byte[]> CropAvatarAsync(byte[] picture, Core.Characters.AvatarCrop crop) => Task.Run(() =>
+    {
+        var frame = Decode(picture);
+        return Avatar(frame, crop.Within(frame.PixelWidth, frame.PixelHeight));
+    });
+
+    private static BitmapSource Decode(byte[] picture)
+    {
         try
         {
             using var input = new MemoryStream(picture);
             var decoder = BitmapDecoder.Create(input, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
-            frame = decoder.Frames[0];
+            return decoder.Frames[0];
         }
         catch (Exception e) when (e is NotSupportedException or FileFormatException or ArgumentException or IOException)
         {
             throw new InvalidOperationException("That picture could not be read.");
         }
+    }
 
-        // Keep a PNG as it is (it may be a card); convert anything else so it can carry a card when exported.
-        var png = Core.Characters.PngText.IsPng(picture) ? picture : Encode(frame);
-
-        // Square crop: centred across, a little below the top for tall pictures, where faces usually are.
-        int w = frame.PixelWidth, h = frame.PixelHeight, side = Math.Min(w, h);
-        var crop = new CroppedBitmap(frame, new Int32Rect((w - side) / 2, (h - side) / 4, side, side));
-        var scale = Math.Min(1.0, (double)AvatarSize / side);
+    /// <summary>The square cut out and scaled down to at most <see cref="AvatarSize"/> pixels.</summary>
+    private static byte[] Avatar(BitmapSource frame, Core.Characters.AvatarCrop square)
+    {
+        var crop = new CroppedBitmap(frame, new Int32Rect(square.X, square.Y, square.Side, square.Side));
+        var scale = Math.Min(1.0, (double)AvatarSize / square.Side);
         var small = new TransformedBitmap(crop, new ScaleTransform(scale, scale));
         RenderOptions.SetBitmapScalingMode(small, BitmapScalingMode.HighQuality);
-        return (png, Encode(small));
-    });
+        return Encode(small);
+    }
 
     private static byte[] Encode(BitmapSource source)
     {

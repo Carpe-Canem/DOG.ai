@@ -88,6 +88,7 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
     {
         var body = SamplerBody(sampler);
         body["prompt"] = prompt;
+        if (sampler.JsonSchema is { } completionSchema) body["json_schema"] = JsonNode.Parse(completionSchema);
         body["n_predict"] ??= -1;
 
         using var response = await http.SendAsync(
@@ -128,6 +129,13 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
     {
         var body = SamplerBody(sampler);
         body["messages"] = ToJson(messages);
+        // llama-server turns the schema into a grammar, so the reply is always JSON of that shape.
+        if (sampler.JsonSchema is { } schema)
+            body["response_format"] = new JsonObject
+            {
+                ["type"] = "json_schema",
+                ["json_schema"] = new JsonObject { ["name"] = "answer", ["schema"] = JsonNode.Parse(schema) },
+            };
         body["stream_options"] = new JsonObject { ["include_usage"] = true };
 
         using var response = await http.SendAsync(
