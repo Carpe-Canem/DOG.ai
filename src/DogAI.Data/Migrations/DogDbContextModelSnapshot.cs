@@ -209,6 +209,9 @@ namespace DogAI.Data.Migrations
                     b.Property<int>("Role")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("SourcesJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<long?>("SpeakerId")
                         .HasColumnType("INTEGER");
 
@@ -263,6 +266,9 @@ namespace DogAI.Data.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("RecallEnabled")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Summary")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -291,6 +297,188 @@ namespace DogAI.Data.Migrations
                     b.HasIndex("Mode", "UpdatedAt");
 
                     b.ToTable("Conversations");
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.ChatCollection", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CollectionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConversationId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CollectionId");
+
+                    b.HasIndex("ConversationId", "CollectionId")
+                        .IsUnique();
+
+                    b.ToTable("ChatCollections");
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.DocumentChunk", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("DocumentId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Heading")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Length")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Ordinal")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("Page")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Start")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Vector")
+                        .HasColumnType("BLOB");
+
+                    b.Property<string>("VectorModel")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "Ordinal");
+
+                    b.ToTable("Chunks");
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.DocumentCollection", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("ConversationId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId");
+
+                    b.ToTable("Collections");
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.MessageVector", b =>
+                {
+                    b.Property<long>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ContentHash")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConversationId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Vector")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.HasKey("MessageId");
+
+                    b.HasIndex("ConversationId");
+
+                    b.ToTable("MessageVectors");
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.SourceDocument", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("AddedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ChunkCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CollectionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PageCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourcePath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VectorModel")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CollectionId", "Sha256");
+
+                    b.ToTable("Documents");
                 });
 
             modelBuilder.Entity("DogAI.Core.Models.ModelRecord", b =>
@@ -414,6 +602,56 @@ namespace DogAI.Data.Migrations
                     b.HasOne("DogAI.Core.Chat.Conversation", null)
                         .WithMany()
                         .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.ChatCollection", b =>
+                {
+                    b.HasOne("DogAI.Core.Documents.DocumentCollection", null)
+                        .WithMany()
+                        .HasForeignKey("CollectionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DogAI.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.DocumentChunk", b =>
+                {
+                    b.HasOne("DogAI.Core.Documents.SourceDocument", null)
+                        .WithMany()
+                        .HasForeignKey("DocumentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.DocumentCollection", b =>
+                {
+                    b.HasOne("DogAI.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.MessageVector", b =>
+                {
+                    b.HasOne("DogAI.Core.Chat.ChatMessage", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DogAI.Core.Documents.SourceDocument", b =>
+                {
+                    b.HasOne("DogAI.Core.Documents.DocumentCollection", null)
+                        .WithMany()
+                        .HasForeignKey("CollectionId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

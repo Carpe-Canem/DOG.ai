@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Markdig" Version="1.6.0" />
+    <PackageReference Include="PdfPig" Version="0.1.16" />
   </ItemGroup>
 
   <ItemGroup>

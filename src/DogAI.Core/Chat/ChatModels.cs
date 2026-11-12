@@ -75,6 +75,12 @@ public sealed class Conversation
     /// <summary>Group chats: who answers after the user writes.</summary>
     public TurnOrder TurnOrder { get; set; }
 
+    /// <summary>
+    /// Character chats, groups and stories: when older turns are left out, the ones that match the newest message are
+    /// found with the document search model and sent along. Needs <see cref="MemoryEnabled"/> too.
+    /// </summary>
+    public bool RecallEnabled { get; set; } = true;
+
     public bool IsGroup => Mode == GroupMode;
 
     public const string GroupMode = "group";
@@ -124,6 +130,9 @@ public sealed class ChatMessage
 
     /// <summary>Story mode: choices, tracked state, dice roll or chapter as JSON (see <c>StoryTurn</c>). Null elsewhere.</summary>
     public string? ExtraJson { get; set; }
+
+    /// <summary>Document passages and recalled earlier messages that were in the prompt, as JSON (see <c>ReplySources</c>). Null when none.</summary>
+    public string? SourcesJson { get; set; }
 }
 
 public interface IChatStore

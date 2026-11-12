@@ -40,6 +40,7 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
             .SetProperty(c => c.AuthorsNote, conversation.AuthorsNote)
             .SetProperty(c => c.AuthorsNoteDepth, conversation.AuthorsNoteDepth)
             .SetProperty(c => c.MemoryEnabled, conversation.MemoryEnabled)
+            .SetProperty(c => c.RecallEnabled, conversation.RecallEnabled)
             .SetProperty(c => c.TurnOrder, conversation.TurnOrder), ct);
     }
 
@@ -63,6 +64,14 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
     public async Task DeleteAsync(long id, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
+        // The chat's own documents and their passages, its links to shared collections, and its message vectors.
+        var own = db.Collections.Where(c => c.ConversationId == id).Select(c => c.Id);
+        var docs = db.Documents.Where(d => own.Contains(d.CollectionId)).Select(d => d.Id);
+        await db.Chunks.Where(c => docs.Contains(c.DocumentId)).ExecuteDeleteAsync(ct);
+        await db.Documents.Where(d => own.Contains(d.CollectionId)).ExecuteDeleteAsync(ct);
+        await db.ChatCollections.Where(l => l.ConversationId == id || own.Contains(l.CollectionId)).ExecuteDeleteAsync(ct);
+        await db.Collections.Where(c => c.ConversationId == id).ExecuteDeleteAsync(ct);
+        await db.MessageVectors.Where(v => v.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.Messages.Where(m => m.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.ChatMembers.Where(m => m.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.Stories.Where(s => s.ConversationId == id).ExecuteDeleteAsync(ct);
@@ -102,7 +111,8 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
             .SetProperty(m => m.TrimmedMessages, message.TrimmedMessages)
             .SetProperty(m => m.LoreUsed, message.LoreUsed)
             .SetProperty(m => m.MemoryUsed, message.MemoryUsed)
-            .SetProperty(m => m.ExtraJson, message.ExtraJson), ct);
+            .SetProperty(m => m.ExtraJson, message.ExtraJson)
+            .SetProperty(m => m.SourcesJson, message.SourcesJson), ct);
     }
 
     public async Task SetMessageExtraAsync(long messageId, string? extraJson, CancellationToken ct = default)

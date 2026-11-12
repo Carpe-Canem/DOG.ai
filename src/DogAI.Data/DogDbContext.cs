@@ -1,6 +1,7 @@
 using System.Text.Json;
 using DogAI.Core.Characters;
 using DogAI.Core.Chat;
+using DogAI.Core.Documents;
 using DogAI.Core.Models;
 using DogAI.Core.Stories;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,11 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
     public DbSet<Persona> Personas => Set<Persona>();
     public DbSet<ChatMember> ChatMembers => Set<ChatMember>();
     public DbSet<Story> Stories => Set<Story>();
+    public DbSet<DocumentCollection> Collections => Set<DocumentCollection>();
+    public DbSet<SourceDocument> Documents => Set<SourceDocument>();
+    public DbSet<DocumentChunk> Chunks => Set<DocumentChunk>();
+    public DbSet<ChatCollection> ChatCollections => Set<ChatCollection>();
+    public DbSet<MessageVector> MessageVectors => Set<MessageVector>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -47,6 +53,44 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
             e.HasOne<Conversation>().WithMany().HasForeignKey(s => s.ConversationId).OnDelete(DeleteBehavior.Cascade);
             e.Property(s => s.Bible).HasConversion(Json<StoryBible>(), JsonComparer<StoryBible>());
             e.Property(s => s.Outline).HasConversion(Json<List<StoryChapter>>(), JsonComparer<List<StoryChapter>>());
+        });
+        // Documents (M5). All new tables, so their links cost no rebuild: a chat's own collection, its documents and
+        // their passages go with the chat; links and message vectors go with either end.
+        model.Entity<DocumentCollection>(e =>
+        {
+            e.Property(c => c.Name).HasMaxLength(200);
+            e.HasIndex(c => c.ConversationId);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(c => c.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.Ignore(c => c.IsPrivate);
+        });
+        model.Entity<SourceDocument>(e =>
+        {
+            e.Property(d => d.FileName).HasMaxLength(400);
+            e.Property(d => d.Kind).HasMaxLength(20);
+            e.Property(d => d.Sha256).HasMaxLength(64);
+            e.Property(d => d.VectorModel).HasMaxLength(300);
+            e.HasIndex(d => new { d.CollectionId, d.Sha256 });
+            e.HasOne<DocumentCollection>().WithMany().HasForeignKey(d => d.CollectionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        model.Entity<DocumentChunk>(e =>
+        {
+            e.Property(c => c.VectorModel).HasMaxLength(300);
+            e.HasIndex(c => new { c.DocumentId, c.Ordinal });
+            e.HasOne<SourceDocument>().WithMany().HasForeignKey(c => c.DocumentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        model.Entity<ChatCollection>(e =>
+        {
+            e.HasIndex(l => new { l.ConversationId, l.CollectionId }).IsUnique();
+            e.HasOne<Conversation>().WithMany().HasForeignKey(l => l.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<DocumentCollection>().WithMany().HasForeignKey(l => l.CollectionId).OnDelete(DeleteBehavior.Cascade);
+        });
+        model.Entity<MessageVector>(e =>
+        {
+            e.HasKey(v => v.MessageId);
+            e.Property(v => v.MessageId).ValueGeneratedNever();
+            e.Property(v => v.Model).HasMaxLength(300);
+            e.HasIndex(v => v.ConversationId);
+            e.HasOne<ChatMessage>().WithMany().HasForeignKey(v => v.MessageId).OnDelete(DeleteBehavior.Cascade);
         });
         model.Entity<Character>(e =>
         {

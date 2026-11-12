@@ -92,6 +92,35 @@ public sealed class DatabaseUpgradeTests : IDisposable
         Assert.Empty(await store.ListAsync(DogAI.Core.Stories.Story.Mode));
     }
 
+    [Fact]
+    public async Task A_story_from_m4_gets_recall_on_no_sources_and_no_documents()
+    {
+        var factory = _services.GetRequiredService<IDbContextFactory<DogDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20261112171425_Stories");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Conversations (Mode, Title, SystemPrompt, PresetId, AuthorsNote, AuthorsNoteDepth, Summary, MemoryEnabled, TurnOrder, CreatedAt, UpdatedAt) " +
+                "VALUES ('story', 'M4 story', '', 'creative', '', 4, '', 1, 0, '2026-11-12 10:00:00', '2026-11-12 10:00:00')");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Messages (ConversationId, Role, Content, ExtraJson, CreatedAt) VALUES (1, 1, 'Once upon a time', '{{\"Chapter\":0}}', '2026-11-12 10:00:00')");
+        }
+
+        await _services.MigrateDogDatabaseAsync();
+
+        var store = _services.GetRequiredService<IChatStore>();
+        var story = Assert.Single(await store.ListAsync(DogAI.Core.Stories.Story.Mode));
+        Assert.True(story.RecallEnabled);
+        Assert.True(story.MemoryEnabled);
+        var message = Assert.Single(await store.GetMessagesAsync(story.Id));
+        Assert.Equal("{\"Chapter\":0}", message.ExtraJson);
+        Assert.Null(message.SourcesJson);
+        var collections = _services.GetRequiredService<DogAI.Core.Documents.ICollectionStore>();
+        Assert.Empty(await collections.ListAsync());
+        Assert.Empty(await collections.AttachedAsync(story.Id));
+        Assert.Null(await collections.ForConversationAsync(story.Id, create: false));
+    }
+
     public void Dispose()
     {
         _services.Dispose();
