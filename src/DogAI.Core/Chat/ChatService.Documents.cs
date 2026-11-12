@@ -14,8 +14,11 @@ public sealed partial class ChatService
     private const int RecallCount = 3;
     private const int RecallMessageChars = 800;
 
-    /// <summary>Below this a left-out message is not recalled. Higher than for passages: a wrong memory misleads more than a missing one.</summary>
-    public const float RecallMinSimilarity = 0.45f;
+    /// <summary>
+    /// Below this a left-out message is not recalled. Higher than for passages: a wrong memory misleads more than a missing one.
+    /// Measured with Qwen3 Embedding 0.6B: a message about the same thing scored 0.6 to 0.7, unrelated chat 0.26 to 0.41.
+    /// </summary>
+    public const float RecallMinSimilarity = 0.5f;
 
     /// <summary>The similarity a left-out message needs to be recalled. Depends on the search model; tests lower it for their fake one.</summary>
     public float RecallThreshold { get; set; } = RecallMinSimilarity;
@@ -26,7 +29,12 @@ public sealed partial class ChatService
         "by its number in square brackets, like [2], right after the sentence it supports. If the passages do not hold the answer, say so, " +
         "then answer from what you know if you can.";
 
-    public const string PassagesHeader = "[Passages from the user's documents]";
+    /// <summary>Starts the passages in a General chat. The numbers that exist are stated, because documents have numbered
+    /// sections of their own, and a model asked to cite tends to cite those too.</summary>
+    public const string PassagesHeader = "[Passages from the user's documents";
+
+    private static string PassagesHeading(int count) =>
+        count == 1 ? PassagesHeader + ": one passage, [1]. Cite it as [1].]" : $"{PassagesHeader}, numbered 1 to {count}. Cite only these numbers.]";
     public const string BackgroundHeader = "[Background from reference documents. Use it for facts; it is not part of the conversation.]";
 
     /// <summary>
@@ -68,7 +76,7 @@ public sealed partial class ChatService
 
         var budget = engine.ContextLength / (general ? 3 : 6);
         var used = 0;
-        var text = new StringBuilder(general ? PassagesHeader : BackgroundHeader);
+        var text = new StringBuilder();
         foreach (var passage in found)
         {
             var number = sources.Passages.Count + 1;
@@ -82,7 +90,7 @@ public sealed partial class ChatService
             sources.Passages.Add(source);
         }
         if (sources.Passages.Count == 0) return instruction;
-        var reference = text.ToString();
+        var reference = (general ? PassagesHeading(sources.Passages.Count) : BackgroundHeader) + text;
         return layout =>
         {
             instruction(layout);

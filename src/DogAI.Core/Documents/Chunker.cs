@@ -12,14 +12,17 @@ public sealed record Chunk(int Start, int Length, int? Page, string? Heading, st
 /// </summary>
 public static partial class Chunker
 {
-    /// <summary>Aim for passages about this long (roughly 300 tokens).</summary>
-    public const int Target = 1200;
+    /// <summary>
+    /// Aim for passages about this long (roughly 200 tokens). Longer ones mix several topics, and their meaning gets
+    /// diluted: live, a 1,150-character page holding an error-code list scored 0.28 against a question about one code.
+    /// </summary>
+    public const int Target = 800;
 
     /// <summary>Never longer than this; one character per token still fits the search model's window.</summary>
     public const int Max = 1500;
 
     /// <summary>How much of the end of one passage is repeated at the start of the next, so a sentence cut in two is still found.</summary>
-    public const int Overlap = 300;
+    public const int Overlap = 250;
 
     public static IReadOnlyList<Chunk> Split(ExtractedText document)
     {
@@ -79,7 +82,8 @@ public static partial class Chunker
                 var cut = limit;
                 if (limit < end)
                 {
-                    cut = LastBreak(text, pos, limit, SentenceEnd()) ?? LastBreak(text, pos, limit, Space()) ?? limit;
+                    // Line ends first (PDF pages are often one block of lines), then sentence ends, then spaces.
+                    cut = LastBreak(text, pos, limit, LineEnd()) ?? LastBreak(text, pos, limit, SentenceEnd()) ?? LastBreak(text, pos, limit, Space()) ?? limit;
                 }
                 pieces.Add(new Piece(pos, cut, false));
                 pos = cut;
@@ -131,4 +135,7 @@ public static partial class Chunker
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex Space();
+
+    [GeneratedRegex(@"\n")]
+    private static partial Regex LineEnd();
 }

@@ -64,8 +64,12 @@ public sealed partial class ChunkIndex
 /// </summary>
 public static class Retriever
 {
-    /// <summary>Below this similarity a passage is not used unless its exact words match well.</summary>
-    public const float DefaultMinSimilarity = 0.35f;
+    /// <summary>
+    /// Below this similarity a passage is not used unless its exact words match well. Measured with Qwen3 Embedding 0.6B:
+    /// a question and the passage answering it scored 0.55 to 0.75, other passages of the same documents 0.27 to 0.43,
+    /// and unrelated text under 0.2.
+    /// </summary>
+    public const float DefaultMinSimilarity = 0.45f;
 
     private const double RankConstant = 60;
 
@@ -108,9 +112,12 @@ public static class Retriever
             keywordRank[byWords[r]] = r;
         }
 
-        // A passage must mean something close to the query, or be among the best exact-word matches and not far off.
+        // A passage must mean something close to the query, or be among the best exact-word matches (scoring at least half
+        // the best, so that in a small collection a passage sharing only common words does not count) and not far off.
+        var bestKeyword = all.Count == 0 ? 0 : all.Max(c => c.Keyword);
+        bool StrongWords(int i) => keywordRank[i] < 3 && all[i].Keyword >= bestKeyword / 2;
         return Enumerable.Range(0, all.Count)
-            .Where(i => all[i].Similarity >= minSimilarity || (keywordRank[i] < 3 && all[i].Similarity >= minSimilarity - 0.15f))
+            .Where(i => all[i].Similarity >= minSimilarity || (StrongWords(i) && all[i].Similarity >= minSimilarity - 0.2f))
             .OrderByDescending(i => score[i])
             .Take(count)
             .Select(i => new SearchHit(all[i].Index.Chunks[all[i].Row], all[i].Similarity, score[i]))
