@@ -6,6 +6,9 @@ public sealed class AppPaths
     /// <summary>Set this environment variable to relocate all app data (portable installs, tests).</summary>
     public const string RootOverrideVariable = "DOGAI_DATA_DIR";
 
+    /// <summary>Set this to choose the models folder a fresh data folder starts with (test runs).</summary>
+    public const string ModelsOverrideVariable = "DOGAI_MODELS_DIR";
+
     public AppPaths(string? root = null)
     {
         Root = root
@@ -17,6 +20,9 @@ public sealed class AppPaths
     public string DatabaseFile => Path.Combine(Root, "dogai.db");
     public string LogsDirectory => Path.Combine(Root, "logs");
     public string WebViewDataDirectory => Path.Combine(Root, "webview");
+
+    /// <summary>Where DOG AI's own copy of the model engine goes once the Models section installs one.</summary>
+    public string EngineDirectory => Path.Combine(Root, "engine");
 
     public void EnsureCreated()
     {
@@ -31,6 +37,8 @@ public sealed class AppPaths
     /// </summary>
     public string SuggestModelsDirectory()
     {
+        if (Environment.GetEnvironmentVariable(ModelsOverrideVariable) is { Length: > 0 } explicitPath)
+            return explicitPath;
         try
         {
             var best = DriveInfo.GetDrives()

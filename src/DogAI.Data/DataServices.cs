@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DogAI.Core;
+using DogAI.Core.Chat;
 using DogAI.Core.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,6 +14,7 @@ public static class DataServices
         services.AddDbContextFactory<DogDbContext>((sp, o) =>
             o.UseSqlite($"Data Source={sp.GetRequiredService<AppPaths>().DatabaseFile}"));
         services.AddSingleton<ISettingsStore, SqliteSettingsStore>();
+        services.AddSingleton<IChatStore, SqliteChatStore>();
         return services;
     }
 

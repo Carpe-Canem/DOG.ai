@@ -1,0 +1,147 @@
+@implements IDisposable
+@inject EngineManager Engine
+@inject ISettingsStore SettingsStore
+@inject IDesktopShell Desktop
+
+<button class="btn model-btn @(Primary ? "primary" : "")" @onclick="OpenAsync" title="Choose which model answers">
+    <i class="dot @StateClass"></i><span>@ButtonText</span>
+</button>
+
+@if (_open)
+{
+    <Modal Title="Models on this PC" OnClose="() => _open = false">
+        @if (Engine.State == EngineState.Loading)
+        {
+            <div class="notice">
+                <span>Loading <b>@Engine.ModelName</b>. Large models can take a minute.</span>
+                <button class="btn" @onclick="Engine.UnloadAsync">Cancel</button>
+            </div>
+        }
+        else if (Engine.State == EngineState.Failed)
+        {
+            <div class="notice bad"><span>@Engine.Error</span></div>
+        }
+        else if (Engine.State == EngineState.Ready)
+        {
+            <div class="notice ok">
+                <span><b>@Engine.ModelName</b> is loaded with a @Engine.ContextLength.ToString("N0") token context.</span>
+                <button class="btn" @onclick="Engine.UnloadAsync">Unload</button>
+            </div>
+        }
+
+        @if (_engineMissing)
+        {
+            <div class="notice bad"><span>The model engine (llama-server) was not found on this PC. Install it with <code>winget install llama.cpp</code>, then try again.</span></div>
+        }
+
+        <div class="models">
+            @foreach (var model in _models)
+            {
+                var path = model.Path;
+                var current = Engine.ModelPath == path && Engine.State is EngineState.Ready or EngineState.Loading;
+                <div class="model">
+                    <div class="li-text">
+                        <div class="model-name">@model.Name</div>
+                        <div class="model-meta">@model.SizeText · @path</div>
+                    </div>
+                    @if (current)
+                    {
+                        <span class="chip">@(Engine.State == EngineState.Ready ? "Loaded" : "Loading…")</span>
+                    }
+                    else
+                    {
+                        <button class="btn primary" disabled="@(Engine.State == EngineState.Loading)" @onclick="() => LoadAsync(path)">Load</button>
+                    }
+                </div>
+            }
+            @if (_models.Count == 0)
+            {
+                <p class="small">No model files were found in <b>@(_settings.ModelsDirectory ?? "the models folder")</b>. Pick a .gguf file from anywhere on this PC with the button below. Downloading models from inside DOG AI arrives with the Models section.</p>
+            }
+        </div>
+
+        <div class="modal-foot">
+            <label class="inline">
+                <span>Context size</span>
+                <select class="field" value="@_settings.ContextLength" @onchange="SetContextAsync">
+                    @foreach (var size in ContextSizes)
+                    {
+                        <option value="@size">@size.ToString("N0") tokens</option>
+                    }
+                </select>
+            </label>
+            <button class="btn" disabled="@(Engine.State == EngineState.Loading)" @onclick="BrowseAsync">Browse for a file…</button>
+        </div>
+        <p class="small">Context size is how much of the conversation the model can see at once. Bigger uses more graphics memory. It applies the next time a model is loaded.</p>
+    </Modal>
+}
+
+@code {
+    /// <summary>Draw as the main call-to-action (used in the empty state).</summary>
+    [Parameter] public bool Primary { get; set; }
+
+    private static readonly int[] ContextSizes = [4096, 8192, 16384, 32768, 65536];
+
+    private bool _open;
+    private bool _engineMissing;
+    private AppSettings _settings = new();
+    private List<ModelFile> _models = [];
+
+    private string ButtonText => Engine.State switch
+    {
+        EngineState.Loading => "Loading model…",
+        EngineState.Ready => Engine.ModelName ?? "Model loaded",
+        EngineState.Failed => "Model failed to load",
+        _ => "Choose a model",
+    };
+
+    private string StateClass => Engine.State switch
+    {
+        EngineState.Ready => "ok",
+        EngineState.Loading => "warn",
+        EngineState.Failed => "bad",
+        _ => "",
+    };
+
+    protected override void OnInitialized() => Engine.Changed += Refresh;
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Engine.Changed -= Refresh;
+
+    private async Task OpenAsync()
+    {
+        _settings = await SettingsStore.LoadAsync();
+        _engineMissing = Engine.FindExecutable() is null;
+        var models = await Task.Run(() => ModelLibrary.Scan(_settings.ModelsDirectory).ToList());
+
+        // A model picked from elsewhere last time stays on offer.
+        if (_settings.LastModelPath is { } last && models.All(m => !SamePath(m.Path, last)) && File.Exists(last))
+            models.Insert(0, new ModelFile(last, GgufReader.TryRead(last)?.Name ?? Path.GetFileNameWithoutExtension(last), new FileInfo(last).Length));
+
+        _models = models;
+        _open = true;
+    }
+
+    private async Task BrowseAsync()
+    {
+        var path = await Desktop.PickModelFileAsync(_settings.ModelsDirectory);
+        if (path is not null) await LoadAsync(path);
+    }
+
+    private async Task LoadAsync(string path)
+    {
+        await Engine.LoadAsync(path, new EngineOptions(_settings.ContextLength));
+        if (Engine.State != EngineState.Ready) return;
+        _settings = await SettingsStore.LoadAsync() with { LastModelPath = path };
+        await SettingsStore.SaveAsync(_settings);
+        _open = false;
+    }
+
+    private async Task SetContextAsync(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var size)) return;
+        _settings = await SettingsStore.LoadAsync() with { ContextLength = size };
+        await SettingsStore.SaveAsync(_settings);
+    }
+
+    private static bool SamePath(string a, string b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+}

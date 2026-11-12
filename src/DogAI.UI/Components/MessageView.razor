@@ -1,0 +1,43 @@
+@* One turn in a thread. The page supplies the buttons (Actions) and, while editing, the edit box (Editor). *@
+<div class="msg @(IsUser ? "user" : "ai")">
+    <div class="avatar" aria-hidden="true">@(IsUser ? "You" : "D")</div>
+    <div class="msg-col">
+        <div class="msg-name">@Name</div>
+        @if (!string.IsNullOrEmpty(Reasoning))
+        {
+            <details class="thinking">
+                <summary>@(Streaming && string.IsNullOrEmpty(Content) ? "Thinking…" : "Thinking")</summary>
+                <div>@Reasoning</div>
+            </details>
+        }
+        @if (Editor is not null)
+        {
+            @Editor
+        }
+        else if (IsUser)
+        {
+            <div class="msg-body plain">@Content</div>
+        }
+        else
+        {
+            <div class="msg-body">
+                <MarkdownView Text="@Content" />
+                @if (Streaming)
+                {
+                    <span class="caret" aria-label="Writing"></span>
+                }
+            </div>
+        }
+        <div class="msg-actions">@Actions</div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public bool IsUser { get; set; }
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public string Content { get; set; } = "";
+    [Parameter] public string? Reasoning { get; set; }
+    [Parameter] public bool Streaming { get; set; }
+    [Parameter] public RenderFragment? Editor { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+}

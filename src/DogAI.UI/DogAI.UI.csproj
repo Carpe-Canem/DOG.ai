@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DogAI.Core\DogAI.Core.csproj" />
+    <ProjectReference Include="..\DogAI.Engine\DogAI.Engine.csproj" />
   </ItemGroup>
 
 </Project>

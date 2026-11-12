@@ -2,7 +2,9 @@
 using System.Windows;
 using DogAI.Core;
 using DogAI.Core.Appearance;
+using DogAI.Core.Chat;
 using DogAI.Core.Net;
+using DogAI.Engine;
 using DogAI.Core.Settings;
 using DogAI.Data;
 using DogAI.Hub;
@@ -52,6 +54,14 @@ public partial class App : Application
                     log.LogWarning("Blocked {Source} request to {Target} ({Reason})", entry.Source, entry.Target, entry.Reason);
             };
 
+            var engine = _services.GetRequiredService<EngineManager>();
+            engine.Output += line => log.LogDebug("engine: {Line}", line);
+            engine.Changed += () =>
+            {
+                if (engine.State == EngineState.Failed) log.LogWarning("Engine failed for {Model}: {Error}", engine.ModelPath, engine.Error);
+                else log.LogInformation("Engine {State} {Model}", engine.State, engine.ModelPath);
+            };
+
             await _services.MigrateDogDatabaseAsync();
             await EnsureFirstRunDefaultsAsync(_services, paths);
             await _services.GetRequiredService<AppearanceState>().LoadAsync();
@@ -76,6 +86,12 @@ public partial class App : Application
         services.AddSingleton<HubHttp>();
         services.AddSingleton<ISystemTheme, WindowsSystemTheme>();
         services.AddSingleton<AppearanceState>();
+        services.AddSingleton<IDesktopShell, WpfDesktopShell>();
+        services.AddSingleton<LoopbackHttp>();
+        services.AddSingleton<LlamaServerLocator>();
+        services.AddSingleton<EngineManager>();
+        services.AddSingleton<IChatEngine>(sp => sp.GetRequiredService<EngineManager>());
+        services.AddSingleton<ChatService>();
         services.AddDogData();
         services.AddWpfBlazorWebView();
 #if DEBUG

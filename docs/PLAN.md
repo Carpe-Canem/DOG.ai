@@ -2,8 +2,14 @@
 
 ## Status (updated 2026-11-12)
 
-- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks).
-- **Next:** M1, Engine + General chat. Nothing in M1 is started.
+- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat).
+- **Next:** M2, the Models section. Nothing in M2 is started.
+- **What M1 delivered:** the app starts and stops `llama-server` itself (found from winget for now), loads any GGUF from the models folder or picked by hand, and General mode has streaming chat with stop, regenerate, edit-and-branch, version switching, markdown with code copy buttons, collapsed "thinking", four style presets, per-chat instructions, a context meter with automatic trimming of old turns, and a prompt inspector. Chats are saved in SQLite as a message tree.
+- **Left out of M1 on purpose, still owed by a later milestone:**
+  - "Continue" a stopped reply, and editing your own sampler presets (the four built-in ones are fixed). Best done early in M3, where characters need both.
+  - Syntax colouring and LaTeX in replies (needs highlight.js and KaTeX bundled). Planned with M7 polish.
+  - Idle auto-unload, VRAM readout and GPU-layer tuning. These come with the hardware probe in M2.
+  - The winget `llama-server` is a Vulkan build. It runs on the 4090, but the CUDA build that M2's engine updater installs should be faster.
 - **Decided after this plan was first written:**
   - The app ships **three switchable looks** instead of one: Workbench (default), Fireside and Playhouse, each in light and dark, chosen in Settings. See `CLAUDE.md` for how they are built. The "Console" proposal was dropped.
   - The logo and Windows icon are the **D-Dog** mark (`src/DogAI.App/Assets/icon.svg`).
@@ -129,7 +135,7 @@ Each ends with a runnable app, passing tests, and a git commit.
 | M0a ✅ | Skeleton | `git init`, solution, bare WPF + Blazor shell, settings, SQLite, logging, offline lockdown. No styling. |
 | ✅ | **Design gate** | Four design proposals → three kept as switchable looks; D-Dog icon chosen |
 | M0b ✅ | Shell | Navigation, three looks with light/dark, Settings screen, placeholder mode pages, app icon |
-| M1 | Engine + General chat | Engine manager, load a GGUF from disk, streaming chat, markdown, message tree, presets, context budgeter, prompt inspector |
+| M1 ✅ | Engine + General chat | Engine manager, load a GGUF from disk, streaming chat, markdown, message tree, presets, context budgeter, prompt inspector |
 | M2 | Models section | Hardware probe, HF browse, fit badges, download manager, library, curated picks, benchmark, engine updater |
 | M3 | Characters | Card import/export, editor, personas, lorebooks, swipes, rolling-summary memory, AI card builder, group chat |
 | M4 | Story | Story Bible, authored mode, CYOA with structured choices and state, branch map, exports |

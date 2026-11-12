@@ -1,0 +1,18 @@
+@implements IDisposable
+@inject EngineManager Engine
+
+<span>@Text</span>
+
+@code {
+    private string Text => Engine.State switch
+    {
+        EngineState.Loading => $"Loading {Engine.ModelName}…",
+        EngineState.Ready => $"{Engine.ModelName} · {Engine.ContextLength:N0} token context",
+        EngineState.Failed => "Model failed to load",
+        _ => "No model loaded",
+    };
+
+    protected override void OnInitialized() => Engine.Changed += Refresh;
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Engine.Changed -= Refresh;
+}

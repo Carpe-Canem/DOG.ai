@@ -1,3 +1,4 @@
+using DogAI.Core.Chat;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 
@@ -7,8 +8,23 @@ public sealed class DogDbContext(DbContextOptions<DogDbContext> options) : DbCon
 {
     public DbSet<SettingEntry> Settings => Set<SettingEntry>();
 
+    public DbSet<Conversation> Conversations => Set<Conversation>();
+    public DbSet<ChatMessage> Messages => Set<ChatMessage>();
+
     protected override void OnModelCreating(ModelBuilder model)
     {
+        model.Entity<Conversation>(e =>
+        {
+            e.Property(c => c.Mode).HasMaxLength(20);
+            e.Property(c => c.PresetId).HasMaxLength(40);
+            e.HasIndex(c => new { c.Mode, c.UpdatedAt });
+        });
+        model.Entity<ChatMessage>(e =>
+        {
+            e.Property(m => m.PresetId).HasMaxLength(40);
+            e.HasIndex(m => m.ConversationId);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
+        });
         model.Entity<SettingEntry>(e =>
         {
             e.HasKey(s => s.Key);

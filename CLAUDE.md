@@ -23,7 +23,7 @@ Target is `net9.0-windows` because VS 2022 cannot target .NET 10. Pin Microsoft 
 | `src/DogAI.App` | WPF window, DI startup, WebView2 lockdown, Windows theme detection |
 | `src/DogAI.UI` | Razor components, pages, `wwwroot/css/app.css` |
 | `src/DogAI.Core` | Domain logic with no UI or I/O dependencies |
-| `src/DogAI.Engine` | Model engine (empty until M1) |
+| `src/DogAI.Engine` | Starts/stops `llama-server` (`EngineManager`), loopback-only client, GGUF header reader |
 | `src/DogAI.Data` | EF Core + SQLite |
 | `src/DogAI.Hub` | The only code allowed to go online |
 | `tests/DogAI.Tests` | xUnit. Cannot reference App or UI, so keep testable logic in Core |
@@ -57,6 +57,15 @@ pwsh tools/walkthrough.ps1 -Steps @(
   @{ eval = "document.querySelector(`"input[value='fireside']`").click()" },
   @{ shot = 'fireside-settings' })
 ```
+
+To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.gguf` before running the script; a fresh data folder then uses it as the models folder. The Ollama blobs under `~\.ollama\models\blobs` are GGUF files and can be hard-linked there with a `.gguf` name. `dotnet test` runs the real-engine smoke test only when `$env:DOGAI_TEST_MODEL` points at a model file. Wait for conditions in `eval` steps with a promise (model loads and replies take seconds).
+
+## How chat works
+
+- Chat logic is `ChatService` in Core. It talks to the model only through `IChatEngine`, so tests use a fake engine with the real SQLite store.
+- Messages are a tree (`MessageTree`). Regenerate and edit add a sibling and move `Conversation.ActiveLeafId`; nothing is overwritten.
+- Model output goes through `MarkdownRenderer` (Core), which disables raw HTML and neutralises non-web links. Never render model text with `MarkupString` any other way.
+- UI needs from Windows (file dialog, clipboard) go through `IDesktopShell`, implemented in App.
 
 Check every new screen in all three skins, dark and light. Say plainly what was and was not looked at. Never point a test run at the real data folder (`%LOCALAPPDATA%\DOG-AI`).
 

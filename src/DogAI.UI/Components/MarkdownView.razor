@@ -1,0 +1,45 @@
+@inject IDesktopShell Desktop
+
+@* Model output is untrusted: MarkdownRenderer never passes raw HTML through, and code is drawn as plain text. *@
+@for (var i = 0; i < _segments.Count; i++)
+{
+    var index = i;
+    var segment = _segments[i];
+    if (segment.IsCode)
+    {
+        <div class="code">
+            <div class="code-head">
+                <span>@(segment.Language ?? "code")</span>
+                <button @onclick="() => CopyAsync(index, segment.Code!)">@(_copied == index ? "Copied" : "Copy")</button>
+            </div>
+            <pre><code>@segment.Code</code></pre>
+        </div>
+    }
+    else
+    {
+        @((MarkupString)segment.Html!)
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+
+    private string? _rendered;
+    private IReadOnlyList<MarkdownSegment> _segments = [];
+    private int _copied = -1;
+
+    protected override void OnParametersSet()
+    {
+        if (Text == _rendered) return;
+        _rendered = Text;
+        _segments = MarkdownRenderer.Render(Text);
+    }
+
+    private async Task CopyAsync(int index, string code)
+    {
+        Desktop.CopyText(code);
+        _copied = index;
+        await Task.Delay(1500);
+        if (_copied == index) _copied = -1;
+    }
+}
