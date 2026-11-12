@@ -96,6 +96,9 @@ namespace DogAI.Data.Migrations
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Voice")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("UpdatedAt");
@@ -548,6 +551,9 @@ namespace DogAI.Data.Migrations
 
                     b.Property<int>("Kind")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("NarratorVoice")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Outline")
                         .IsRequired()

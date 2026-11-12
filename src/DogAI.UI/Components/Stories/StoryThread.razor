@@ -67,6 +67,7 @@
                     <div class="msg-actions">
                         @Versions(siblings, position, "Other versions of this passage")
                         <button @onclick="() => Desktop.CopyText(m.Content)">Copy</button>
+                        <ReadAloudButton Message="m" />
                         @if (!Chat.IsBusy)
                         {
                             <button @onclick="() => StartEdit(m)">Edit</button>

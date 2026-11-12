@@ -30,6 +30,7 @@ public sealed class SqliteCharacterStore(IDbContextFactory<DogDbContext> factory
                 ExtraJson = c.ExtraJson,
                 Avatar = c.Avatar,
                 PresetId = c.PresetId,
+                Voice = c.Voice,
                 CreatedAt = c.CreatedAt,
                 UpdatedAt = c.UpdatedAt,
             })

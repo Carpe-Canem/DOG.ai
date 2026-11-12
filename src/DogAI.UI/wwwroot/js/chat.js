@@ -11,10 +11,26 @@ export function initComposer(textarea, dotnet) {
   textarea._dogResize = resize;
   textarea.addEventListener('input', resize);
   textarea.addEventListener('keydown', e => {
+    // Hold Ctrl+Space to talk; letting go writes down what was said.
+    if (e.code === 'Space' && e.ctrlKey) {
+      e.preventDefault();
+      if (!e.repeat && !textarea._dogTalking) {
+        textarea._dogTalking = true;
+        dotnet.invokeMethodAsync('PushToTalk', true);
+      }
+      return;
+    }
     if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
     e.preventDefault();
     dotnet.invokeMethodAsync('SubmitFromKeyboard');
   });
+  const release = e => {
+    if (!textarea._dogTalking || (e.type === 'keyup' && e.code !== 'Space' && e.key !== 'Control')) return;
+    textarea._dogTalking = false;
+    dotnet.invokeMethodAsync('PushToTalk', false);
+  };
+  textarea.addEventListener('keyup', release);
+  textarea.addEventListener('blur', release);
 }
 
 export function resizeComposer(textarea) {

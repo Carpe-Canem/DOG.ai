@@ -34,6 +34,9 @@ public sealed class ActiveReply(long conversationId, long? parentId, long? conti
 
     public ReplyKind Kind { get; } = kind;
 
+    /// <summary>When continuing: how long the text was before this continuation started.</summary>
+    public int StartLength { get; } = startText?.Length ?? 0;
+
     /// <summary>Group chats: the character writing this reply. Null in one-to-one chats.</summary>
     public long? SpeakerId { get; } = speakerId;
 

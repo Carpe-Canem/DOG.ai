@@ -151,6 +151,11 @@
             </select>
         </label>
 
+        <div class="label-like">
+            Narrator's voice <span class="small">for reading passages aloud</span>
+            <VoicePicker @bind-Value="_s.NarratorVoice" Label="Narrator's voice" Sample="Once upon a time, in a land far from here, a story began." />
+        </div>
+
         @if (_error is not null)
         {
             <div class="notice bad"><span>@_error</span></div>

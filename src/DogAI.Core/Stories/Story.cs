@@ -58,6 +58,9 @@ public sealed class Story
     public int PassageWords { get; set; } = DefaultPassageWords;
 
     public const int DefaultPassageWords = 250;
+
+    /// <summary>The voice passages are read with (a <see cref="DogAI.Core.Voice.VoiceId"/> as text). Null means the default voice.</summary>
+    public string? NarratorVoice { get; set; }
     public const string Mode = "story";
 }
 

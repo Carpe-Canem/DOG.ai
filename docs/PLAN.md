@@ -2,8 +2,37 @@
 
 ## Status (updated 2026-11-12)
 
-- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 (characters, lore, memory, group chat), M4 (Story), M5 (Documents).
-- **Next:** M6 (Voice).
+- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 (characters, lore, memory, group chat), M4 (Story), M5 (Documents), M6 (Voice).
+- **Next:** M7 (Polish).
+- **What M6 delivered (Voice):**
+  - *Talking instead of typing:* a microphone button under every message box (General, Characters, groups, Story). Press it, talk, press it again, and what you said appears in the box to check before sending. Holding **Ctrl+Space** in the box does the same. A line under the box says what is happening (listening, writing it down) with a level meter.
+  - *Hands-free:* the second button keeps the microphone on. Talk, pause, and it is sent; the reply is read aloud if reading is on; then it listens again. It does not listen while a reply is being written or read, so DOG AI never hears itself. Sensitivity (noisy room, normal, quiet room) is in Settings.
+  - *Reading aloud:* **Read aloud** under every reply and story passage (it becomes **Stop reading** while speaking). The speaker button under the message box reads every new reply as it is written, a sentence at a time, starting with the first sentence while the rest is still coming; a stop button replaces it while speaking. Code blocks, web addresses, citation numbers and markup symbols are not read. Drafts ("Write mine", rewrites), story choices and "thinking" are never read.
+  - *Voices:* the 54 Kokoro v1.0 voices (American and British English plus eight other languages), Piper voices, and the voices that come with Windows (always there, no download). Each character has a voice in its editor, each story a narrator's voice on its setup page, both with a **Listen** button; everything else uses the default voice from Settings (if none is chosen: Kokoro's "Heart", else any downloaded voice, else a Windows voice). In a group chat each member speaks with its own voice, one after another, never over each other. A voice that is no longer on the PC falls back to the default and the picker says so.
+  - *Models → Voice:* recommended speech recognition models (Whisper large-v3 turbo, small, base English) and voices (Kokoro v1.0, four Piper voices with open licences), with Download, **Use this** (which Whisper model listens) and Delete. Downloads go through the normal download list with checksums, into a "voice" folder inside the models folder. Voice models found there but not on the list are shown too.
+  - *Settings → Voice:* default voice and speed, read replies aloud, speakers, microphone, the language you speak (or detect it), hands-free sensitivity, and **Try listening**.
+  - Database: one additive migration (a voice column on characters and a narrator voice on stories, empty for existing ones). A test upgrades an M5 database.
+- **How M6 behaves, decided while building it:**
+  - *Everything runs inside DOG AI, on this PC.* Whisper (whisper.cpp through Whisper.net) listens; Kokoro and Piper (sherpa-onnx) and Windows' own voices speak; NAudio records and plays. Recording and playing happen in the app, not the web view, so the web view still needs no microphone permission and its security policy is unchanged.
+  - *Whisper runs on the graphics card (Vulkan) when it can.* Measured here with large-v3 turbo: a 7-second sentence takes 0.33 s on the RTX 4090 and 13 s on the processor, so the processor is only the fallback. The first run ever on a graphics card prepares its shaders (about 15 s, once; the driver keeps them), so the model is loaded and tried as soon as the microphone turns on. It uses about 1 GB of graphics memory and lets go after ten idle minutes.
+  - *Voices run on the processor.* Kokoro says 7 seconds of speech in about 1.6 s, Piper faster; the next sentence is made while the current one plays, so there are no gaps. A voice pack is let go after ten idle minutes; at most two are kept loaded.
+  - *sherpa-onnx stays on version 1.13.* Version 2 dropped the espeak-ng pronunciation engine: Piper voices could not say anything and Kokoro skipped every number. Tried and measured before choosing.
+  - *Kokoro's voice names are read from the model file itself*, so a newer pack with more voices works without a code change.
+  - *Whisper's made-up text is dropped.* Given silence or noise it tends to write "Thank you." or "Thanks for watching!"; those, noise markers like "[BLANK_AUDIO]", and anything the model itself rates as probably not speech are thrown away instead of typed into the box.
+  - *Hands-free finds speech by loudness against the room's background level*, which it keeps learning while nobody talks; it keeps 0.4 s from before the start so the first word is not cut, ends after a 0.9 s pause, drops clicks shorter than 0.3 s, and cuts at 30 s.
+  - *Starting a new reply stops what is being read*, unless group members are answering one after another; then each waits for the one before.
+  - *Devices are saved by name*, not number, so plugging something in does not change the choice. Windows' older sound interface, which DOG AI uses, cuts names at 31 characters ("Headphones (Arctis Nova Pro Wir").
+  - *Voice choices are DOG AI's own*: a character's voice is not written into exported cards.
+  - *Test stand-ins:* `DOGAI_TEST_MIC` (a WAV file played as the microphone) and `DOGAI_TEST_SPEAKERS` (a folder that receives what would have been played) let walkthroughs drive voice without hardware.
+- **Tried live** with Mag-Mell 12B, Whisper large-v3 turbo, Kokoro v1.0 and Piper Amy (downloaded from Hugging Face with permission; checksums matched), using the test stand-ins for microphone and speakers: a recorded question was written down word for word with the microphone button, sent, and the reply read aloud sentence by sentence (the saved clips, run back through Whisper, said exactly the reply); hands-free heard the same question, sent it, waited while the reply was written and read, then listened again; a character given the Piper voice in its editor was read in that voice (and the Read aloud / Stop reading button worked); a character's voice and the chosen speakers were still shown after leaving and coming back; and the Kokoro pack was downloaded again through Models → Voice into a fresh folder (375 files, every one checked, no partial files left) and its voices then appeared in the pickers. An opt-in test (`DOGAI_TEST_VOICE_DIR`) has Kokoro, Piper and a Windows voice each say a sentence that Whisper must hear back; it passed. Screens checked in all three looks, dark and light: Settings → Voice, Models → Voice, the character editor's voice picker, the story setup's narrator voice, and the message box while listening.
+- **Not tried, said plainly:** a real microphone and real speakers. Every live run used the test stand-ins, because the tools here cannot speak into a microphone or hear speakers; the NAudio recording and playback code has not been heard working. Try the microphone button, **Try listening** in Settings and a **Listen** button once. Also not tried live: a group chat read aloud (unit-tested), a story read aloud (unit-tested), Kokoro's non-English voices, the four recommended Piper voices (Amy, which is not on the list because its licence is unclear, was used instead), Whisper small and base, and a language other than "detect".
+- **Left out of M6, still owed:**
+  - *Talking over a reply to stop it* ("barge-in"). Hands-free waits until reading has finished; there is no echo cancellation.
+  - *A push-to-talk key that works anywhere in Windows.* Ctrl+Space works in the message box only; tray and global hotkeys are M7.
+  - *Kokoro on the graphics card.* The sherpa-onnx package has no GPU build for Windows; it is quick enough on the processor.
+  - *Story narration and "What do you do?"*: passages are cleaned after they are written, but reading starts while they stream, so a closing question the model adds may be read before it is removed.
+  - Full device names (would need the newer Windows sound interface, WASAPI).
+  - The app folder grows by the voice libraries' native files for every platform (Whisper's Vulkan library alone is about 116 MB). M7's publish profile should keep only Windows x64.
 - **What M5 delivered (Documents):**
   - *Reading files:* PDF (its text layer, page by page), Word .docx (headings, lists and tables kept), markdown, text and code files. The text is copied into DOG AI, so the original can move. A scanned PDF with no text, an old .doc, a password-protected file or a binary file is refused with a plain reason. Each file is cut into passages of about 800 characters at paragraph and line boundaries, overlapping a little, each knowing its page and heading.
   - *Document search model:* a second, small llama-server runs the embedding model beside the chat model (about 1 GB of graphics memory for Qwen3 Embedding 0.6B). It starts when first needed and stops after ten idle minutes. It is the library model marked **Default for… → Document search**; without a choice, the first embedding model found. Embedding models are recognised from their header, are not offered for chat, and have no Load or Benchmark buttons. Changing the model indexes every document again in the background.
@@ -47,7 +76,7 @@
 - **Left out of M4, still owed:**
   - *Hierarchical summaries* (scene → chapter → story so far). There is one rolling "story so far" summary, the same mechanism as chat memory. It was not run live in a story (unit-tested).
   - *Lorebooks and document collections as world reference.* Standalone lorebooks are still owed from M3; documents are M5. The bible's World field is the place for world facts until then.
-  - *Narrator read-aloud* comes with voice in M6.
+  - ~~*Narrator read-aloud* comes with voice in M6.~~ Done in M6.
   - *Scene beats as their own level.* The outline is chapters, each with a free-text plan; beats can be written into the plan.
   - A past action or direction cannot be edited; go back and do something else instead. The branch map is for adventures only.
   - Not tried: opening the EPUB in an e-reader (its structure and well-formedness are unit-tested), a strict-template model (Gemma, Mistral `[INST]`; role alternation is unit-tested), a reasoning model, and a story long enough to need the summary.
@@ -252,7 +281,7 @@ Each ends with a runnable app, passing tests, and a git commit.
 | M3 ✅ | Characters | Card import/export, editor, personas, lorebooks, swipes, rolling-summary memory, AI card builder, group chat |
 | M4 ✅ | Story | Story Bible, authored mode, CYOA with structured choices and state, branch map, exports |
 | M5 ✅ | Documents | Embedding server, ingestion, collections, citations; vector recall added to character and story memory |
-| M6 | Voice | Speech-to-text, text-to-speech, per-character voices |
+| M6 ✅ | Voice | Speech-to-text, text-to-speech, per-character voices |
 | M7 | Polish | Assistants, prompt library, search, backup/restore, self-contained publish profile |
 
 Possible later additions, not planned: app lock / encrypted database, local OpenAI-compatible API for other tools, image understanding, image generation.

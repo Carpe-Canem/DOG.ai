@@ -121,6 +121,35 @@ public sealed class DatabaseUpgradeTests : IDisposable
         Assert.Null(await collections.ForConversationAsync(story.Id, create: false));
     }
 
+    [Fact]
+    public async Task Characters_and_stories_from_m5_get_no_voice_so_they_use_the_default()
+    {
+        var factory = _services.GetRequiredService<IDbContextFactory<DogDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20261112180625_Documents");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Characters (Name, Description, Personality, Scenario, FirstMessage, AlternateGreetings, ExampleMessages, SystemPrompt, " +
+                "PostHistoryInstructions, CreatorNotes, Creator, CharacterVersion, Tags, ExtraJson, CreatedAt, UpdatedAt) " +
+                "VALUES ('Ann', 'A baker', '', '', 'Hi', '[]', '', '', '', '', '', '', '[]', '', '2026-11-12 10:00:00', '2026-11-12 10:00:00')");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Conversations (Mode, Title, SystemPrompt, PresetId, AuthorsNote, AuthorsNoteDepth, Summary, MemoryEnabled, TurnOrder, RecallEnabled, CreatedAt, UpdatedAt) " +
+                "VALUES ('story', 'M5 story', '', 'creative', '', 4, '', 1, 0, 1, '2026-11-12 10:00:00', '2026-11-12 10:00:00')");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Stories (ConversationId, Kind, Bible, Outline, TrackState, Dice, PassageWords) VALUES (1, 0, '{{}}', '[]', 1, 0, 250)");
+        }
+
+        await _services.MigrateDogDatabaseAsync();
+
+        var character = Assert.Single(await _services.GetRequiredService<DogAI.Core.Characters.ICharacterStore>().ListAsync());
+        Assert.Equal("Ann", character.Name);
+        Assert.Null(character.Voice);
+        var story = await _services.GetRequiredService<DogAI.Core.Stories.IStoryStore>().GetAsync(1);
+        Assert.NotNull(story);
+        Assert.Null(story.NarratorVoice);
+        Assert.Equal(250, story.PassageWords);
+    }
+
     public void Dispose()
     {
         _services.Dispose();

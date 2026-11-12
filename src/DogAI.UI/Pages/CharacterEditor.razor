@@ -98,6 +98,10 @@
                         }
                     </select>
                 </label>
+                <div class="label-like">
+                    Voice for reading replies aloud
+                    <VoicePicker @bind-Value="_c.Voice" Sample="@VoiceSample" />
+                </div>
             </div>
         </div>
 
@@ -166,6 +170,8 @@
 }
 
 @code {
+    private string VoiceSample => string.IsNullOrWhiteSpace(_c.Name) ? "Hello! This is how I sound." : $"Hello, I'm {_c.Name.Trim()}. This is how I sound.";
+
     [Parameter] public long? CharacterId { get; set; }
 
     private string _idea = "";
@@ -202,6 +208,7 @@
             draft.Image = _c.Image;
             draft.Avatar = _c.Avatar;
             draft.PresetId = _c.PresetId;
+            draft.Voice = _c.Voice;
             _c = draft;
             _tags = string.Join(", ", _c.Tags);
             _drafted = true;

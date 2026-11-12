@@ -1,0 +1,169 @@
+@* Settings → Voice: the default voice and speed, reading replies aloud, speakers, microphone and listening. *@
+@implements IDisposable
+@inject ISettingsStore SettingsStore
+@inject IAudioDevices Devices
+@inject ReplyVoice Voice
+@inject Dictation Dict
+@inject ISpeechRecognizer Recognizer
+
+@if (_s is { } s)
+{
+    <div class="voice-settings">
+        <div class="two">
+            <div class="label-like">
+                Default voice <span class="small">for General chats, and characters and stories without a voice of their own</span>
+                <VoicePicker Value="@s.Voice" ValueChanged="v => SaveAsync(s with { Voice = v })" DefaultLabel="Pick one automatically" />
+            </div>
+            <label>
+                <span>Speed <span class="small">@s.VoiceSpeed.ToString("0.0#")×</span></span>
+                <input type="range" min="0.5" max="2" step="0.05" value="@s.VoiceSpeed.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                       @onchange="e => SaveAsync(s with { VoiceSpeed = Parse(e.Value, 1) })" aria-label="Speaking speed" />
+            </label>
+        </div>
+        <div class="two">
+            <label>
+                Speakers
+                <select class="field" value="@(s.Speakers ?? "")" @onchange="e => SaveAsync(s with { Speakers = Empty(e.Value) })">
+                    <option value="" selected="@(s.Speakers is null)">Windows default</option>
+                    @foreach (var name in WithSaved(_speakers, s.Speakers))
+                    {
+                        <option value="@name" selected="@(name == s.Speakers)">@name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                Microphone
+                <select class="field" value="@(s.Microphone ?? "")" @onchange="e => SaveAsync(s with { Microphone = Empty(e.Value) })">
+                    <option value="" selected="@(s.Microphone is null)">Windows default</option>
+                    @foreach (var name in WithSaved(_microphones, s.Microphone))
+                    {
+                        <option value="@name" selected="@(name == s.Microphone)">@name</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <label class="check">
+            <input type="checkbox" checked="@Voice.AutoRead" @onchange="e => Voice.SetAutoReadAsync(e.Value is true)" />
+            <span>Read replies aloud as they are written <span class="small">The speaker button under the message box does the same.</span></span>
+        </label>
+        <div class="two">
+            <label>
+                Language you speak
+                <select class="field" value="@s.SpeechLanguage" @onchange="e => SaveAsync(s with { SpeechLanguage = Empty(e.Value) ?? Auto })">
+                    @foreach (var (lang, name) in Languages)
+                    {
+                        <option value="@lang">@name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                Hands-free listening
+                <select class="field" value="@s.HandsFreeSensitivity" @onchange="e => SaveAsync(s with { HandsFreeSensitivity = (int)Parse(e.Value, 1) })">
+                    <option value="0">Noisy room: only clear, loud speech</option>
+                    <option value="1">Normal</option>
+                    <option value="2">Quiet room: pick up soft voices</option>
+                </select>
+            </label>
+        </div>
+        <div class="label-like">
+            Speech recognition
+            @if (_speechModel is null)
+            {
+                <span class="small">No model is downloaded yet, so the microphone cannot be used. Get one in <a href="models/voice">Models → Voice</a>.</span>
+            }
+            else
+            {
+                <span class="small">@VoiceCatalog.Title(_speechModel)@(Recognizer.RunsOn is { } where ? $", running on the {where}" : ""). Change it in <a href="models/voice">Models → Voice</a>.</span>
+                <span class="row">
+                    <button class="btn" @onclick="TryListeningAsync">@(Dict.IsOn && !Dict.HandsFree ? "Done: write it down" : Dict.State == DictationState.Writing ? "Writing…" : "Try listening")</button>
+                    @if (Dict.IsOn)
+                    {
+                        <span class="meter level"><i style="width:@((int)(Dict.Level * 100))%"></i></span>
+                    }
+                    <span class="small @(Dict.Problem is null ? "" : "bad-text")">@(Dict.Problem ?? _heard)</span>
+                </span>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private const string Auto = "auto";
+
+    private static readonly (string, string)[] Languages =
+    [
+        (Auto, "Detect it each time"), ("en", "English"), ("de", "German"), ("fr", "French"), ("es", "Spanish"), ("it", "Italian"),
+        ("pt", "Portuguese"), ("nl", "Dutch"), ("sv", "Swedish"), ("pl", "Polish"), ("ru", "Russian"), ("uk", "Ukrainian"),
+        ("tr", "Turkish"), ("ar", "Arabic"), ("hi", "Hindi"), ("ja", "Japanese"), ("ko", "Korean"), ("zh", "Chinese"),
+    ];
+
+    private AppSettings? _s;
+    private IReadOnlyList<string> _speakers = [];
+    private IReadOnlyList<string> _microphones = [];
+    private string? _speechModel;
+    private string? _heard;
+    private bool _trying;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Voice.Changed += Refresh;
+        Dict.Changed += Refresh;
+        Dict.Heard += OnHeard;
+        _s = await SettingsStore.LoadAsync();
+        (_speakers, _microphones) = await Task.Run(() => (Devices.Speakers(), Devices.Microphones()));
+        _speechModel = await Recognizer.ModelPathAsync() is { } path ? Path.GetFileName(path) : null;
+    }
+
+    private async Task SaveAsync(AppSettings changed)
+    {
+        // Load again first so a change made elsewhere meanwhile (the speaker button) is not undone.
+        var current = await SettingsStore.LoadAsync();
+        changed = current with
+        {
+            Voice = changed.Voice, VoiceSpeed = Math.Clamp(changed.VoiceSpeed, 0.5, 2), Speakers = changed.Speakers, Microphone = changed.Microphone,
+            SpeechLanguage = changed.SpeechLanguage, HandsFreeSensitivity = Math.Clamp(changed.HandsFreeSensitivity, 0, 2),
+        };
+        await SettingsStore.SaveAsync(changed);
+        _s = changed;
+    }
+
+    private async Task TryListeningAsync()
+    {
+        if (Dict.State == DictationState.Writing) return;
+        if (Dict.IsOn && !Dict.HandsFree)
+        {
+            await Dict.FinishAsync();
+            return;
+        }
+        _heard = null;
+        _trying = true;
+        await Dict.StartAsync();
+    }
+
+    private void OnHeard(string text, bool send)
+    {
+        if (!_trying) return;
+        _trying = false;
+        _heard = $"Heard: “{text}”";
+        Refresh();
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private static string? Empty(object? value) => value?.ToString() is { Length: > 0 } text ? text : null;
+
+    private static double Parse(object? value, double fallback) =>
+        double.TryParse(value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : fallback;
+
+    /// <summary>The devices plugged in now, plus the saved one if it is unplugged, so the choice is not silently lost.</summary>
+    private static IEnumerable<string> WithSaved(IReadOnlyList<string> names, string? saved) =>
+        saved is null || names.Contains(saved, StringComparer.OrdinalIgnoreCase) ? names : names.Append(saved);
+
+    public void Dispose()
+    {
+        Voice.Changed -= Refresh;
+        Dict.Changed -= Refresh;
+        Dict.Heard -= OnHeard;
+        if (Dict.IsOn) Dict.Stop();
+    }
+}

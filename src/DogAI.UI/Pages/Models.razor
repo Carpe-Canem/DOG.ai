@@ -61,6 +61,9 @@
     case "engine":
         <EngineTab />
         break;
+    case "voice":
+        <VoiceTab />
+        break;
     default:
         <div class="hw">@foreach (var chip in HardwareChips) {<span class="chip">@chip</span>}</div>
         <RecommendedTab Installed="_installed" />
@@ -148,6 +151,7 @@
         "library" => "Models on this PC",
         "downloads" => "Downloads in progress and finished",
         "engine" => "The program that runs models",
+        "voice" => "Models for listening and speaking",
         _ => "Recommended for your PC",
     };
 
@@ -156,6 +160,7 @@
         ("recommended", "Recommended", "Picked for your hardware"),
         ("browse", "Browse Hugging Face", "Search all GGUF models"),
         ("library", "Library", $"{_libraryCount} installed · {Sizes.Gb(_librarySize)}"),
+        ("voice", "Voice", "Listening and speaking"),
         ("downloads", "Downloads", DownloadsSub),
         ("engine", "Engine", Updater.InstalledTag is { } tag ? $"llama.cpp {tag}" : "llama.cpp"),
     ];

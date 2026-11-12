@@ -45,6 +45,10 @@
                         </span>
                     }
                     <button @onclick="() => Desktop.CopyText(m.Content)">Copy</button>
+                    @if (!isUser)
+                    {
+                        <ReadAloudButton Message="m" />
+                    }
                     @if (!Chat.IsBusy)
                     {
                         <button @onclick="() => StartEdit(m)">Edit</button>

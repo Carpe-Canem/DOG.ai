@@ -91,6 +91,13 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - Citations: `MarkdownRenderer.Render(text, citations)` turns `[n]` into `button.cite`; `chat.js` `watchCitations` passes clicks to `ChatThread.OpenCitation`. `PassageViewer` shows the passage in its document as plain text.
 - `dotnet test` does not rebuild the app. Run `dotnet build DogAI.sln` before `tools/walkthrough.ps1`, or it runs old code.
 
+## How voice works
+
+- Core: `DogAI.Core/Voice`. Interfaces `ISpeechRecognizer`, `ISpeechSynthesizer`, `IMicrophone`, `IAudioOutput`, `IAudioDevices`; logic `ReadAloud` (reads text piece by piece, next piece synthesised while the current one plays; `Begin`/`Feed`/`End` for streaming, `queue` for group members), `ReplyVoice` (picks the voice: story narrator, group speaker, character, else default; reads `ReplyKind.Reply` only when auto-read is on), `Dictation` (push to talk and hands-free; `Paused` keeps hands-free deaf while a reply is written or read), `SentenceSplitter`, `SpeechText` (markdown → words to say), `VoiceActivity` (hands-free speech detection), `Transcript` (drops Whisper's invented text), `VoiceId` (saved as text: `windows:<name>`, `kokoro:<folder>/<speaker>`, `piper:<folder>`), `VoiceCatalog` (recommended downloads), `Wav`.
+- Engine: `DogAI.Engine/Voice`. `WhisperRecognizer` (Whisper.net, Vulkan then CPU), `VoiceBox` (sherpa-onnx Kokoro/Piper plus System.Speech Windows voices), `Microphone`/`Speakers`/`AudioDevices` (NAudio WinMM), `VoiceLibrary` (finds models in `<models>/voice`; Kokoro voice names come from the .onnx metadata via `OnnxMetadata`). Keep sherpa-onnx on 1.13.x: 2.x dropped espeak-ng.
+- UI: `ChatComposer` has the microphone, hands-free and read-aloud buttons; `ReadAloudButton` sits in reply actions; `VoicePicker` in the character editor and story setup; `Components/Voice/VoiceSettings` in Settings; `Components/Models/VoiceTab` in Models. A `<select>` whose options load after the first render must mark the chosen `<option selected>`, or it shows the first option.
+- Walkthroughs without hardware: `$env:DOGAI_TEST_MIC` = a WAV file played as the microphone; `$env:DOGAI_TEST_SPEAKERS` = a folder that receives each spoken clip as a WAV. `dotnet test` runs the real-voice test only when `$env:DOGAI_TEST_VOICE_DIR` is a models folder with a `voice` folder.
+
 Check every new screen in all three skins, dark and light. Say plainly what was and was not looked at. Never point a test run at the real data folder (`%LOCALAPPDATA%\DOG-AI`).
 
 ## Machine

@@ -4,10 +4,28 @@
 @inject ChatService Chat
 @inject EngineManager Engine
 @inject IJSRuntime JS
+@inject Dictation Dict
+@inject ReadAloud Reader
+@inject ReplyVoice Voice
 
 <div class="composer">
     <textarea @ref="_input" rows="1" aria-label="Message" @bind="_draft" @bind:event="oninput"
               placeholder="@(Engine.IsReady ? Placeholder : "Load a model to start chatting.")"></textarea>
+    <span class="voice-btns">
+        <button class="btn icon @(Dict.IsOn && !Dict.HandsFree ? "on" : "")" aria-pressed="@Aria(Dict.IsOn && !Dict.HandsFree)" @onclick="ToggleMicAsync"
+                title="@(Dict.IsOn && !Dict.HandsFree ? "Done talking: write it down" : "Talk instead of typing (or hold Ctrl+Space)")"><Icon Name="mic" Size="18" /></button>
+        <button class="btn icon @(Dict.HandsFree ? "on" : "")" aria-pressed="@Aria(Dict.HandsFree)" @onclick="ToggleHandsFreeAsync"
+                title="Hands-free: talk, pause, and it is sent. Click again to stop."><Icon Name="handsfree" Size="18" /></button>
+        @if (Reader.IsSpeaking)
+        {
+            <button class="btn icon on" @onclick="Reader.Stop" title="Stop reading aloud"><Icon Name="stop" Size="18" /></button>
+        }
+        else
+        {
+            <button class="btn icon @(Voice.AutoRead ? "on" : "")" aria-pressed="@Aria(Voice.AutoRead)" @onclick="() => Voice.SetAutoReadAsync(!Voice.AutoRead)"
+                    title="@(Voice.AutoRead ? "Replies are read aloud as they are written. Click to stop that." : "Read replies aloud as they are written")"><Icon Name="speaker" Size="18" /></button>
+        }
+    </span>
     @if (Chat.IsBusy)
     {
         <button class="btn" @onclick="Chat.Stop">Stop</button>
@@ -23,6 +41,16 @@
         <button class="btn primary" disabled="@(!Engine.IsReady || (!AllowEmpty && string.IsNullOrWhiteSpace(_draft)))" @onclick="SendAsync">@SendLabel</button>
     }
 </div>
+@if (VoiceLine is { } line)
+{
+    <div class="ctx voice-line @(line.Problem ? "bad-text" : "")" role="status">
+        @if (!line.Problem && Dict.IsOn && !(Dict.HandsFree && (Chat.IsBusy || Reader.IsSpeaking)))
+        {
+            <div class="meter level"><i style="width:@((int)(Dict.Level * 100))%"></i></div>
+        }
+        <span>@line.Text</span>
+    </div>
+}
 @if (Usage is { } usage)
 {
     <div class="ctx" title="How much of the model's context window this chat is using">
@@ -89,7 +117,88 @@
         }
     }
 
-    protected override void OnInitialized() => Chat.Changed += OnChatChanged;
+    protected override void OnInitialized()
+    {
+        Chat.Changed += OnChatChanged;
+        Dict.Changed += OnVoiceChanged;
+        Dict.Heard += OnHeard;
+        Reader.Changed += OnVoiceChanged;
+        Voice.Changed += OnVoiceChanged;
+        // Hands-free does not listen while a reply is written or read aloud, so DOG AI never hears itself.
+        Dict.Paused = () => Chat.IsBusy || Reader.IsSpeaking;
+    }
+
+    private DateTime _lastVoiceRender;
+
+    /// <summary>aria-pressed needs the words "true" or "false"; Blazor would drop a false attribute and leave a true one empty.</summary>
+    private static string Aria(bool on) => on ? "true" : "false";
+
+    private void OnVoiceChanged()
+    {
+        // The level meter changes twenty times a second; redraw at most ten.
+        if (DateTime.UtcNow - _lastVoiceRender < TimeSpan.FromMilliseconds(100) && Dict.State is DictationState.Listening or DictationState.Hearing) return;
+        _lastVoiceRender = DateTime.UtcNow;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private (string Text, bool Problem)? VoiceLine
+    {
+        get
+        {
+            if (Dict.Problem is { } p) return (p, true);
+            if (Dict.State == DictationState.Writing) return ("Writing down what you said…", false);
+            if (Dict.HandsFree)
+            {
+                if (Chat.IsBusy || Reader.IsSpeaking) return ("Hands-free: waiting until the reply is finished.", false);
+                return Dict.State == DictationState.Hearing
+                    ? ("Hands-free: hearing you…", false)
+                    : ("Hands-free: listening. Talk, then pause, and it is sent.", false);
+            }
+            if (Dict.IsOn) return ("Listening… press the microphone again (or let go of Ctrl+Space) when you are done.", false);
+            if (Reader.Problem is { } r) return ("Could not read aloud: " + r, true);
+            return null;
+        }
+    }
+
+    private async Task ToggleMicAsync()
+    {
+        if (Dict.IsOn && !Dict.HandsFree) await Dict.FinishAsync();
+        else await Dict.StartAsync();
+    }
+
+    private async Task ToggleHandsFreeAsync()
+    {
+        if (Dict.HandsFree) Dict.Stop();
+        else await Dict.StartHandsFreeAsync();
+    }
+
+    [JSInvokable]
+    public Task PushToTalk(bool down) => InvokeAsync(async () =>
+    {
+        if (down && !Dict.IsOn) await Dict.StartAsync();
+        else if (!down && Dict.IsOn && !Dict.HandsFree) await Dict.FinishAsync();
+    });
+
+    private void OnHeard(string text, bool send) => _ = InvokeAsync(async () =>
+    {
+        if (send && !Chat.IsBusy && !_drafting && Engine.IsReady && string.IsNullOrWhiteSpace(_draft))
+        {
+            _draft = text;
+            await SendAsync();
+        }
+        else
+        {
+            _draft = string.IsNullOrWhiteSpace(_draft) ? text : _draft.TrimEnd() + " " + text;
+        }
+        StateHasChanged();
+        try
+        {
+            if (_module is not null) await _module.InvokeVoidAsync("resizeComposer", _input);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    });
 
     // While the model drafts the user's message, show it growing in the box.
     private void OnChatChanged()
@@ -132,6 +241,12 @@
     public async ValueTask DisposeAsync()
     {
         Chat.Changed -= OnChatChanged;
+        Dict.Changed -= OnVoiceChanged;
+        Dict.Heard -= OnHeard;
+        Reader.Changed -= OnVoiceChanged;
+        Voice.Changed -= OnVoiceChanged;
+        // Leaving the screen turns the microphone off; reading aloud carries on.
+        if (Dict.IsOn) Dict.Stop();
         _self?.Dispose();
         try
         {

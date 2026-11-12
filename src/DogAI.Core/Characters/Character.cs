@@ -50,6 +50,9 @@ public sealed class Character
     /// <summary>Style used for new chats with this character. Null means the default.</summary>
     public string? PresetId { get; set; }
 
+    /// <summary>The voice its replies are read with (a <see cref="DogAI.Core.Voice.VoiceId"/> as text). Null means the default voice. Not part of the card.</summary>
+    public string? Voice { get; set; }
+
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 

@@ -30,17 +30,49 @@ public sealed record AppSettings
     /// <summary>Hugging Face access token for gated models, encrypted for this Windows user (DPAPI). Null when none.</summary>
     public string? HfTokenProtected { get; init; }
 
+    /// <summary>Speech recognition model: a file name in the voice folder. Null uses the first one found.</summary>
+    public string? SpeechModel { get; init; }
+
+    /// <summary>Language spoken to DOG AI, as a code ("en", "de"…), or "auto" to let the model tell.</summary>
+    public string SpeechLanguage { get; init; } = "auto";
+
+    /// <summary>Microphone by its Windows name. Null uses the Windows default.</summary>
+    public string? Microphone { get; init; }
+
+    /// <summary>Speakers or headphones by their Windows name. Null uses the Windows default.</summary>
+    public string? Speakers { get; init; }
+
+    /// <summary>The voice used when a character or story has none of its own (a <see cref="DogAI.Core.Voice.VoiceId"/> as text). Null picks one.</summary>
+    public string? Voice { get; init; }
+
+    /// <summary>How fast voices speak: 1 is normal, 0.5 to 2.</summary>
+    public double VoiceSpeed { get; init; } = 1.0;
+
+    /// <summary>Read every new reply aloud as it is written.</summary>
+    public bool ReadRepliesAloud { get; init; }
+
+    /// <summary>Hands-free listening: 0 needs clear, loud speech; 1 normal; 2 picks up quiet voices.</summary>
+    public int HandsFreeSensitivity { get; init; } = 1;
+
     /// <summary>Compares lists and dictionaries by content, so two loads of the same settings are equal.</summary>
     public bool Equals(AppSettings? other) =>
         other is not null &&
         ModelsDirectory == other.ModelsDirectory && Theme == other.Theme && Skin == other.Skin &&
         ContextLength == other.ContextLength && LastModelPath == other.LastModelPath &&
         IdleUnloadMinutes == other.IdleUnloadMinutes && HfTokenProtected == other.HfTokenProtected &&
+        SpeechModel == other.SpeechModel && SpeechLanguage == other.SpeechLanguage && Microphone == other.Microphone &&
+        Speakers == other.Speakers && Voice == other.Voice && VoiceSpeed.Equals(other.VoiceSpeed) &&
+        ReadRepliesAloud == other.ReadRepliesAloud && HandsFreeSensitivity == other.HandsFreeSensitivity &&
         ExtraModelFolders.SequenceEqual(other.ExtraModelFolders) &&
         DefaultModels.Count == other.DefaultModels.Count &&
         DefaultModels.All(kv => other.DefaultModels.TryGetValue(kv.Key, out var v) && v == kv.Value);
 
-    public override int GetHashCode() => HashCode.Combine(ModelsDirectory, Theme, Skin, ContextLength, LastModelPath, IdleUnloadMinutes);
+    public override int GetHashCode() => HashCode.Combine(
+        HashCode.Combine(ModelsDirectory, Theme, Skin, ContextLength, LastModelPath, IdleUnloadMinutes),
+        HashCode.Combine(SpeechModel, SpeechLanguage, Microphone, Speakers, Voice, VoiceSpeed, ReadRepliesAloud, HandsFreeSensitivity));
+
+    /// <summary>Where voice models are kept: a "voice" folder inside the models folder.</summary>
+    public string? VoiceFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, "voice");
 }
 
 /// <summary>The few things the UI needs from Windows itself. Implemented by the WPF host.</summary>
