@@ -68,7 +68,10 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - Messages are a tree (`MessageTree`). Regenerate and edit add a sibling and move `Conversation.ActiveLeafId`; nothing is overwritten.
 - Model output goes through `MarkdownRenderer` (Core), which disables raw HTML and neutralises non-web links. Never render model text with `MarkupString` any other way.
 - UI needs from Windows (file dialog, clipboard) go through `IDesktopShell`, implemented in App.
-- General and Characters share `Components/Chat/` (`ChatThread`, `ChatComposer`, `StylePanel`). Character chats run through the same `ChatService`; `CharacterPrompt` (Core) turns card + persona into the system message, and `CharacterCard` reads and writes card files. Styles come from `PresetCatalog`, not `SamplerPresets` directly.
+- General and Characters share `Components/Chat/` (`ChatThread`, `ChatComposer`, `StylePanel`). Character chats run through the same `ChatService`; `CharacterPrompt.Layout` (Core) turns card, persona, lore, author's note and memory into a `PromptLayout`, and `CharacterCard` reads and writes card files. Styles come from `PresetCatalog`, not `SamplerPresets` directly.
+- A prompt is a `PromptLayout`: system-message parts (each with a drop order for when space runs out) plus text placed inside user turns. Never add a `system` message after the first one; many chat templates reject it. Notes go into user turns via `PromptLayout.Arrange`.
+- Lore lives in the card's `character_book` inside `Character.ExtraJson`; edit it through `Lorebook` (`For`, `SaveTo`) so unknown fields survive export. Keys from cards are untrusted: matching uses a regex timeout.
+- DOG AI's own model jobs (summaries, card builder) set `MaxTokens` / `JsonSchema` on a copy of a preset; both are `[JsonIgnore]` so they never end up in a user's saved style. Check their output before keeping it (see `CharacterPrompt.IsUsableSummary`).
 
 Check every new screen in all three skins, dark and light. Say plainly what was and was not looked at. Never point a test run at the real data folder (`%LOCALAPPDATA%\DOG-AI`).
 
