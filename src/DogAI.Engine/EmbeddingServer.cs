@@ -269,8 +269,7 @@ public sealed class EmbeddingServer : IEmbedder, IDisposable
     {
         string[] lines;
         lock (_recentOutput) lines = _recentOutput.ToArray();
-        var hint = lines.LastOrDefault(l => l.Contains("error", StringComparison.OrdinalIgnoreCase) || l.Contains("failed", StringComparison.OrdinalIgnoreCase));
-        return hint is null ? lead : $"{lead} It said: {hint.Trim()}";
+        return EngineFailure.Explain(lead, lines);
     }
 
     public void Dispose()
