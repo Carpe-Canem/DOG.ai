@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOG AI design proposals</title>
+<style>
+/* ───────── Proposal switcher (not part of any design) ───────── */
+html,body{margin:0;height:100%;background:#111}
+#switcher{height:46px;display:flex;align-items:center;gap:8px;padding:0 12px;background:#0c0c0e;color:#d6d6da;
+  font:13px/1 "Segoe UI",system-ui,sans-serif;border-bottom:1px solid #2a2a30;overflow-x:auto;white-space:nowrap}
+#switcher b{margin-right:4px;color:#8a8a94;font-weight:600}
+#switcher button{font:inherit;color:#d6d6da;background:#1b1b20;border:1px solid #34343c;border-radius:6px;padding:6px 10px;cursor:pointer}
+#switcher button[aria-pressed=true]{background:#e8e8ec;color:#111;border-color:#e8e8ec;font-weight:600}
+#switcher .gap{flex:1;min-width:8px}
+#switcher #blurb{color:#8a8a94}
+
+/* ───────── Shared component base, driven by per-design tokens ───────── */
+.mock{height:calc(100vh - 47px);background:var(--bg);color:var(--text);font:var(--fs)/1.5 var(--ui);overflow:hidden}
+.mock *{box-sizing:border-box}
+.mock button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
+.mock button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mock [hidden]{display:none!important}
+.logo svg{display:block;width:28px;height:28px;color:var(--accent)}
+.nav{display:flex;gap:4px}
+.nav-btn{display:flex;align-items:center;gap:8px;padding:7px 11px;border-radius:var(--r);color:var(--muted)}
+.nav-btn:hover{color:var(--text)}
+.nav-btn.active{color:var(--accent)}
+.list{overflow:auto;padding:12px}
+.list-head{display:flex;justify-content:space-between;align-items:center;margin:2px 4px 10px}
+.list-head h3{margin:0;font-size:.78em;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.li{display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:8px!important;border-radius:var(--r)}
+.li:hover{background:var(--surface2)}
+.li.active{background:var(--surface2)}
+.li-text{min-width:0}
+.li-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.li-sub{color:var(--muted);font-size:.85em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.list-foot{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.avatar{flex:none;width:32px;height:32px;border-radius:50%;background:var(--surface2);display:grid;place-items:center;font-weight:700;color:var(--accent)}
+.center{display:flex;flex-direction:column;min-width:0;min-height:0}
+.head{padding:12px 20px;border-bottom:1px solid var(--line)}
+.head h2{margin:0;font-size:1.15em}
+.head p{margin:0;color:var(--muted);font-size:.85em}
+.main{flex:1;overflow:auto;padding:20px}
+.thread{max-width:780px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+.msg{display:flex;gap:12px}
+.msg-col{min-width:0;flex:1}
+.msg-name{font-weight:600;font-size:.85em;color:var(--muted)}
+.msg-body p{margin:.3em 0 .7em}
+.msg-body pre{font:.88em/1.5 var(--mono);background:var(--surface2);border:1px solid var(--line);border-radius:var(--r);padding:12px;overflow:auto;margin:.5em 0}
+.msg-body code{font-family:var(--mono);font-size:.92em}
+.msg-body em{color:var(--muted)}
+.msg-actions{display:flex;gap:12px;align-items:center;font-size:.8em;color:var(--muted);flex-wrap:wrap}
+.msg-actions button:hover{color:var(--accent)}
+.stat{margin-left:auto;font-family:var(--mono)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border:1px solid var(--line);border-radius:999px;font-size:.8em;color:var(--muted)}
+.composer-wrap{padding:12px 20px 16px}
+.composer{max-width:780px;margin:0 auto;display:flex;gap:8px;align-items:flex-end;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:8px}
+.composer .input{flex:1;padding:6px;color:var(--muted);min-height:38px}
+.btn{padding:6px 12px!important;border-radius:var(--r);border:1px solid var(--line)!important;white-space:nowrap}
+.btn:hover{border-color:var(--accent)!important}
+.btn.primary{background:var(--accent);color:var(--ink);border-color:transparent!important;font-weight:600}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.aside{overflow:auto;padding:14px}
+.panel{margin-bottom:20px}
+.panel h4{margin:0 0 8px;font-size:.75em;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.kv{display:flex;justify-content:space-between;gap:10px;padding:3px 0}
+.kv span:first-child{color:var(--muted)}
+.kv span:last-child{text-align:right}
+.meter{height:6px;background:var(--surface2);border-radius:99px;overflow:hidden;margin:6px 0 4px}
+.meter i{display:block;height:100%;background:var(--accent)}
+.small{font-size:.85em;color:var(--muted)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.cardhead{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.cardhead .avatar{width:48px;height:48px;font-size:1.3em}
+.prose{max-width:680px;margin:0 auto;font:var(--readfs)/1.7 var(--read)}
+.prose h3{margin:0 0 .2em;font-size:1.3em}
+.prose .chapter{color:var(--muted);font:600 .75rem var(--ui);letter-spacing:.1em;text-transform:uppercase;margin-bottom:1em}
+.prose p{margin:0 0 1em}
+.choices{max-width:680px;margin:22px auto 0;display:grid;gap:8px}
+.choices-label{font-size:.78em;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.choice{display:flex;gap:10px;text-align:left;padding:10px 12px!important;border:1px solid var(--line)!important;border-radius:var(--r);background:var(--surface)}
+.choice b{color:var(--accent)}
+.choice:hover{border-color:var(--accent)!important}
+.choices .composer{max-width:none;margin:6px 0 0;width:100%}
+.branch svg{width:100%;height:auto;display:block;color:var(--muted)}
+.hw{display:flex;flex-wrap:wrap;gap:8px;max-width:980px;margin:0 auto 14px}
+.models{display:grid;gap:8px;max-width:980px;margin:0 auto}
+.model{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.model-name{font-weight:600}
+.model-meta{color:var(--muted);font-size:.85em}
+.fit{font-size:.85em;white-space:nowrap}
+.fit.full{color:var(--ok)}.fit.partial{color:var(--warn)}.fit.no{color:var(--bad)}
+.rec{margin-left:8px;font-size:.72em;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink);background:var(--accent);padding:1px 7px;border-radius:999px;vertical-align:middle}
+.progress{width:130px;font-size:.8em;color:var(--muted)}
+.note{max-width:980px;margin:14px auto 0;font-size:.82em;color:var(--muted)}
+.status{display:flex;gap:18px;padding:4px 14px;font:.78em var(--mono);color:var(--muted);border-top:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.offline{display:inline-flex;align-items:center;gap:6px;font-size:.8em;color:var(--muted);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.offline.on{color:var(--ok)}.offline.on .dot{background:var(--ok)}
+.home{display:none}
+@media (max-width:1050px){.mock .aside{display:none!important}}
+@media (max-width:760px){.mock .list{display:none!important}.model{grid-template-columns:1fr}}
+
+/* ═════════ A · WORKBENCH ═════════ */
+.dir-a{--ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;--read:var(--ui);--mono:"Cascadia Code",Consolas,monospace;
+  --fs:13px;--readfs:15px;--r:6px;
+  --bg:#16181c;--surface:#1c1f24;--surface2:#262a31;--line:#2f343c;--text:#e6e8eb;--muted:#8d95a2;--accent:#f2a93b;--ink:#1a1206;
+  --ok:#5fd38d;--warn:#f0b84a;--bad:#f28b82;
+  display:grid;grid-template-columns:64px 250px minmax(0,1fr) 290px}
+[data-theme=light] .dir-a{--bg:#f3f4f6;--surface:#fff;--surface2:#e9ebef;--line:#d7dbe1;--text:#1b1e23;--muted:#5d6673;--accent:#a35f00;--ink:#fff;--ok:#17794a;--warn:#8a5a00;--bad:#b3261e}
+.dir-a .rail{background:var(--surface);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:14px}
+.dir-a .nav{flex-direction:column;gap:6px}
+.dir-a .nav-btn{flex-direction:column;gap:3px;font-size:10px;width:54px;padding:8px 0}
+.dir-a .nav-btn.active{background:var(--surface2);box-shadow:inset 2px 0 0 var(--accent)}
+.dir-a .rail-foot{margin-top:auto}
+.dir-a .rail-foot .offline{flex-direction:column;font-size:10px;gap:4px}
+.dir-a .list{background:var(--surface);border-right:1px solid var(--line)}
+.dir-a .aside{background:var(--surface);border-left:1px solid var(--line)}
+.dir-a .msg.user .avatar{color:var(--muted)}
+.dir-a .li.active{box-shadow:inset 2px 0 0 var(--accent)}
+
+/* ═════════ B · FIRESIDE ═════════ */
+.dir-b{--ui:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;--read:Georgia,Cambria,"Times New Roman",serif;--mono:"Cascadia Code",Consolas,monospace;
+  --fs:14px;--readfs:18px;--r:10px;
+  --bg:#1c1713;--surface:#241e19;--surface2:#30281f;--line:#3d3229;--text:#ede4d8;--muted:#a69886;--accent:#e08a5c;--ink:#1c1713;
+  --ok:#8fcf9a;--warn:#e6b866;--bad:#ef9a8c;
+  display:flex;flex-direction:column}
+[data-theme=light] .dir-b{--bg:#f5efe4;--surface:#fbf7ef;--surface2:#ece3d3;--line:#dccfba;--text:#2b241d;--muted:#75675a;--accent:#a8481f;--ink:#fff;--ok:#2c6e3c;--warn:#855600;--bad:#a8321f}
+.dir-b .top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:10px 24px;border-bottom:1px solid var(--line)}
+.dir-b .brand{display:flex;align-items:center;gap:10px}
+.dir-b .word{font:600 1.25em var(--read);letter-spacing:.02em}
+.dir-b .top>:last-child{justify-self:end}
+.dir-b .nav-btn{border-radius:0;padding:8px 14px;border-bottom:2px solid transparent}
+.dir-b .nav-btn svg{display:none}
+.dir-b .nav-btn.active{border-bottom-color:var(--accent);color:var(--text);font-weight:600}
+.dir-b .body{flex:1;min-height:0;display:grid;grid-template-columns:230px minmax(0,1fr) 250px}
+.dir-b .list{padding:22px 14px}
+.dir-b .li.active{background:none;box-shadow:inset 3px 0 0 var(--accent);border-radius:0}
+.dir-b .avatar{border-radius:8px}
+.dir-b .head{border:0;text-align:center;padding:26px 20px 4px}
+.dir-b .head h2{font:600 1.6em var(--read)}
+.dir-b .main{padding:18px 28px}
+.dir-b .thread{max-width:680px;gap:26px}
+.dir-b .msg .avatar{display:none}
+.dir-b .msg.ai .msg-body{font:var(--readfs)/1.7 var(--read)}
+.dir-b .msg.user{padding-left:18px;border-left:3px solid var(--accent)}
+.dir-b .msg.user .msg-body{color:var(--muted);font-style:italic}
+.dir-b .msg-name{font-size:.72em;letter-spacing:.1em;text-transform:uppercase}
+.dir-b .composer{max-width:680px;border-radius:999px;padding:6px 6px 6px 18px;align-items:center}
+.dir-b .btn{border-radius:999px}
+.dir-b .aside{padding:30px 22px 20px 6px;font-size:.88em}
+.dir-b .panel{border-top:1px solid var(--line);padding-top:10px}
+.dir-b .panel h4{font:italic 1.05em var(--read);text-transform:none;letter-spacing:0}
+.dir-b .prose{font-size:19px}
+.dir-b .prose p:first-of-type::first-letter{font-size:3.1em;float:left;line-height:.85;padding:.08em .1em 0 0;color:var(--accent)}
+.dir-b .choice{background:none;border-radius:6px;font-family:var(--read);font-size:1.08em}
+.dir-b .model,.dir-b .composer{box-shadow:0 1px 0 var(--line)}
+
+/* ═════════ C · CONSOLE ═════════ */
+.dir-c{--ui:"Cascadia Code","Cascadia Mono",Consolas,monospace;--read:var(--ui);--mono:var(--ui);
+  --fs:13px;--readfs:14px;--r:0px;
+  --bg:#060a09;--surface:#0a100f;--surface2:#101a17;--line:#22473c;--text:#bdf5dc;--muted:#679a88;--accent:#3dffa8;--ink:#03110b;
+  --ok:#3dffa8;--warn:#ffd166;--bad:#ff7b7b;
+  display:flex;flex-direction:column}
+[data-theme=light] .dir-c{--bg:#eceee6;--surface:#f6f8f1;--surface2:#e0e5d9;--line:#8fa394;--text:#13241b;--muted:#4f6357;--accent:#0a6e40;--ink:#fff;--ok:#0a6e40;--warn:#7a5200;--bad:#a8231c}
+.dir-c .top{display:flex;align-items:center;gap:18px;padding:6px 12px;border-bottom:1px solid var(--line)}
+.dir-c .word{font-weight:700;color:var(--accent);letter-spacing:.06em}
+.dir-c .nav{flex:1;counter-reset:n}
+.dir-c .nav-btn{text-transform:uppercase;padding:4px 8px;counter-increment:n;letter-spacing:.04em}
+.dir-c .nav-btn svg{display:none}
+.dir-c .nav-btn::before{content:"[" counter(n) "]";color:var(--muted)}
+.dir-c .nav-btn.active{background:var(--accent);color:var(--ink)}
+.dir-c .nav-btn.active::before{color:var(--ink)}
+.dir-c .body{flex:1;min-height:0;display:grid;grid-template-columns:240px minmax(0,1fr) 300px;gap:8px;padding:8px}
+.dir-c .box{border:1px solid var(--line);background:var(--surface)}
+.dir-c .list-head h3::before,.dir-c .panel h4::before{content:"── "}
+.dir-c .list-head h3,.dir-c .panel h4{color:var(--accent)}
+.dir-c .li.active{background:none;outline:1px solid var(--accent);outline-offset:-1px}
+.dir-c .li.active .li-title::before{content:"> ";color:var(--accent)}
+.dir-c .avatar{border-radius:0;border:1px solid var(--line);background:none}
+.dir-c .head{padding:8px 14px}
+.dir-c .head h2{font-size:1em;text-transform:uppercase;letter-spacing:.06em}
+.dir-c .main{padding:14px}
+.dir-c .thread{max-width:none;gap:14px}
+.dir-c .msg .avatar{display:none}
+.dir-c .msg-name{display:inline;color:var(--accent);font-size:1em}
+.dir-c .msg.user .msg-name{color:var(--muted)}
+.dir-c .msg-name::after{content:" >"}
+.dir-c .composer,.dir-c .prose,.dir-c .choices,.dir-c .models,.dir-c .hw,.dir-c .note{max-width:none}
+.dir-c .composer .input::before{content:"$ ";color:var(--accent)}
+.dir-c .composer-wrap{padding:8px 14px 12px}
+.dir-c .chip{border-radius:0}
+.dir-c .rec{border-radius:0}
+.dir-c .meter{border-radius:0;height:10px;border:1px solid var(--line);background:none}
+.dir-c .btn{text-transform:uppercase;font-size:.9em}
+.dir-c .choice b::after{content:")"}
+.dir-c .prose h3{text-transform:uppercase;font-size:1.05em;letter-spacing:.06em}
+.dir-c .status{color:var(--text)}
+
+/* ═════════ D · PLAYHOUSE ═════════ */
+.dir-d{--ui:"Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;--read:var(--ui);--mono:"Cascadia Code",Consolas,monospace;
+  --fs:15px;--readfs:17px;--r:18px;
+  --bg:#16132b;--surface:#201c3b;--surface2:#2c2752;--line:#3a3468;--text:#f4f1ff;--muted:#aaa4d1;--accent:#6cb2ff;--ink:#12102a;
+  --ok:#5fe0a8;--warn:#ffc864;--bad:#ff8f9c;
+  --c-general:#6cb2ff;--c-characters:#ff86a5;--c-story:#bb95ff;--c-models:#5fe0a8;
+  display:flex;flex-direction:column;
+  background:radial-gradient(900px 500px at 85% -10%,color-mix(in srgb,var(--accent) 22%,transparent),transparent),var(--bg)}
+[data-theme=light] .dir-d{--bg:#f2efff;--surface:#fff;--surface2:#ece8ff;--line:#d9d2f6;--text:#211c3c;--muted:#655f88;--ink:#fff;
+  --ok:#11794f;--warn:#855600;--bad:#b3264a;--c-general:#1c69c9;--c-characters:#c8325e;--c-story:#7140cf;--c-models:#11794f;--accent:#1c69c9}
+.dir-d[data-screen=general],.dir-d[data-screen=home]{--accent:var(--c-general)}
+.dir-d[data-screen=characters]{--accent:var(--c-characters)}
+.dir-d[data-screen=story]{--accent:var(--c-story)}
+.dir-d[data-screen=models]{--accent:var(--c-models)}
+.dir-d .top{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:12px 18px}
+.dir-d .brand{display:flex!important;align-items:center;gap:10px;justify-self:start}
+.dir-d .word{font-weight:800;font-size:1.15em;letter-spacing:.01em}
+.dir-d .logo svg{width:34px;height:34px}
+.dir-d .top>:last-child{justify-self:end}
+.dir-d .nav{background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px}
+.dir-d .nav-btn{border-radius:999px;padding:8px 14px;font-weight:600}
+.dir-d .nav-btn.active{background:var(--accent);color:var(--ink)}
+.dir-d .body{flex:1;min-height:0;display:grid;grid-template-columns:260px minmax(0,1fr) 290px;gap:14px;padding:0 18px 18px}
+.dir-d .card{background:var(--surface);border:1px solid var(--line);border-radius:22px}
+.dir-d .li{border-radius:14px}
+.dir-d .li.active{background:color-mix(in srgb,var(--accent) 20%,var(--surface))}
+.dir-d .avatar{width:38px;height:38px;background:color-mix(in srgb,var(--accent) 25%,var(--surface2))}
+.dir-d .head{border:0;padding:16px 22px 0}
+.dir-d .head h2{font-size:1.25em;font-weight:800}
+.dir-d .msg.user{flex-direction:row-reverse}
+.dir-d .msg.user .msg-col{display:flex;flex-direction:column;align-items:flex-end}
+.dir-d .msg-body{background:var(--surface2);padding:10px 14px;border-radius:18px;border-top-left-radius:6px;max-width:100%}
+.dir-d .msg.user .msg-body{background:var(--accent);color:var(--ink);border-radius:18px;border-top-right-radius:6px}
+.dir-d .msg-body p:last-child{margin-bottom:.2em}
+.dir-d .msg-body pre{background:var(--bg);border-radius:12px}
+.dir-d .msg-actions{margin-top:6px}
+.dir-d .composer{border-radius:999px;padding:6px 6px 6px 18px;align-items:center}
+.dir-d .btn{border-radius:999px}
+.dir-d .choice{border-radius:16px;padding:14px 16px!important;font-weight:600}
+.dir-d .choice b{display:grid;place-items:center;flex:none;width:26px;height:26px;border-radius:50%;background:var(--accent);color:var(--ink)}
+.dir-d .model{border-radius:18px}
+.dir-d .status{display:none}
+.dir-d.is-home .body{display:none}
+.dir-d.is-home .home{display:block;flex:1;overflow:auto;padding:3vh 24px 24px}
+.dir-d .home-inner{max-width:920px;margin:0 auto}
+.dir-d .home h1{font-size:2.1em;font-weight:800;margin:0 0 4px}
+.dir-d .home .sub{color:var(--muted);margin:0 0 24px}
+.dir-d .tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.dir-d .tile{display:block;text-align:left;padding:22px!important;border-radius:26px;background:var(--surface);border:1px solid var(--line)!important;position:relative;overflow:hidden}
+.dir-d .tile::after{content:"";position:absolute;right:-40px;top:-40px;width:150px;height:150px;border-radius:50%;background:var(--tc);opacity:.18}
+.dir-d .tile:hover{border-color:var(--tc)!important}
+.dir-d .tile svg{width:34px;height:34px;color:var(--tc)}
+.dir-d .tile h3{margin:10px 0 2px;font-size:1.3em;font-weight:800}
+.dir-d .tile p{margin:0;color:var(--muted)}
+.dir-d .tile .last{margin-top:14px;font-size:.85em;color:var(--tc);font-weight:600}
+@media (max-width:760px){.dir-d .tiles{grid-template-columns:1fr}.dir-b .body,.dir-c .body,.dir-d .body{grid-template-columns:1fr}.dir-a{grid-template-columns:64px minmax(0,1fr)}.dir-d .nav-btn span,.dir-b .word{display:none}}
+@media (min-width:761px) and (max-width:1050px){.dir-a{grid-template-columns:64px 230px minmax(0,1fr)}.dir-b .body{grid-template-columns:210px minmax(0,1fr)}.dir-c .body{grid-template-columns:220px minmax(0,1fr)}.dir-d .body{grid-template-columns:240px minmax(0,1fr)}}
+</style>
+</head>
+<body>
+<div id="switcher" role="toolbar" aria-label="Proposal switcher">
+  <b>Proposal</b>
+  <button data-dir="a">A · Workbench</button>
+  <button data-dir="b">B · Fireside</button>
+  <button data-dir="c">C · Console</button>
+  <button data-dir="d">D · Playhouse</button>
+  <span id="blurb"></span>
+  <span class="gap"></span>
+  <button id="theme"></button>
+</div>
+<div id="stage"></div>
+
+<template id="shell-a">
+  <div class="mock dir-a">
+    <nav class="rail"><div class="logo" data-slot="logo"></div><div class="nav" data-slot="nav"></div><div class="rail-foot" data-slot="offline"></div></nav>
+    <section class="list" data-slot="list"></section>
+    <section class="center">
+      <header class="head" data-slot="title"></header>
+      <div class="main" data-slot="main"></div>
+      <div class="composer-wrap" data-slot="composer"></div>
+      <footer class="status" data-slot="status"></footer>
+    </section>
+    <aside class="aside" data-slot="aside"></aside>
+  </div>
+</template>
+
+<template id="shell-b">
+  <div class="mock dir-b">
+    <header class="top">
+      <div class="brand"><span class="logo" data-slot="logo"></span><span class="word">DOG AI</span></div>
+      <div class="nav" data-slot="nav"></div>
+      <div data-slot="offline"></div>
+    </header>
+    <div class="body">
+      <section class="list" data-slot="list"></section>
+      <section class="center">
+        <header class="head" data-slot="title"></header>
+        <div class="main" data-slot="main"></div>
+        <div class="composer-wrap" data-slot="composer"></div>
+      </section>
+      <aside class="aside" data-slot="aside"></aside>
+    </div>
+  </div>
+</template>
+
+<template id="shell-c">
+  <div class="mock dir-c">
+    <header class="top"><span class="word">DOG//AI</span><div class="nav" data-slot="nav"></div><span data-slot="offline"></span></header>
+    <div class="body">
+      <section class="list box" data-slot="list"></section>
+      <section class="center box">
+        <header class="head" data-slot="title"></header>
+        <div class="main" data-slot="main"></div>
+        <div class="composer-wrap" data-slot="composer"></div>
+      </section>
+      <aside class="aside box" data-slot="aside"></aside>
+    </div>
+    <footer class="status" data-slot="status"></footer>
+  </div>
+</template>
+
+<template id="shell-d">
+  <div class="mock dir-d">
+    <header class="top">
+      <button class="brand" data-go="home" aria-label="Home"><span class="logo" data-slot="logo"></span><span class="word">DOG AI</span></button>
+      <div class="nav" data-slot="nav"></div>
+      <div data-slot="offline"></div>
+    </header>
+    <div class="body">
+      <section class="list card" data-slot="list"></section>
+      <section class="center card">
+        <header class="head" data-slot="title"></header>
+        <div class="main" data-slot="main"></div>
+        <div class="composer-wrap" data-slot="composer"></div>
+      </section>
+      <aside class="aside card" data-slot="aside"></aside>
+    </div>
+    <div class="home" data-slot="home"></div>
+  </div>
+</template>
+
+<script>
+const BLURB = {
+  a: 'Icon rail, dense panes, one amber accent. A professional tool.',
+  b: 'Top tabs, serif reading column, margin notes. Calm and bookish.',
+  c: 'Tiled boxes, monospace, keyboard-first, live status bar.',
+  d: 'Home launcher, colour per mode, bubbles, big rounded cards.'
+};
+const S = { dir: 'a', screen: 'general', theme: 'dark' };
+
+const ICON = {
+  home: '<path d="M3 11l9-7 9 7v9h-6v-6H9v6H3z"/>',
+  general: '<path d="M4 5h16v11H9l-5 4z"/>',
+  characters: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
+  story: '<path d="M4 5c3-1 6-1 8 1 2-2 5-2 8-1v14c-3-1-6-1-8 1-2-2-5-2-8-1z"/><path d="M12 6v14"/>',
+  models: '<path d="M12 3v11m0 0l-4-4m4 4l4-4"/><path d="M4 17v3h16v-3"/>'
+};
+const LABEL = { home: 'Home', general: 'General', characters: 'Characters', story: 'Story', models: 'Models' };
+const icon = k => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
+const LOGO = '<svg viewBox="0 0 32 32" role="img" aria-label="DOG AI"><path d="M5 5l6 4h10l6-4v10c0 7-4.500 12-11 12S5 22 5 15z" fill="currentColor"/><circle cx="12.500" cy="15" r="1.700" fill="var(--bg)"/><circle cx="19.500" cy="15" r="1.700" fill="var(--bg)"/><path d="M13.500 20h5L16 22.800z" fill="var(--bg)"/></svg>';
+
+const li = (title, sub, active, avatar) =>
+  `<button class="li${active ? ' active' : ''}">${avatar ? `<span class="avatar" aria-hidden="true">${avatar}</span>` : ''}<span class="li-text"><div class="li-title">${title}</div><div class="li-sub">${sub}</div></span></button>`;
+const listHead = (t, action) => `<div class="list-head"><h3>${t}</h3>${action ? `<button class="btn">${action}</button>` : ''}</div>`;
+const msg = (who, name, body, extra = '') =>
+  `<article class="msg ${who}"><div class="avatar" aria-hidden="true">${name[0]}</div><div class="msg-col"><div class="msg-name">${name}</div><div class="msg-body">${body}</div>${extra}</div></article>`;
+const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
+const meter = (pct, label) => `<div class="meter" role="img" aria-label="${label}"><i style="width:${pct}%"></i></div><div class="small">${label}</div>`;
+const panel = (h, body) => `<div class="panel"><h4>${h}</h4>${body}</div>`;
+
+const SCREENS = {
+  general: {
+    title: ['Streaming large downloads', 'Assistant: Coder · Atlas 24B Instruct'],
+    list: () => listHead('Chats', '+ New') +
+      li('Streaming large downloads', 'Coder · 2 min ago', true) +
+      li('Regex for log timestamps', 'Coder · yesterday') +
+      li('Explain GGUF quantization', 'Tutor · Monday') +
+      li('Weekly meal plan', 'General · last week') +
+      li('SQL window functions', 'Tutor · last week'),
+    main: () => `<div class="thread">` +
+      msg('user', 'You', `<p>My download loop freezes the window while a 20 GB model file comes in. What's the cleanest way to stream it with progress and still be able to pause?</p>`) +
+      msg('ai', 'Atlas', `<p>Read the response as a stream and write it in chunks, so nothing is ever held in memory and the UI thread stays free. Opening the file in append mode is what makes pause and resume work: on resume you ask the server for the bytes after the current file length.</p>
+<pre><code>await using var file = new FileStream(path, FileMode.Append);
+var buffer = new byte[81920];
+int read;
+while ((read = await stream.ReadAsync(buffer, ct)) > 0)
+{
+    await file.WriteAsync(buffer.AsMemory(0, read), ct);
+    progress.Report(file.Length);
+}</code></pre>
+<p>Cancelling the token pauses the download. To resume, send a <code>Range: bytes=N-</code> header where N is the size of the partial file.</p>`,
+        `<div class="msg-actions"><button>Copy</button><button>Regenerate</button><button>Branch from here</button><span class="chip">Source: download-notes.pdf, p. 3</span><span class="stat">42.6 tok/s · 318 tokens</span></div>`) +
+      `</div>`,
+    composer: 'Ask anything, or drop a document here…',
+    aside: () =>
+      panel('Model', kv('Loaded', 'Atlas 24B Instruct') + kv('Quantization', 'Q5_K_M') + kv('Preset', 'Balanced')) +
+      panel('Context', meter(19, '3,180 of 16,384 tokens used')) +
+      panel('Documents', `<div class="chips"><span class="chip">download-notes.pdf</span><span class="chip">+ Add</span></div>`) +
+      panel('Tools', `<button class="btn">View exact prompt</button>`)
+  },
+  characters: {
+    title: ['Captain Mara Voss', 'Chatting as Rook · Ember 32B Roleplay'],
+    list: () => listHead('Characters') +
+      li('Captain Mara Voss', 'Salvage captain · 214 messages', true, 'M') +
+      li('Professor Ilex', 'Eccentric botanist', false, 'I') +
+      li('Juno-7', 'Station AI, dry wit', false, 'J') +
+      li('The Gilded Stag', 'Group · 3 characters', false, 'G') +
+      `<div class="list-foot"><button class="btn">Import card</button><button class="btn">New character</button></div>`,
+    main: () => `<div class="thread">` +
+      msg('ai', 'Mara Voss', `<p><em>The airlock cycles shut behind you. Mara doesn't look up from the cracked nav console, one boot propped on the co-pilot's chair.</em></p><p>"You're late, Rook. The Drift doesn't wait, and neither does the Guild's patience." <em>She finally glances over, the corner of her mouth twitching.</em> "Tell me you at least brought the coupling."</p>`) +
+      msg('user', 'Rook', `<p>I brought the coupling. I also brought a problem: there's a Guild cutter sitting off our stern, running dark.</p>`) +
+      msg('ai', 'Mara Voss', `<p><em>Her boot comes off the chair. For a moment the only sound is the tick of cooling metal.</em></p><p>"Running dark." <em>She pulls the scope feed onto the main screen and studies the smudge of heat against the stars.</em> "That's not an inspection, that's an ambush with paperwork. Strap in. We're going through the Meridian Drift, and you're going to tell me exactly who knew we were docked here."</p>`,
+        `<div class="msg-actions"><span class="swipe"><button aria-label="Previous reply">‹</button> 2 / 4 <button aria-label="Next reply">›</button></span><button>Regenerate</button><button>Continue</button><button>Read aloud</button><span class="chip">Lore used: The Meridian Drift</span><span class="stat">37.9 tok/s</span></div>`) +
+      `</div>`,
+    composer: 'Reply as Rook…',
+    aside: () =>
+      `<div class="cardhead"><span class="avatar" aria-hidden="true">M</span><div><b>Captain Mara Voss</b><div class="small">Sharp-tongued captain of the salvage ship <i>Second Wind</i></div></div></div>` +
+      panel('You', kv('Persona', 'Rook') + kv('Voice', 'Amber')) +
+      panel('Active lore', `<div class="chips"><span class="chip">The Meridian Drift</span><span class="chip">Salvage Guild</span></div>`) +
+      panel('Memory', `<div class="small">Summary covers messages 1–170. 6 older moments recalled for this reply.</div>`) +
+      panel('Context', meter(71, '11,620 of 16,384 tokens used')) +
+      panel('Card', `<div class="list-foot"><button class="btn">Edit card</button><button class="btn">Export PNG</button></div>`)
+  },
+  story: {
+    title: ['The Lantern at Hollow Creek', 'Interactive story · Quill 12B Storyteller'],
+    list: () => listHead('Stories', '+ New') +
+      li('The Lantern at Hollow Creek', 'Interactive · Chapter 3', true) +
+      li('Salt and Starlight', 'Authored · 12,400 words') +
+      li('The Clockmaker’s Debt', 'Interactive · Chapter 1'),
+    main: () => `<div class="prose"><div class="chapter">Chapter 3 · The Mill Road</div>
+<p>The light is there again. It bobs along the far bank where no path runs, pale and unhurried, and it stops when you stop. Behind you Tomas is asleep against the cart wheel with his hat over his face, the map still open on his knee.</p>
+<p>The old mill stands black against the water. Its door, which was chained when you passed at dusk, hangs open a hand's width. The brass key in your pocket has gone cold enough to feel through the cloth.</p></div>
+<div class="choices"><div class="choices-label">What do you do?</div>
+<button class="choice"><b>1</b><span>Follow the lantern light into the mill.</span></button>
+<button class="choice"><b>2</b><span>Wake Tomas and tell him what you saw.</span></button>
+<button class="choice"><b>3</b><span>Stay hidden and watch from the reeds. <span class="chip">Nerve check</span></span></button>
+<div class="composer"><div class="input">Or write your own action…</div><button class="btn primary">Do it</button></div></div>`,
+    composer: '',
+    aside: () =>
+      panel('Where you are', kv('Location', 'Old mill road') + kv('Time', 'Past midnight') + kv('Nerve', '6 / 10')) +
+      panel('Carrying', `<div class="chips"><span class="chip">Brass key</span><span class="chip">Half a candle</span><span class="chip">Tomas’s map</span></div>`) +
+      panel('Branch map', `<div class="branch"><svg viewBox="0 0 200 86" role="img" aria-label="Story branch map: 6 turns on the current path, 2 on an alternate path">
+<g fill="none" stroke="currentColor" stroke-width="1.500"><path d="M16 22H168"/><path d="M54 22C72 22 72 60 92 60H130"/></g>
+<g fill="var(--surface)" stroke="currentColor" stroke-width="1.500"><circle cx="16" cy="22" r="5"/><circle cx="54" cy="22" r="5"/><circle cx="92" cy="22" r="5"/><circle cx="130" cy="22" r="5"/><circle cx="92" cy="60" r="5"/><circle cx="130" cy="60" r="5"/></g>
+<circle cx="168" cy="22" r="7" fill="var(--accent)"/>
+<g fill="currentColor" font-size="9" font-family="inherit"><text x="158" y="42">now</text><text x="92" y="80">took the ferry</text></g></svg></div><div class="small">Click any point to rewind or explore another path.</div>`) +
+      panel('Story', `<div class="list-foot"><button class="btn">Story Bible</button><button class="btn">Export</button></div>`)
+  },
+  models: {
+    title: ['Models', 'Recommended for your PC'],
+    list: () => listHead('Models') +
+      li('Recommended', 'Picked for your hardware', true) +
+      li('Browse Hugging Face', 'Search all GGUF models') +
+      li('Library', '6 installed · 74 GB') +
+      li('Downloads', '1 active') +
+      li('Engine', 'llama.cpp · up to date'),
+    main: () => `<div class="hw"><span class="chip">RTX 4090</span><span class="chip">24 GB VRAM · 23.1 free</span><span class="chip">32 GB RAM</span><span class="chip">D: 931 GB free</span></div>
+<div class="models">` + [
+      ['Atlas 24B Instruct', true, 'General · Q5_K_M · 17.1 GB', 'full', '● Fits on GPU · ~55 tok/s', '<button class="btn primary">Download</button>'],
+      ['Ember 32B Roleplay', false, 'Characters · Q4_K_M · 19.8 GB', 'full', '● Fits on GPU · ~38 tok/s', '<button class="btn primary">Download</button>'],
+      ['Quill 12B Storyteller', false, 'Story · Q8_0 · 13.0 GB · room for 32k context', 'full', '● Fits on GPU · ~80 tok/s', `<div class="progress">${meter(62, '62% · 4 min left')}</div>`],
+      ['Titan 70B', false, 'General · Q4_K_M · 42.5 GB', 'partial', '◐ Partly on GPU · ~4 tok/s', '<button class="btn">Download</button>'],
+      ['Colossus 120B', false, 'General · Q4_K_M · 71.0 GB', 'no', '✕ Too large for this PC', '<button class="btn" disabled>Download</button>'],
+      ['Pebble Embed', false, 'Document search · 0.3 GB', 'full', '● Fits on GPU', '<button class="btn">Installed</button>']
+    ].map(([n, rec, meta, cls, fit, action]) =>
+      `<div class="model"><div><div class="model-name">${n}${rec ? '<span class="rec">Best pick</span>' : ''}</div><div class="model-meta">${meta}</div></div><div class="fit ${cls}">${fit}</div>${action}</div>`).join('') +
+      `</div><p class="note">Model names here are placeholders for the mockup.</p>`,
+    composer: '',
+    aside: () =>
+      panel('Your hardware', kv('GPU', 'RTX 4090') + kv('CPU', 'Core Ultra 9 285K') + kv('RAM', '32 GB')) +
+      panel('VRAM', meter(4, '0.9 of 24 GB in use')) +
+      panel('How fit is judged', `<div class="small">File size plus working memory for a 16k context, compared with free VRAM. Change the context length to see the badges update.</div>`) +
+      panel('Connection', `<div class="small">This is the only section that goes online. Leaving it closes the connection.</div>`)
+  }
+};
+
+const HOME = () => `<div class="home-inner"><h1>Good evening.</h1><p class="sub">Atlas 24B is loaded and ready. What are we making?</p><div class="tiles">` + [
+  ['general', 'Ask and get help', 'Questions, code, writing, documents.', 'Continue: Streaming large downloads'],
+  ['characters', 'Talk to a character', 'Your cast, imported cards, group scenes.', 'Continue: Captain Mara Voss'],
+  ['story', 'Tell a story', 'Write one together or play it as an adventure.', 'Continue: The Lantern at Hollow Creek'],
+  ['models', 'Get models', 'Browse and download what fits your PC.', '1 download in progress']
+].map(([k, h, p, last]) => `<button class="tile" data-go="${k}" style="--tc:var(--c-${k})">${icon(k)}<h3>${h}</h3><p>${p}</p><div class="last">${last}</div></button>`).join('') + `</div></div>`;
+
+function render() {
+  document.documentElement.dataset.theme = S.theme;
+  const stage = document.getElementById('stage');
+  stage.innerHTML = document.getElementById('shell-' + S.dir).innerHTML;
+  const mock = stage.firstElementChild;
+  const hasHome = S.dir === 'd';
+  const screen = (S.screen === 'home' && !hasHome) ? 'general' : S.screen;
+  const data = SCREENS[screen === 'home' ? 'general' : screen];
+  mock.dataset.screen = screen;
+  mock.classList.toggle('is-home', screen === 'home');
+
+  const fill = (slot, html) => mock.querySelectorAll(`[data-slot="${slot}"]`).forEach(el => { el.innerHTML = html; el.hidden = !html; });
+  fill('logo', LOGO);
+  fill('nav', (hasHome ? ['home'] : []).concat(['general', 'characters', 'story', 'models'])
+    .map(k => `<button class="nav-btn${k === screen ? ' active' : ''}" data-go="${k}" ${k === screen ? 'aria-current="page"' : ''}>${icon(k)}<span>${LABEL[k]}</span></button>`).join(''));
+  fill('offline', screen === 'models'
+    ? '<span class="offline on"><i class="dot"></i>Online</span>'
+    : '<span class="offline"><i class="dot"></i>Offline</span>');
+  fill('title', `<h2>${data.title[0]}</h2><p>${data.title[1]}</p>`);
+  fill('list', data.list());
+  fill('main', data.main());
+  fill('composer', data.composer ? `<div class="composer"><div class="input">${data.composer}</div><button class="btn" aria-label="Speak">Mic</button><button class="btn primary">Send</button></div>` : '');
+  fill('aside', data.aside());
+  fill('status', `<span>MODEL Atlas 24B Q5_K_M</span><span>CTX 3,180 / 16,384</span><span>42.6 tok/s</span><span>VRAM 17.9 / 24 GB</span><span>${screen === 'models' ? 'ONLINE' : 'OFFLINE'}</span>`);
+  fill('home', hasHome ? HOME() : '');
+
+  document.querySelectorAll('#switcher [data-dir]').forEach(b => b.setAttribute('aria-pressed', b.dataset.dir === S.dir));
+  document.getElementById('blurb').textContent = BLURB[S.dir];
+  document.getElementById('theme').textContent = S.theme === 'dark' ? 'Switch to light' : 'Switch to dark';
+}
+
+document.addEventListener('click', e => {
+  const dir = e.target.closest('[data-dir]');
+  const go = e.target.closest('[data-go]');
+  if (dir) S.dir = dir.dataset.dir;
+  else if (go) S.screen = go.dataset.go;
+  else if (e.target.id === 'theme') S.theme = S.theme === 'dark' ? 'light' : 'dark';
+  else return;
+  render();
+});
+render();
+</script>
+</body>
+</html>
