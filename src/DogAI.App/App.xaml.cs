@@ -106,6 +106,7 @@ public partial class App : Application
         services.AddSingleton<PresetCatalog>();
         services.AddSingleton<ChatService>();
         services.AddSingleton<DogAI.Core.Characters.CardBuilder>();
+        services.AddSingleton<DogAI.Core.Stories.StoryBuilder>();
         services.AddDogData();
         services.AddWpfBlazorWebView();
 #if DEBUG

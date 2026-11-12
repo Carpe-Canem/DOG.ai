@@ -1,5 +1,5 @@
 @* The message box under a chat: Enter sends, Shift+Enter adds a line, Stop while a reply is written,
-   and the context meter. Shared by General and Characters. *@
+   and the context meter. Shared by General, Characters and Story. *@
 @implements IAsyncDisposable
 @inject ChatService Chat
 @inject EngineManager Engine
@@ -19,7 +19,8 @@
             <button class="btn" disabled="@(!Engine.IsReady || !string.IsNullOrWhiteSpace(_draft))" @onclick="ImpersonateAsync"
                     title="The model writes your next message here, for you to change before sending">Write mine</button>
         }
-        <button class="btn primary" disabled="@(!Engine.IsReady || string.IsNullOrWhiteSpace(_draft))" @onclick="SendAsync">Send</button>
+        @Extra
+        <button class="btn primary" disabled="@(!Engine.IsReady || (!AllowEmpty && string.IsNullOrWhiteSpace(_draft)))" @onclick="SendAsync">@SendLabel</button>
     }
 </div>
 @if (Usage is { } usage)
@@ -41,6 +42,15 @@
 
     /// <summary>When set, a "Write mine" button asks the model to draft the user's message (character chats).</summary>
     [Parameter] public Func<Task<string>>? Impersonate { get; set; }
+
+    /// <summary>The words on the send button.</summary>
+    [Parameter] public string SendLabel { get; set; } = "Send";
+
+    /// <summary>Lets the button be pressed with nothing typed (a story's "Write next", where steering is optional).</summary>
+    [Parameter] public bool AllowEmpty { get; set; }
+
+    /// <summary>Extra controls shown before the send button, such as a story's dice switch.</summary>
+    [Parameter] public RenderFragment? Extra { get; set; }
 
     private bool _drafting;
 
@@ -114,7 +124,7 @@
     private async Task SendAsync()
     {
         var text = _draft.Trim();
-        if (text.Length == 0 || Chat.IsBusy || _drafting || !Engine.IsReady) return;
+        if ((text.Length == 0 && !AllowEmpty) || Chat.IsBusy || _drafting || !Engine.IsReady) return;
         _draft = "";
         await OnSend.InvokeAsync(text);
     }

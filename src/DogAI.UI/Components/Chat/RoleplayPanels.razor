@@ -1,7 +1,6 @@
 @* The side-panel settings shared by character and group chats: persona, style, extra instructions, author's note
    and memory. Changes are saved straight away on the conversation passed in. *@
 @inject IChatStore Store
-@inject ChatService Chat
 
 <div class="panel">
     <h4>You are</h4>
@@ -40,19 +39,7 @@
         </select>
     </label>
 </div>
-<div class="panel">
-    <h4>Memory</h4>
-    <label class="check"><input type="checkbox" checked="@Conversation.MemoryEnabled" @onchange="SetMemoryAsync" /> Summarise older messages when the chat outgrows the model's context</label>
-    @if (SummaryState is { } summary)
-    {
-        <p class="small">@summary</p>
-        @if (Conversation.Summary.Length > 0)
-        {
-            <textarea class="field" rows="6" aria-label="Summary of earlier messages" value="@Conversation.Summary" @onchange="EditSummaryAsync"></textarea>
-            <div class="row"><button class="btn" disabled="@Streaming" @onclick="ForgetSummaryAsync" title="Write a fresh summary when one is next needed">Forget summary</button></div>
-        }
-    }
-</div>
+<MemoryPanel Conversation="@Conversation" Path="@Path" Streaming="@Streaming" />
 
 @code {
     [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();
@@ -71,21 +58,6 @@
     [Parameter] public bool Streaming { get; set; }
 
     private static readonly int[] NoteDepths = [0, 1, 2, 4, 6, 8];
-
-    /// <summary>A line saying what the summary covers, or why there is none. Null while memory is off.</summary>
-    private string? SummaryState
-    {
-        get
-        {
-            if (!Conversation.MemoryEnabled) return null;
-            if (Conversation.Summary.Length == 0)
-                return "No summary yet. One is written when older messages stop fitting in the context.";
-            var at = Conversation.SummaryThroughId is { } id ? Path.ToList().FindIndex(m => m.Id == id) : -1;
-            return at < 0
-                ? "This summary was written for another version of the chat and is not used here. A new one is written when needed."
-                : $"Covers the first {at + 1} message{(at == 0 ? "" : "s")}. It is sent instead of the ones left out; you can correct it.";
-        }
-    }
 
     private async Task SetPersonaAsync(ChangeEventArgs e)
     {
@@ -118,27 +90,6 @@
         if (!int.TryParse(e.Value?.ToString(), out var depth)) return;
         Conversation.AuthorsNoteDepth = depth;
         await Store.UpdateAsync(Conversation);
-    }
-
-    private async Task SetMemoryAsync(ChangeEventArgs e)
-    {
-        Conversation.MemoryEnabled = e.Value is true;
-        await Store.UpdateAsync(Conversation);
-    }
-
-    private async Task EditSummaryAsync(ChangeEventArgs e)
-    {
-        var text = e.Value?.ToString()?.Trim() ?? "";
-        Conversation.Summary = text;
-        if (text.Length == 0) Conversation.SummaryThroughId = null;
-        await Store.SetSummaryAsync(Conversation.Id, text, Conversation.SummaryThroughId);
-    }
-
-    private async Task ForgetSummaryAsync()
-    {
-        await Chat.ForgetSummaryAsync(Conversation.Id);
-        Conversation.Summary = "";
-        Conversation.SummaryThroughId = null;
     }
 
     private static string Shorten(string text, int max) => text.Length <= max ? text : text[..(max - 1)].TrimEnd() + "…";

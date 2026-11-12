@@ -58,6 +58,12 @@ public sealed class PromptLayout
     /// </summary>
     public string Directive { get; set; } = "";
 
+    /// <summary>
+    /// The user turn put first when the history would otherwise open with a reply (many chat templates refuse that).
+    /// Null uses the character-chat wording.
+    /// </summary>
+    public string? OpeningTurn { get; set; }
+
     /// <summary>Names of the lore entries included, for the prompt inspector.</summary>
     public List<string> LoreNames { get; } = [];
 

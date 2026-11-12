@@ -38,7 +38,7 @@ public sealed class Conversation
 {
     public long Id { get; set; }
 
-    /// <summary>Which area of the app owns it: "general", "characters" (one character), "group" (several), "story" later.</summary>
+    /// <summary>Which area of the app owns it: "general", "characters" (one character), "group" (several), "story" (settings in <c>Story</c>).</summary>
     public string Mode { get; set; } = "general";
 
     public string Title { get; set; } = "New chat";
@@ -121,6 +121,9 @@ public sealed class ChatMessage
 
     /// <summary>Which turns the summary in the prompt covered, as "1–40". Null when no summary was used.</summary>
     public string? MemoryUsed { get; set; }
+
+    /// <summary>Story mode: choices, tracked state, dice roll or chapter as JSON (see <c>StoryTurn</c>). Null elsewhere.</summary>
+    public string? ExtraJson { get; set; }
 }
 
 public interface IChatStore
@@ -145,6 +148,9 @@ public interface IChatStore
     Task<ChatMessage> AddMessageAsync(ChatMessage message, CancellationToken ct = default);
     /// <summary>Saves a message's text, thinking, prompt and speed figures (used by edit and continue).</summary>
     Task UpdateMessageAsync(ChatMessage message, CancellationToken ct = default);
+
+    /// <summary>Saves only a message's story details (<see cref="ChatMessage.ExtraJson"/>).</summary>
+    Task SetMessageExtraAsync(long messageId, string? extraJson, CancellationToken ct = default);
 
     /// <summary>Chats with one character, newest first.</summary>
     Task<IReadOnlyList<Conversation>> ListForCharacterAsync(long characterId, CancellationToken ct = default);

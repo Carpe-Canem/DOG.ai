@@ -1,0 +1,349 @@
+@page "/story/new"
+@page "/story/{StoryId:long}/setup"
+@using StoryInfo = DogAI.Core.Stories.Story
+@implements IDisposable
+@inject IChatStore Store
+@inject IStoryStore Stories
+@inject ChatService Chat
+@inject StoryBuilder Builder
+@inject EngineManager Engine
+@inject NavigationManager Nav
+
+<SectionContent SectionName="title">
+    <div class="head-row">
+        <div class="head-text">
+            <h2>@(StoryId is null ? "New story" : $"Story bible: {_title}")</h2>
+            <p>@(StoryId is null ? "Choose the kind of story, then describe it" : "The model follows this in every passage. Changes apply from the next one.")</p>
+        </div>
+        @if (StoryId is null)
+        {
+            <ModelPicker Mode="story" />
+        }
+    </div>
+</SectionContent>
+
+<SectionContent SectionName="list"><StoryList ActiveId="@StoryId" /></SectionContent>
+
+@if (_loaded)
+{
+    <div class="editor">
+        @if (StoryId is null)
+        {
+            <div class="kind-grid" role="radiogroup" aria-label="Kind of story">
+                <label class="choice-card @(_s.Kind == StoryKind.Interactive ? "active" : "")">
+                    <input type="radio" name="story-kind" checked="@(_s.Kind == StoryKind.Interactive)" @onchange="() => SetKind(StoryKind.Interactive)" />
+                    <b>Interactive adventure</b>
+                    <span class="desc">You are the main character. The model narrates, then offers choices; pick one or type your own. Every path is kept on a map.</span>
+                </label>
+                <label class="choice-card @(_s.Kind == StoryKind.Authored ? "active" : "")">
+                    <input type="radio" name="story-kind" checked="@(_s.Kind == StoryKind.Authored)" @onchange="() => SetKind(StoryKind.Authored)" />
+                    <b>Written story</b>
+                    <span class="desc">You are the author. The model writes passage by passage along your outline; steer each one and rewrite any part.</span>
+                </label>
+            </div>
+
+            <div class="card-text builder">
+                <label class="field-block">
+                    <span class="field-label">Let the model draft it <span class="small">Describe the story in a sentence or two. The loaded model fills in the story bible below@(_s.Kind == StoryKind.Authored ? " and an outline" : "") for you to change before saving.</span></span>
+                    <textarea class="field" rows="2" @bind="_idea" @bind:event="oninput" disabled="@(_draftCts is not null)"
+                              placeholder="For example: a lighthouse keeper's daughter finds a door under the lamp room that was not there yesterday"></textarea>
+                </label>
+                <div class="row">
+                    @if (_draftCts is not null)
+                    {
+                        <button class="btn" @onclick="() => _draftCts?.Cancel()">Stop</button>
+                        <span class="small">Planning the story… @_draftLength.ToString("N0") characters so far</span>
+                    }
+                    else
+                    {
+                        <button class="btn primary" disabled="@(!Engine.IsReady || Chat.IsBusy || string.IsNullOrWhiteSpace(_idea))" @onclick="DraftAsync">Draft the story bible</button>
+                        @if (!Engine.IsReady)
+                        {
+                            <span class="small">Load a model first, with the model button at the top. Or fill in the fields yourself.</span>
+                        }
+                        else if (Chat.IsBusy)
+                        {
+                            <span class="small">Waiting for other writing to finish.</span>
+                        }
+                        else if (_drafted)
+                        {
+                            <span class="small">Drafted. Read it through, change what you like, then create the story.</span>
+                        }
+                    }
+                </div>
+            </div>
+        }
+
+        <label>Title<input class="field" @bind="_title" placeholder="Untitled story" /></label>
+        @Area("Premise", "What the story is about: who, what they want, what stands in the way.", () => _s.Bible.Premise, v => _s.Bible.Premise = v, 3)
+        <div class="two">
+            <label>Genre<input class="field" @bind="_s.Bible.Genre" placeholder="For example: gothic mystery" /></label>
+            <label>Tone<input class="field" @bind="_s.Bible.Tone" placeholder="For example: eerie, slow-burning, dry humour" /></label>
+        </div>
+        <div class="two">
+            <label>
+                Point of view
+                <input class="field" list="story-pov" @bind="_s.Bible.PointOfView" />
+                <datalist id="story-pov">
+                    <option value="Second person (you)"></option>
+                    <option value="First person (I)"></option>
+                    <option value="Third person, close on one character"></option>
+                    <option value="Third person, all-knowing"></option>
+                </datalist>
+            </label>
+            <label>
+                Tense
+                <input class="field" list="story-tense" @bind="_s.Bible.Tense" />
+                <datalist id="story-tense">
+                    <option value="Present"></option>
+                    <option value="Past"></option>
+                </datalist>
+            </label>
+        </div>
+        @Area("Cast", _s.Kind == StoryKind.Interactive ? "The people in the story, one per line. Start with the main character, whom you play." : "The people in the story, one per line: who they are and what they want.", () => _s.Bible.Cast, v => _s.Bible.Cast = v, 5)
+        @Area("World", "The setting, and the facts and rules that matter.", () => _s.Bible.World, v => _s.Bible.World = v, 4)
+        @Area("Style guide", "Rules for the prose: sentence length, how much dialogue, what to avoid.", () => _s.Bible.StyleGuide, v => _s.Bible.StyleGuide = v, 3)
+
+        @if (_s.Kind == StoryKind.Authored)
+        {
+            <div class="field-block">
+                <div class="field-label">Outline <span class="small">The chapters in order, each with what happens in it. The model writes towards the current chapter's plan and does not run ahead.</span></div>
+                @for (var i = 0; i < _s.Outline.Count; i++)
+                {
+                    var index = i;
+                    var chapter = _s.Outline[i];
+                    <div class="chapter-edit">
+                        <div class="chapter-edit-head">
+                            <span class="small">Chapter @(index + 1)</span>
+                            <input class="field" aria-label="@($"Chapter {index + 1} title")" placeholder="Title" @bind="chapter.Title" />
+                            <span class="member-tools">
+                                <button class="icon-btn" disabled="@(index == 0)" aria-label="Move up" title="Move up" @onclick="() => Move(index, -1)">↑</button>
+                                <button class="icon-btn" disabled="@(index == _s.Outline.Count - 1)" aria-label="Move down" title="Move down" @onclick="() => Move(index, 1)">↓</button>
+                                <button class="icon-btn" aria-label="Remove chapter" title="Remove chapter" @onclick="() => _s.Outline.RemoveAt(index)">✕</button>
+                            </span>
+                        </div>
+                        <textarea class="field" rows="3" aria-label="@($"Chapter {index + 1} plan")" placeholder="What happens in this chapter" @bind="chapter.Plan"></textarea>
+                    </div>
+                }
+                <div class="row"><button class="btn" @onclick="() => _s.Outline.Add(new StoryChapter())">Add a chapter</button></div>
+                @if (StoryId is not null && _s.Outline.Count > 0)
+                {
+                    <p class="small">Passages already written stay with their chapter number. Moving or removing chapters changes which heading they appear under.</p>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="field-block">
+                <div class="field-label">Adventure rules</div>
+                <label class="check"><input type="checkbox" @bind="_s.TrackState" /> Keep track of location, inventory, stats and facts <span class="small">The model updates them after each passage; you can correct them.</span></label>
+                <label class="check"><input type="checkbox" @bind="_s.Dice" /> Decide risky actions with a dice roll <span class="small">A 20-sided dice: low fails, high succeeds, and the narrator follows the result.</span></label>
+            </div>
+        }
+
+        <label>
+            Passage length
+            <select class="field" @bind="_s.PassageWords">
+                @foreach (var (words, name) in Lengths)
+                {
+                    <option value="@words">@name</option>
+                }
+            </select>
+        </label>
+
+        @if (_error is not null)
+        {
+            <div class="notice bad"><span>@_error</span></div>
+        }
+        <div class="editor-foot">
+            <div class="row">
+                <button class="btn primary" disabled="@(_saving || _draftCts is not null)" @onclick="SaveAsync">@(StoryId is null ? "Create story" : "Save")</button>
+                <a class="btn" href="@(StoryId is null ? "story" : $"story/{StoryId}")">Cancel</a>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long? StoryId { get; set; }
+
+    private static readonly (int Words, string Name)[] Lengths =
+    [
+        (120, "Short (about 120 words)"),
+        (StoryInfo.DefaultPassageWords, "Medium (about 250 words)"),
+        (450, "Long (about 450 words)"),
+        (800, "Very long (about 800 words)"),
+    ];
+
+    private StoryInfo _s = NewStory(StoryKind.Interactive);
+    private Conversation? _conversation;
+    private string _title = "";
+    private string _idea = "";
+    private bool _loaded;
+    private bool _saving;
+    private bool _drafted;
+    private string? _error;
+    private CancellationTokenSource? _draftCts;
+    private int _draftLength;
+    private DateTime _lastProgress;
+
+    private static StoryInfo NewStory(StoryKind kind) => new()
+    {
+        Kind = kind,
+        TrackState = true,
+        Dice = false,
+        Bible = new StoryBible
+        {
+            PointOfView = kind == StoryKind.Interactive ? "Second person (you)" : "Third person, close on one character",
+            Tense = kind == StoryKind.Interactive ? "Present" : "Past",
+        },
+    };
+
+    protected override void OnInitialized()
+    {
+        Engine.Changed += Refresh;
+        Chat.Changed += Refresh;
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _error = null;
+        _drafted = false;
+        if (StoryId is { } id)
+        {
+            _conversation = await Store.GetAsync(id);
+            var story = _conversation is null ? null : await Stories.GetAsync(id);
+            if (story is null)
+            {
+                Nav.NavigateTo("story", replace: true);
+                return;
+            }
+            _s = story;
+            _title = _conversation!.Title;
+            // An older length that is not on the list snaps to the nearest one, so the box always shows a value.
+            if (Lengths.All(l => l.Words != _s.PassageWords)) _s.PassageWords = Lengths.MinBy(l => Math.Abs(l.Words - _s.PassageWords)).Words;
+        }
+        else
+        {
+            _conversation = null;
+            _s = NewStory(StoryKind.Interactive);
+            _title = "";
+            _idea = "";
+        }
+        _loaded = true;
+    }
+
+    /// <summary>Switching kind keeps what was typed, and moves the point of view and tense only if they are still the defaults.</summary>
+    private void SetKind(StoryKind kind)
+    {
+        if (_s.Kind == kind) return;
+        var before = NewStory(_s.Kind).Bible;
+        var after = NewStory(kind).Bible;
+        if (_s.Bible.PointOfView == before.PointOfView) _s.Bible.PointOfView = after.PointOfView;
+        if (_s.Bible.Tense == before.Tense) _s.Bible.Tense = after.Tense;
+        _s.Kind = kind;
+    }
+
+    private void Move(int index, int by)
+    {
+        var chapter = _s.Outline[index];
+        _s.Outline.RemoveAt(index);
+        _s.Outline.Insert(index + by, chapter);
+    }
+
+    /// <summary>Asks the model for a bible (and outline) and puts it in the form, unsaved.</summary>
+    private async Task DraftAsync()
+    {
+        _error = null;
+        _drafted = false;
+        _draftLength = 0;
+        using var cts = new CancellationTokenSource();
+        _draftCts = cts;
+        try
+        {
+            var draft = await Builder.DraftAsync(_idea, _s.Kind, text =>
+            {
+                _draftLength = text.Length;
+                if (DateTime.UtcNow - _lastProgress < TimeSpan.FromMilliseconds(150)) return;
+                _lastProgress = DateTime.UtcNow;
+                Refresh();
+            }, cts.Token);
+            // The model is not asked for point of view or tense; keep the ones chosen here.
+            draft.Bible.PointOfView = _s.Bible.PointOfView;
+            draft.Bible.Tense = _s.Bible.Tense;
+            _s.Bible = draft.Bible;
+            if (_s.Kind == StoryKind.Authored && draft.Outline.Count > 0) _s.Outline = draft.Outline;
+            if (draft.Title.Length > 0) _title = draft.Title;
+            _drafted = true;
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _draftCts = null;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _s.Outline = _s.Kind == StoryKind.Authored
+            ? _s.Outline.Where(c => c.Title.Trim().Length > 0 || c.Plan.Trim().Length > 0).ToList()
+            : [];
+        if (_s.Kind == StoryKind.Authored)
+        {
+            _s.TrackState = false;
+            _s.Dice = false;
+        }
+        _saving = true;
+        try
+        {
+            if (StoryId is null)
+            {
+                var title = _title.Trim().Length > 0 ? _title : "Untitled story";
+                var conversation = await Chat.StartStoryAsync(title, _s);
+                Nav.NavigateTo($"story/{conversation.Id}");
+            }
+            else
+            {
+                await Stories.SaveAsync(_s);
+                if (_conversation is not null && _title.Trim().Length > 0 && _title.Trim() != _conversation.Title)
+                {
+                    _conversation.Title = _title.Trim();
+                    await Store.UpdateAsync(_conversation);
+                }
+                Nav.NavigateTo($"story/{StoryId}");
+            }
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private RenderFragment Area(string label, string hint, Func<string> get, Action<string> set, int rows) => __builder =>
+    {
+        <label class="field-block">
+            <span class="field-label">@label <span class="small">@hint</span></span>
+            <textarea class="field" rows="@rows" value="@get()" @onchange="e => set(e.Value?.ToString() ?? string.Empty)"></textarea>
+        </label>
+    };
+
+    public void Dispose()
+    {
+        _draftCts?.Cancel();
+        Engine.Changed -= Refresh;
+        Chat.Changed -= Refresh;
+    }
+}

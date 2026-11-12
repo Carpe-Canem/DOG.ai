@@ -1,0 +1,36 @@
+@* "What the model was sent": the exact prompt behind one reply, with its size and what was left out or added. *@
+@inject IDesktopShell Desktop
+@inject PresetCatalog Presets
+
+<Modal Title="What the model was sent" Class="wide" OnClose="OnClose">
+    <div class="about">
+        <div class="kv"><span>Model</span><span>@Message.ModelName</span></div>
+        <div class="kv"><span>Style</span><span>@Presets.Get(Message.PresetId).Name</span></div>
+        <div class="kv"><span>Prompt size</span><span>@(Message.PromptTokens?.ToString("N0") ?? "?") tokens</span></div>
+        @if (Message.CompletionTokens is { } written)
+        {
+            <div class="kv"><span>Reply size</span><span>@written.ToString("N0") tokens</span></div>
+        }
+        @if (Message.TrimmedMessages is > 0)
+        {
+            <div class="kv"><span>Older messages left out to fit</span><span>@Message.TrimmedMessages</span></div>
+        }
+        @if (Message.MemoryUsed is { } memory)
+        {
+            <div class="kv"><span>Summary of earlier messages</span><span>covers @memory</span></div>
+        }
+        @if (Message.LoreUsed is { } lore)
+        {
+            <div class="kv"><span>Lore entries included</span><span>@lore.ReplaceLineEndings(", ")</span></div>
+        }
+    </div>
+    <div class="code">
+        <div class="code-head"><span>exact prompt text</span><button @onclick="() => Desktop.CopyText(Message.PromptText ?? string.Empty)">Copy</button></div>
+        <pre class="wrap"><code>@Message.PromptText</code></pre>
+    </div>
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public ChatMessage Message { get; set; } = new();
+    [Parameter] public EventCallback OnClose { get; set; }
+}

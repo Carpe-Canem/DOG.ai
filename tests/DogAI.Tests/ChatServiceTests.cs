@@ -61,6 +61,7 @@ public sealed partial class ChatServiceTests : IDisposable
     private readonly ChatService _chat;
     private readonly ICharacterStore _characters;
     private readonly PresetCatalog _presets;
+    private readonly DogAI.Core.Stories.IStoryStore _stories;
 
     public ChatServiceTests()
     {
@@ -71,7 +72,8 @@ public sealed partial class ChatServiceTests : IDisposable
         _store = _services.GetRequiredService<IChatStore>();
         _characters = _services.GetRequiredService<ICharacterStore>();
         _presets = new PresetCatalog(_services.GetRequiredService<IDocumentStore>());
-        _chat = new ChatService(_store, _engine, _presets, _characters);
+        _stories = _services.GetRequiredService<DogAI.Core.Stories.IStoryStore>();
+        _chat = new ChatService(_store, _engine, _presets, _characters, _stories);
     }
 
     private async Task<long> NewChatAsync(string instructions = "") =>

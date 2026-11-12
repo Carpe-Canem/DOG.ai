@@ -68,6 +68,30 @@ public sealed class DatabaseUpgradeTests : IDisposable
         Assert.Empty(await store.GetMembersAsync(chat.Id));
     }
 
+    [Fact]
+    public async Task Messages_from_m3_get_no_story_details_and_there_are_no_stories()
+    {
+        var factory = _services.GetRequiredService<IDbContextFactory<DogDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20261112144546_GroupChat");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Conversations (Mode, Title, SystemPrompt, PresetId, AuthorsNote, AuthorsNoteDepth, Summary, MemoryEnabled, TurnOrder, CreatedAt, UpdatedAt) " +
+                "VALUES ('general', 'M3 chat', '', 'balanced', '', 4, '', 1, 0, '2026-11-12 10:00:00', '2026-11-12 10:00:00')");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Messages (ConversationId, Role, Content, CreatedAt) VALUES (1, 0, 'Hello', '2026-11-12 10:00:00')");
+        }
+
+        await _services.MigrateDogDatabaseAsync();
+
+        var store = _services.GetRequiredService<IChatStore>();
+        var message = Assert.Single(await store.GetMessagesAsync(1));
+        Assert.Equal("Hello", message.Content);
+        Assert.Null(message.ExtraJson);
+        Assert.Empty(await _services.GetRequiredService<DogAI.Core.Stories.IStoryStore>().ListAsync());
+        Assert.Empty(await store.ListAsync(DogAI.Core.Stories.Story.Mode));
+    }
+
     public void Dispose()
     {
         _services.Dispose();

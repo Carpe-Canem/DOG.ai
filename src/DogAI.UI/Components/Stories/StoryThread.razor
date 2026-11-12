@@ -1,0 +1,464 @@
+@* A story's text: its passages in reading order with their versions and tools. An interactive story shows the
+   player's actions between passages and the choices after the last one; an authored story shows chapter headings
+   and directions, and lets a selection be rewritten. The page loads the story and passes it in. *@
+@implements IAsyncDisposable
+@inject ChatService Chat
+@inject EngineManager Engine
+@inject IChatStore Store
+@inject IDesktopShell Desktop
+@inject IJSRuntime JS
+
+<div class="thread story" @ref="_root">
+    @{ int? chapter = null; }
+    @foreach (var message in Visible)
+    {
+        var m = message;
+        var siblings = Tree.Siblings(m);
+        var position = IndexOf(siblings, m.Id);
+        var isLast = ReferenceEquals(m, Visible[^1]);
+        if (m.Role == ChatRole.User)
+        {
+            var turn = StoryTurn.Of(m);
+            if (!Interactive && Info.Outline.Count > 0)
+            {
+                var c = Math.Clamp(turn.Chapter ?? chapter ?? 0, 0, Info.Outline.Count - 1);
+                if (c != chapter)
+                {
+                    <h3 class="chapter-head">@StoryPrompt.ChapterName(Info, c)</h3>
+                }
+                chapter = c;
+            }
+            var unanswered = isLast && Streaming is null;
+            if (Interactive || m.Content.Length > 0 || siblings.Count > 1 || unanswered)
+            {
+                <div class="@(Interactive ? "action" : "direction")">
+                    <span class="turn-text">@(Interactive ? m.Content : m.Content.Length > 0 ? "Direction: " + m.Content : "No direction")</span>
+                    @if (turn.Roll is { } roll)
+                    {
+                        <span class="chip" title="A 20-sided dice decided how this went">Rolled @roll · @StoryPrompt.DiceLabel(roll)</span>
+                    }
+                    <span class="msg-actions">
+                        @Versions(siblings, position, "Other things tried here")
+                        @if (unanswered && !Chat.IsBusy)
+                        {
+                            <button disabled="@(!Engine.IsReady)" @onclick="() => Run(() => Chat.AnswerTurnAsync(m.ConversationId, m.Id))">@(Interactive ? "Continue the story" : "Write it")</button>
+                        }
+                    </span>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="passage" data-id="@m.Id">
+                @Thinking(m.Reasoning, false)
+                @if (_editingId == m.Id)
+                {
+                    <div class="edit">
+                        <textarea class="field" rows="@Math.Clamp(_editText.Split('\n').Length + 3, 6, 24)" aria-label="Edit passage" @bind="_editText"></textarea>
+                        <div class="row">
+                            <button class="btn primary" @onclick="() => SaveEditAsync(m)">Save</button>
+                            <button class="btn" @onclick="() => _editingId = null">Cancel</button>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="msg-body"><MarkdownView Text="@m.Content" /></div>
+                    <div class="msg-actions">
+                        @Versions(siblings, position, "Other versions of this passage")
+                        <button @onclick="() => Desktop.CopyText(m.Content)">Copy</button>
+                        @if (!Chat.IsBusy)
+                        {
+                            <button @onclick="() => StartEdit(m)">Edit</button>
+                            <button disabled="@(!Engine.IsReady)" title="Write this passage again; the earlier version is kept" @onclick="() => Run(() => Chat.RegeneratePassageAsync(m.ConversationId, m.Id))">Rewrite</button>
+                            @if (isLast && m.Content.Length > 0)
+                            {
+                                <button disabled="@(!Engine.IsReady)" title="Carry on writing this passage" @onclick="() => Run(() => Chat.ContinuePassageAsync(m.ConversationId, m.Id))">Continue</button>
+                            }
+                            else if (!isLast)
+                            {
+                                <button title="@(Interactive ? "Go back to this moment and choose again. The path you took stays on the map." : "Go back to here and write on from this point. What follows is kept as another version.")"
+                                        @onclick="() => Run(() => Chat.GoToAsync(m.ConversationId, m.Id))">Go back to here</button>
+                            }
+                        }
+                        @if (m.PromptText is not null)
+                        {
+                            <button @onclick="() => _inspect = m">Prompt</button>
+                        }
+                        @if (m.TokensPerSecond is > 0)
+                        {
+                            <span class="stat">@m.CompletionTokens tokens · @m.TokensPerSecond.Value.ToString("0.0") tok/s</span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    }
+    @if (Streaming is { } active)
+    {
+        @if (active.Kind == ReplyKind.Reply)
+        {
+            <div class="passage">
+                @Thinking(active.Reasoning, active.Content.Length == 0)
+                <div class="msg-body"><MarkdownView Text="@active.Content" /><span class="caret" aria-label="Writing"></span></div>
+            </div>
+        }
+        @if (active.Status is { } status)
+        {
+            <p class="small status-line">@status…</p>
+        }
+    }
+    else if (Interactive && Visible.Count > 0 && Visible[^1] is { Role: ChatRole.Assistant } last && _editingId is null)
+    {
+        var choices = StoryTurn.Of(last).Choices ?? [];
+        <div class="choices">
+            @if (choices.Count > 0)
+            {
+                <div class="choices-label">What do you do?</div>
+                @for (var i = 0; i < choices.Count; i++)
+                {
+                    var choice = choices[i];
+                    <button class="choice" disabled="@(Chat.IsBusy || !Engine.IsReady)" @onclick="() => Run(() => Chat.ActAsync(last.ConversationId, choice.Text, choice.Risky))">
+                        <b>@(i + 1)</b>
+                        <span>@choice.Text @if (choice.Risky && Info.Dice) { <span class="chip" title="This could go wrong: a dice roll decides">Dice roll</span> }</span>
+                    </button>
+                }
+            }
+            <div class="row">
+                <button class="btn" disabled="@(Chat.IsBusy || !Engine.IsReady)" @onclick="() => Run(() => Chat.SuggestChoicesAsync(last.ConversationId, last.Id))">@(choices.Count > 0 ? "Other choices" : "Suggest choices")</button>
+                <span class="small">Or type what you do in the box below.</span>
+            </div>
+        </div>
+    }
+    @if (Problem is { } problem)
+    {
+        <div class="notice bad"><span>@problem</span><button class="btn" @onclick="DismissProblem">Dismiss</button></div>
+    }
+    @if (!Interactive && _selection is { } selected && !Chat.IsBusy && _revise is null)
+    {
+        <div class="select-bar" @onmousedown:preventDefault="true">
+            <span class="small">@Words(selected.Text) selected</span>
+            <button class="btn" disabled="@(!Engine.IsReady)" @onclick="() => OpenRevise(ReviseKind.Rewrite)">Rewrite</button>
+            <button class="btn" disabled="@(!Engine.IsReady)" @onclick="() => OpenRevise(ReviseKind.Expand)">Expand</button>
+            <button class="btn" disabled="@(!Engine.IsReady)" @onclick="() => OpenRevise(ReviseKind.Shorten)">Shorten</button>
+            <button class="btn" disabled="@(!Engine.IsReady)" @onclick="() => OpenRevise(ReviseKind.Tone)">Change tone…</button>
+            <button class="btn" disabled="@(!Engine.IsReady)" @onclick="() => OpenRevise(ReviseKind.Custom)">Other…</button>
+        </div>
+    }
+</div>
+
+@if (_inspect is { } inspected)
+{
+    <PromptInspector Message="inspected" OnClose="() => _inspect = null" />
+}
+
+@if (_revise is { } revise)
+{
+    var running = Chat.Active is { Kind: ReplyKind.Draft } draft && draft.ConversationId == Conversation.Id ? draft : null;
+    var result = running?.Content ?? revise.Result;
+    <Modal Title="@ReviseTitle(revise.Kind)" Class="wide" OnClose="CloseRevise">
+        <div class="field-block">
+            <div class="field-label">Selected text</div>
+            <div class="revise-text">@revise.Original</div>
+        </div>
+        @if (revise.Kind is ReviseKind.Tone or ReviseKind.Custom)
+        {
+            <label class="field-block">
+                <span class="field-label">@(revise.Kind == ReviseKind.Tone ? "Tone" : "What to change")</span>
+                <input class="field" disabled="@(running is not null)" @bind="revise.Detail" @bind:event="oninput"
+                       placeholder="@(revise.Kind == ReviseKind.Tone ? "For example: tense, playful, colder" : "For example: tell it from her point of view; add the smell of rain")" />
+            </label>
+        }
+        @if (result.Length > 0 || running is not null)
+        {
+            <div class="field-block">
+                <div class="field-label">Replacement</div>
+                <div class="revise-text"><span>@result</span>@if (running is not null) { <span class="caret" aria-label="Writing"></span> }</div>
+            </div>
+        }
+        @if (revise.Problem is not null)
+        {
+            <div class="notice bad"><span>@revise.Problem</span></div>
+        }
+        <div class="modal-foot">
+            <div class="row">
+                @if (running is not null)
+                {
+                    <button class="btn" @onclick="Chat.Stop">Stop</button>
+                }
+                else
+                {
+                    @if (revise.Result.Length > 0)
+                    {
+                        <button class="btn primary" @onclick="ApplyReviseAsync">Use this</button>
+                    }
+                    <button class="btn @(revise.Result.Length == 0 ? "primary" : "")" disabled="@(!Engine.IsReady || Chat.IsBusy || (revise.Kind is ReviseKind.Tone or ReviseKind.Custom && string.IsNullOrWhiteSpace(revise.Detail)))"
+                            @onclick="RunReviseAsync">@(revise.Result.Length == 0 ? "Write it" : "Try again")</button>
+                    <button class="btn" @onclick="CloseRevise">Cancel</button>
+                }
+            </div>
+            <span class="small">Nothing changes in the story until you press Use this.</span>
+        </div>
+    </Modal>
+}
+
+@code {
+    [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();
+
+    /// <summary>The story's settings: its kind, outline and whether it uses dice.</summary>
+    [Parameter, EditorRequired] public DogAI.Core.Stories.Story Info { get; set; } = new();
+    [Parameter, EditorRequired] public MessageTree Tree { get; set; } = new([]);
+    [Parameter, EditorRequired] public IReadOnlyList<ChatMessage> Path { get; set; } = [];
+
+    /// <summary>A problem the page wants shown under the text (for example a refused action).</summary>
+    [Parameter] public string? Notice { get; set; }
+    [Parameter] public EventCallback<string?> NoticeChanged { get; set; }
+
+    private sealed class Revision
+    {
+        public long PassageId;
+        public int Start, Length;
+        public string Original = "";
+        public ReviseKind Kind;
+        public string Detail = "";
+        public string Result = "";
+        public string? Problem;
+    }
+
+    private long? _editingId;
+    private string _editText = "";
+    private ChatMessage? _inspect;
+    private (long PassageId, string Text)? _selection;
+    private Revision? _revise;
+    private long _shownConversation = -1;
+    private ActiveReply? _shownActive;
+    private ElementReference _root;
+    private IJSObjectReference? _chatModule, _storyModule;
+    private DotNetObjectReference<StoryThread>? _self;
+
+    private bool Interactive => Info.Kind == StoryKind.Interactive;
+
+    /// <summary>Whatever is being written or worked out in this story, if anything.</summary>
+    private ActiveReply? Streaming => Chat.Active is { } a && a.ConversationId == Conversation.Id && Conversation.Id != 0 && a.Kind != ReplyKind.Draft ? a : null;
+
+    /// <summary>The branch on screen. While a passage is written it ends where that passage goes.</summary>
+    private IReadOnlyList<ChatMessage> Visible
+    {
+        get
+        {
+            if (Streaming is not { Kind: ReplyKind.Reply } reply) return Path;
+            if (reply.ContinuingId is { } continuing)
+            {
+                var at = IndexOf(Path, continuing);
+                return at < 0 ? Path : Path.Take(at).ToList();
+            }
+            if (reply.ParentId is not { } parent) return [];
+            var end = IndexOf(Path, parent);
+            return end < 0 ? Path : Path.Take(end + 1).ToList();
+        }
+    }
+
+    private string? Problem => Notice ?? (Chat.LastError is { } e && e.ConversationId == Conversation.Id ? e.Message : null);
+
+    private RenderFragment Versions(IReadOnlyList<ChatMessage> siblings, int position, string label) => __builder =>
+    {
+        if (siblings.Count > 1)
+        {
+            <span class="branch-nav" title="@label">
+                <button disabled="@(Chat.IsBusy || position == 0)" aria-label="Previous version" @onclick="() => ShowAsync(siblings[position - 1])">‹</button>
+                <span>@(position + 1) of @siblings.Count</span>
+                <button disabled="@(Chat.IsBusy || position == siblings.Count - 1)" aria-label="Next version" @onclick="() => ShowAsync(siblings[position + 1])">›</button>
+            </span>
+        }
+    };
+
+    private static RenderFragment Thinking(string? reasoning, bool busy) => __builder =>
+    {
+        if (!string.IsNullOrEmpty(reasoning))
+        {
+            <details class="thinking">
+                <summary>@(busy ? "Thinking…" : "Thinking")</summary>
+                <div>@reasoning</div>
+            </details>
+        }
+    };
+
+    protected override void OnParametersSet()
+    {
+        if (Conversation.Id == _shownConversation) return;
+        _editingId = null;
+        _inspect = null;
+        _selection = null;
+        _revise = null;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // As in a chat: jump to the end when a story opens or a passage starts, otherwise follow only a reader already there.
+        var writing = Streaming is { Kind: ReplyKind.Reply } ? Streaming : null;
+        var force = Conversation.Id != _shownConversation || (writing is not null && !ReferenceEquals(writing, _shownActive));
+        _shownConversation = Conversation.Id;
+        _shownActive = writing;
+        try
+        {
+            _chatModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
+            await _chatModule.InvokeVoidAsync("followThread", force);
+            if (!Interactive)
+            {
+                _storyModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/story.js");
+                _self ??= DotNetObjectReference.Create(this);
+                await _storyModule.InvokeVoidAsync("watchSelection", _root, _self);
+            }
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException or ObjectDisposedException)
+        {
+            // Scrolling and the selection tools are conveniences; the story works without them.
+        }
+    }
+
+    /// <summary>Called from the page script when the reader selects text inside one passage (id 0 when nothing is selected).</summary>
+    [JSInvokable]
+    public Task SelectionChanged(long passageId, string text) => InvokeAsync(() =>
+    {
+        text = text.Trim();
+        _selection = passageId != 0 && text.Length > 0 ? (passageId, text) : null;
+        StateHasChanged();
+    });
+
+    private static string Words(string text)
+    {
+        var count = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+        return count == 1 ? "1 word" : $"{count:N0} words";
+    }
+
+    private static string ReviseTitle(ReviseKind kind)
+    {
+        if (kind == ReviseKind.Expand) return "Expand the selection";
+        if (kind == ReviseKind.Shorten) return "Shorten the selection";
+        if (kind == ReviseKind.Tone) return "Change the tone";
+        return "Rewrite the selection";
+    }
+
+    private async Task OpenRevise(ReviseKind kind)
+    {
+        if (_selection is not { } selected || Path.FirstOrDefault(m => m.Id == selected.PassageId) is not { } passage) return;
+        if (TextSpan.Find(passage.Content, selected.Text) is not { } span)
+        {
+            await NoticeChanged.InvokeAsync("That selection could not be matched to the passage's text. Try selecting whole sentences inside one paragraph.");
+            return;
+        }
+        _revise = new Revision
+        {
+            PassageId = passage.Id,
+            Start = span.Start,
+            Length = span.Length,
+            Original = passage.Content.Substring(span.Start, span.Length),
+            Kind = kind,
+        };
+        if (kind is not (ReviseKind.Tone or ReviseKind.Custom)) await RunReviseAsync();
+    }
+
+    private async Task RunReviseAsync()
+    {
+        if (_revise is not { } revise || Chat.IsBusy) return;
+        revise.Problem = null;
+        revise.Result = "";
+        try
+        {
+            var text = await Chat.ReviseAsync(Conversation.Id, revise.PassageId, revise.Start, revise.Length, revise.Kind, revise.Detail);
+            if (!ReferenceEquals(_revise, revise)) return;
+            revise.Result = text;
+            if (text.Length == 0 && Chat.LastError is { } error && error.ConversationId == Conversation.Id)
+            {
+                revise.Problem = error.Message;
+                Chat.ClearError();
+            }
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            revise.Problem = e.Message;
+        }
+        StateHasChanged();
+    }
+
+    private async Task ApplyReviseAsync()
+    {
+        if (_revise is not { Result.Length: > 0 } revise) return;
+        try
+        {
+            await Chat.ApplyRevisionAsync(Conversation.Id, revise.PassageId, revise.Start, revise.Length, revise.Result);
+            _revise = null;
+            _selection = null;
+        }
+        catch (InvalidOperationException e)
+        {
+            revise.Problem = e.Message;
+        }
+    }
+
+    private void CloseRevise()
+    {
+        if (Chat.Active is { Kind: ReplyKind.Draft } draft && draft.ConversationId == Conversation.Id) Chat.Stop();
+        _revise = null;
+    }
+
+    private async Task Run(Func<Task> action)
+    {
+        try
+        {
+            await NoticeChanged.InvokeAsync(null);
+            await action();
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            await NoticeChanged.InvokeAsync(e.Message);
+        }
+    }
+
+    private Task ShowAsync(ChatMessage message) => Chat.SelectBranchAsync(message.ConversationId, message.Id);
+
+    private void StartEdit(ChatMessage message)
+    {
+        _editingId = message.Id;
+        _editText = message.Content;
+    }
+
+    private async Task SaveEditAsync(ChatMessage message)
+    {
+        var text = _editText.Trim();
+        _editingId = null;
+        if (text.Length == 0 || text == message.Content) return;
+        message.Content = text;
+        await Store.UpdateMessageAsync(message);
+    }
+
+    private async Task DismissProblem()
+    {
+        await NoticeChanged.InvokeAsync(null);
+        if (Chat.LastError is not null) Chat.ClearError();
+    }
+
+    private static int IndexOf(IReadOnlyList<ChatMessage> messages, long id)
+    {
+        for (var i = 0; i < messages.Count; i++)
+            if (messages[i].Id == id) return i;
+        return -1;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_storyModule is not null)
+            {
+                await _storyModule.InvokeVoidAsync("unwatchSelection");
+                await _storyModule.DisposeAsync();
+            }
+            if (_chatModule is not null) await _chatModule.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException or OperationCanceledException)
+        {
+        }
+        _self?.Dispose();
+    }
+}

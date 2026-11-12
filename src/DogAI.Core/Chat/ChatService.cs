@@ -1,14 +1,18 @@
 using System.Diagnostics;
 using System.Text;
 using DogAI.Core.Characters;
+using DogAI.Core.Stories;
 
 namespace DogAI.Core.Chat;
 
-/// <summary>What is being written: a reply in the chat, or a draft of the user's own next message (impersonate).</summary>
+/// <summary>What is being written: a reply in the chat, or a draft that is handed back without being saved (impersonate, revising a selection).</summary>
 public enum ReplyKind
 {
     Reply = 0,
     Draft = 1,
+
+    /// <summary>Story mode: the choices (and state) that follow a passage are being worked out. Nothing streams into the thread.</summary>
+    Choices = 2,
 }
 
 /// <summary>The reply being written right now. Read from the UI while it streams.</summary>
@@ -60,9 +64,11 @@ public sealed class ActiveReply(long conversationId, long? parentId, long? conti
 /// <summary>
 /// Runs chat turns: stores the user's message, builds a prompt that fits the context window,
 /// streams the reply and saves it. One reply at a time; it keeps going if the user looks at another screen.
-/// Used by General and Characters; a character chat gets its card and persona as standing instructions.
+/// Used by General, Characters and Story; a character chat gets its card and persona as standing instructions,
+/// a story its bible (the story-only parts are in ChatService.Story.cs).
 /// </summary>
-public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCatalog? presets = null, ICharacterStore? characters = null)
+public sealed partial class ChatService(IChatStore store, IChatEngine engine, PresetCatalog? presets = null, ICharacterStore? characters = null,
+    IStoryStore? stories = null)
 {
     public const string UntitledChat = "New chat";
     private static readonly TimeSpan UiInterval = TimeSpan.FromMilliseconds(50);
@@ -457,6 +463,8 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
             var ct = cts.Token;
             var conversation = await store.GetAsync(conversationId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
             var path = new MessageTree(await store.GetMessagesAsync(conversationId, ct)).PathTo(continuing?.Id ?? questionId);
+            // A story's user turns are sent as requests to the narrator, not as they were typed.
+            if (await StoryOfAsync(conversation, ct) is { } story) path = StoryPrompt.ForPrompt(story, path);
             var preset = _presets.Get(conversation.PresetId);
             reply.PresetId = preset.Id;
             reply.ModelName = engine.ModelName;
@@ -545,7 +553,9 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
     /// Who is who in a prompt. <see cref="Character"/> is the one writing (in a group, the speaker); <see cref="Everyone"/>
     /// names all the characters ("Ann and Bo" in a group). In a group, <see cref="Speakers"/> names each reply's writer.
     /// </summary>
-    private sealed record Names(string Character, string User, string Everyone, IReadOnlyDictionary<long, string>? Speakers = null)
+    /// <param name="SummaryTask">The wording of the summary request, when not the character-chat one.</param>
+    private sealed record Names(string Character, string User, string Everyone, IReadOnlyDictionary<long, string>? Speakers = null,
+        string? SummaryTask = null)
     {
         public bool Group => Speakers is not null;
 
@@ -573,6 +583,7 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
     private async Task<(PromptLayout Layout, Names Names)> PrepareAsync(Conversation conversation, IReadOnlyList<ChatMessage> path, ActiveReply active,
         long? speakerId, CancellationToken ct)
     {
+        if (await StoryOfAsync(conversation, ct) is { } story) return await PrepareStoryAsync(conversation, story, path, active, ct);
         if (conversation.IsGroup && characters is not null) return await PrepareGroupAsync(conversation, path, active, speakerId, ct);
         if (conversation.CharacterId is not { } characterId || characters is null || await characters.GetAsync(characterId, ct) is not { } character)
             return (PromptLayout.Plain(conversation.SystemPrompt), new Names("Assistant", "User", "Assistant"));
@@ -696,7 +707,7 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
             }
 
             // Not string.Format: that would turn {{char}} into {char} before the names are filled in.
-            var task = CharacterPrompt.Fill(CharacterPrompt.SummaryTask.Replace("{0}", summary.Length > 0 ? "an updated " : "a "), names.Everyone, names.User);
+            var task = CharacterPrompt.Fill((names.SummaryTask ?? CharacterPrompt.SummaryTask).Replace("{0}", summary.Length > 0 ? "an updated " : "a "), names.Everyone, names.User);
             var prompt = new List<PromptMessage>
             {
                 new("system", CharacterPrompt.SummarySystem),
@@ -817,9 +828,9 @@ public sealed class ChatService(IChatStore store, IChatEngine engine, PresetCata
         {
             var included = path.Skip(fit.FirstIncluded).ToList();
             var history = new List<PromptMessage>();
-            // A character chat opens with the character speaking; give the template the user turn it expects first.
+            // A character chat or story opens with a reply; give the template the user turn it expects first.
             if (included.Count > 0 && included[0].Role == ChatRole.Assistant)
-                history.Add(new PromptMessage("user", CharacterPrompt.ChatStart));
+                history.Add(new PromptMessage("user", layout.OpeningTurn ?? CharacterPrompt.ChatStart));
             foreach (var m in continuation ? included[..^1] : included)
             {
                 var role = m.Role == ChatRole.User ? "user" : "assistant";

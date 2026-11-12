@@ -65,6 +65,7 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
         await using var db = await factory.CreateDbContextAsync(ct);
         await db.Messages.Where(m => m.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.ChatMembers.Where(m => m.ConversationId == id).ExecuteDeleteAsync(ct);
+        await db.Stories.Where(s => s.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.Conversations.Where(c => c.Id == id).ExecuteDeleteAsync(ct);
     }
 
@@ -100,7 +101,14 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
             .SetProperty(m => m.TokensPerSecond, message.TokensPerSecond)
             .SetProperty(m => m.TrimmedMessages, message.TrimmedMessages)
             .SetProperty(m => m.LoreUsed, message.LoreUsed)
-            .SetProperty(m => m.MemoryUsed, message.MemoryUsed), ct);
+            .SetProperty(m => m.MemoryUsed, message.MemoryUsed)
+            .SetProperty(m => m.ExtraJson, message.ExtraJson), ct);
+    }
+
+    public async Task SetMessageExtraAsync(long messageId, string? extraJson, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.Messages.Where(m => m.Id == messageId).ExecuteUpdateAsync(s => s.SetProperty(m => m.ExtraJson, extraJson), ct);
     }
 
     public async Task<IReadOnlyList<Conversation>> ListForCharacterAsync(long characterId, CancellationToken ct = default)

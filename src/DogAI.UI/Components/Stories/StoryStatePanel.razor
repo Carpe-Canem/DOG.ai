@@ -1,0 +1,73 @@
+@* The tracked state of an interactive story: where the main character is, what they carry, their stats and
+   the facts to remember. The model updates it after each passage; anything here can be corrected by hand. *@
+
+<div class="panel">
+    <h4>State</h4>
+    @if (State is null)
+    {
+        <p class="small">Location, inventory, stats and facts appear here after the first passage. The model keeps them up to date and you can correct them.</p>
+    }
+    else
+    {
+        <div class="state-fields">
+            <label>Location<input class="field" disabled="@Disabled" value="@State.Location" @onchange="e => SaveAsync(s => s.Location = Text(e))" /></label>
+            <label>Carrying <span class="small">one per line</span>
+                <textarea class="field" rows="@Rows(State.Inventory.Count)" disabled="@Disabled" value="@string.Join('\n', State.Inventory)"
+                          @onchange="e => SaveAsync(s => s.Inventory = Lines(e))"></textarea>
+            </label>
+            <label>Stats <span class="small">like "Health: 8"</span>
+                <textarea class="field" rows="@Rows(State.Stats.Count)" disabled="@Disabled" value="@string.Join('\n', State.Stats.Select(s => $"{s.Name}: {s.Value}"))"
+                          @onchange="e => SaveAsync(s => s.Stats = Stats(e))"></textarea>
+            </label>
+            <label>Facts <span class="small">one per line</span>
+                <textarea class="field" rows="@Rows(State.Facts.Count)" disabled="@Disabled" value="@string.Join('\n', State.Facts)"
+                          @onchange="e => SaveAsync(s => s.Facts = Lines(e))"></textarea>
+            </label>
+        </div>
+        <p class="small">Sent to the model with each of your actions. Going back to an earlier point brings back the state from then.</p>
+    }
+</div>
+
+@code {
+    /// <summary>The state after the newest passage on screen; null before there is one.</summary>
+    [Parameter] public StoryState? State { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Called with the corrected state.</summary>
+    [Parameter] public EventCallback<StoryState> OnSave { get; set; }
+
+    private static int Rows(int items) => Math.Clamp(items + 1, 2, 8);
+
+    private static string Text(ChangeEventArgs e) => e.Value?.ToString()?.Trim() ?? "";
+
+    private static List<string> Lines(ChangeEventArgs e) =>
+        Text(e).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    /// <summary>Reads lines like "Health: 8" or "Gold 12". A line without a number keeps its name with 0.</summary>
+    private static List<StoryStat> Stats(ChangeEventArgs e)
+    {
+        var stats = new List<StoryStat>();
+        foreach (var line in Lines(e))
+        {
+            var at = line.LastIndexOfAny([':', ' ', '=']);
+            var number = 0;
+            var name = at > 0 && int.TryParse(line[(at + 1)..].Trim(), out number) ? line[..at].Trim().TrimEnd(':', '=').Trim() : line.Trim().TrimEnd(':', '=').Trim();
+            if (name.Length > 0) stats.Add(new StoryStat { Name = name, Value = number });
+        }
+        return stats;
+    }
+
+    private Task SaveAsync(Action<StoryState> change)
+    {
+        if (State is null) return Task.CompletedTask;
+        var next = new StoryState
+        {
+            Location = State.Location,
+            Inventory = [.. State.Inventory],
+            Stats = State.Stats.Select(s => new StoryStat { Name = s.Name, Value = s.Value }).ToList(),
+            Facts = [.. State.Facts],
+        };
+        change(next);
+        return OnSave.InvokeAsync(next);
+    }
+}

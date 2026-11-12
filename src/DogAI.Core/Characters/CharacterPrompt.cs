@@ -60,6 +60,7 @@ public static partial class CharacterPrompt
         if (text.Trim().Length == 0) return false;
         if (text.Contains("[Task:", StringComparison.OrdinalIgnoreCase)
             || text.Contains("summary of the story so far between", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("so it can be remembered after", StringComparison.OrdinalIgnoreCase)
             || text.Contains("summarise stories accurately", StringComparison.OrdinalIgnoreCase))
             return false;
         return !LooksRepetitive(text);

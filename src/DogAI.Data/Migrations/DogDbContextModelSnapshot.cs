@@ -178,6 +178,9 @@ namespace DogAI.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ExtraJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LoreUsed")
                         .HasColumnType("TEXT");
 
@@ -339,6 +342,43 @@ namespace DogAI.Data.Migrations
                     b.ToTable("ModelRecords");
                 });
 
+            modelBuilder.Entity("DogAI.Core.Stories.Story", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Bible")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ConversationId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Dice")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Outline")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("PassageWords")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("TrackState")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId")
+                        .IsUnique();
+
+                    b.ToTable("Stories");
+                });
+
             modelBuilder.Entity("DogAI.Data.SettingEntry", b =>
                 {
                     b.Property<string>("Key")
@@ -370,6 +410,15 @@ namespace DogAI.Data.Migrations
                 });
 
             modelBuilder.Entity("DogAI.Core.Chat.ChatMessage", b =>
+                {
+                    b.HasOne("DogAI.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("DogAI.Core.Stories.Story", b =>
                 {
                     b.HasOne("DogAI.Core.Chat.Conversation", null)
                         .WithMany()

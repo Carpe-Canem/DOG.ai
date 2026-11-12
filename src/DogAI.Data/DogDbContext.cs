@@ -2,6 +2,7 @@ using System.Text.Json;
 using DogAI.Core.Characters;
 using DogAI.Core.Chat;
 using DogAI.Core.Models;
+using DogAI.Core.Stories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Design;
@@ -19,6 +20,7 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
     public DbSet<Character> Characters => Set<Character>();
     public DbSet<Persona> Personas => Set<Persona>();
     public DbSet<ChatMember> ChatMembers => Set<ChatMember>();
+    public DbSet<Story> Stories => Set<Story>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -37,6 +39,14 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
             e.HasIndex(m => new { m.ConversationId, m.Position });
             e.HasOne<Conversation>().WithMany().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Character>().WithMany().HasForeignKey(m => m.CharacterId).OnDelete(DeleteBehavior.Cascade);
+        });
+        model.Entity<Story>(e =>
+        {
+            // One per "story" conversation; a new table, so the link costs no rebuild.
+            e.HasIndex(s => s.ConversationId).IsUnique();
+            e.HasOne<Conversation>().WithMany().HasForeignKey(s => s.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.Property(s => s.Bible).HasConversion(Json<StoryBible>(), JsonComparer<StoryBible>());
+            e.Property(s => s.Outline).HasConversion(Json<List<StoryChapter>>(), JsonComparer<List<StoryChapter>>());
         });
         model.Entity<Character>(e =>
         {
@@ -75,6 +85,28 @@ public sealed partial class DogDbContext
     private static readonly ValueConverter<List<string>, string> StringList = new(
         v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
         v => JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null) ?? new List<string>());
+
+    /// <summary>Small settings objects (a story's bible and outline) are kept as one JSON column each.</summary>
+    private static ValueConverter<T, string> Json<T>() where T : class, new() => new(
+        v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+        v => Read<T>(v));
+
+    private static ValueComparer<T> JsonComparer<T>() where T : class, new() => new(
+        (a, b) => JsonSerializer.Serialize(a, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(b, (JsonSerializerOptions?)null),
+        v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode(),
+        v => Read<T>(JsonSerializer.Serialize(v, (JsonSerializerOptions?)null)));
+
+    private static T Read<T>(string json) where T : class, new()
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json, (JsonSerializerOptions?)null) ?? new T();
+        }
+        catch (JsonException)
+        {
+            return new T();
+        }
+    }
 
     private static readonly ValueComparer<List<string>> StringListComparer = new(
         (a, b) => a!.SequenceEqual(b!),

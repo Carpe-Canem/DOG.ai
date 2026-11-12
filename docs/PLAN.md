@@ -2,8 +2,36 @@
 
 ## Status (updated 2026-11-12)
 
-- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 part 1 (characters, cards, personas, continue, editable styles), M3 part 2 (lore, author's note, impersonate, memory, AI card builder, avatar cropping), M3 part 3 (group chat). **M3 is complete.**
-- **Next:** M4 (Story).
+- **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 (characters, lore, memory, group chat), M4 (Story).
+- **Next:** M5 (Documents).
+- **What M4 delivered (Story):**
+  - *Two kinds of story*, chosen when you press **New story**: an **interactive adventure** (you are the main character; the model narrates and you choose) and a **written story** (you are the author; the model writes passage by passage along your outline).
+  - *Story bible* for both: title, premise, genre, tone, point of view, tense, cast, world, style guide. It is sent with every passage and can be changed at any time (**Story bible** in the side panel); changes apply from the next passage. **Draft the story bible** has the loaded model fill it in from a one-line idea (and, for a written story, an outline of chapters), using the same structured-output method as the card builder. Nothing is saved until you press Create.
+  - *Interactive adventure:* **Begin the story** writes an opening. After every passage a second, short request asks the model for two to four choices as structured output, so they always arrive well-formed; press one, or type your own action in the box. **Other choices** asks again. Optional per story: **state tracking** (location, inventory, stats, facts; the model updates them after each passage, they are sent with your next action, and you can correct them in the side panel) and **dice** (the model marks risky choices; pressing one, or ticking "Roll dice" for your own action, rolls a 20-sided dice and the narrator is told the result: 1 critical failure, 2–7 failure, 8–12 partial success, 13–19 success, 20 critical success).
+  - *Branch map:* every path taken, drawn as a tree. Pick any point to go back to it; what you do next starts a new branch and nothing is lost. **Go back to here** under any earlier passage does the same. Each branch has its own state, so going back also brings back the inventory and stats from then.
+  - *Written story:* **Write next** writes the next passage, optionally steered by a line you type first. A box above it says which outline chapter the passage belongs to; pick the next chapter when you are ready to move on, and a chapter heading appears. Select any text in a passage and a bar offers **Rewrite, Expand, Shorten, Change tone, Other**; the replacement is shown beside the original and nothing changes until you press **Use this**.
+  - *Both kinds:* every passage can be rewritten (the earlier version is kept; arrows flip between versions), continued, edited by hand, copied, and inspected (**Prompt** shows exactly what the model was sent). Style and memory work as in chats: when the story outgrows the context, older passages are summarised.
+  - *Save a copy* of the branch on screen as **Markdown**, a single **web page**, or an **EPUB** e-book (title page, contents, one file per chapter). The files contain nothing that points outside themselves.
+  - The model picker in Story labels the default model for Story.
+  - Database: one additive migration (a `Stories` table and a nullable `ExtraJson` column on messages). A test upgrades an M3 database.
+- **How M4 behaves, decided while building it:**
+  - *A story is a conversation.* Passages are replies in the same message tree as chats, so versions, branching, continue, the prompt inspector and memory needed no second engine. The player's actions (interactive) and the author's directions (written) are the user turns. Story settings live in their own table; choices, state, dice rolls and chapter numbers are kept with each message.
+  - *Choices come from a second request, not from the passage itself.* The passage streams as ordinary prose (better writing, and you can read it as it arrives); then the same prompt plus the passage is sent again with a JSON schema for the choices and state. The engine reuses the prompt it has just processed, so this takes a second or two.
+  - *The narrator is reminded of the rules next to your newest action* (length, do not ask what the player does, the dice result, the current state), because models follow what is nearest the end. A closing "What do you do?" that slips through anyway is removed from the saved passage, since the choices are right below it.
+  - *Rewriting a selection is held to the selection's size:* the request states the length in words, the reply is capped in tokens, and the temperature is lowered. The first live try, without this, turned one sentence into a page.
+  - *Rewriting a selection changes the passage in place* (after you accept it). Rewriting a whole passage keeps the old version beside it.
+  - *Going back never deletes.* In a written story, writing on from an earlier passage makes the later text another version; the arrows on the direction line switch between them.
+  - *A turn that got no passage* (a problem, or stopped at once) is replaced by the next one rather than followed by it, so two user turns never go to the model in a row.
+  - *New stories start with the Creative style.* Dice are off and state tracking is on unless changed.
+- **Tried live** with Mag-Mell 12B (ChatML template): an adventure from a one-line idea through bible draft, opening, choices, a typed action with dice, state updates, the branch map (going back and branching), other choices, editing the state by hand (it was still there after leaving and returning), continue, and hand-editing a passage; a written story through bible and six-chapter outline draft, three passages with a direction and a chapter change, rewriting a selection four ways, rewriting a passage, editing the outline afterwards, and all three exports through the real Save dialog. All story screens (landing, new story, adventure, branch map, written story with the selection bar, rewrite dialog, story bible page) were looked at in all three looks, dark and light.
+- **What the live tries showed about the model, not fixed by code:** passages run about 350–450 words when asked for 250. The dice result was followed in two of three rolls after the wording was strengthened (a failed roll was once still narrated as a success). Rewrites of a selection sometimes drift into the sentence that follows. A stronger model should do better on all three.
+- **Left out of M4, still owed:**
+  - *Hierarchical summaries* (scene → chapter → story so far). There is one rolling "story so far" summary, the same mechanism as chat memory. It was not run live in a story (unit-tested).
+  - *Lorebooks and document collections as world reference.* Standalone lorebooks are still owed from M3; documents are M5. The bible's World field is the place for world facts until then.
+  - *Narrator read-aloud* comes with voice in M6.
+  - *Scene beats as their own level.* The outline is chapters, each with a free-text plan; beats can be written into the plan.
+  - A past action or direction cannot be edited; go back and do something else instead. The branch map is for adventures only.
+  - Not tried: opening the EPUB in an e-reader (its structure and well-formedness are unit-tested), a strict-template model (Gemma, Mistral `[INST]`; role alternation is unit-tested), a reasoning model, and a story long enough to need the summary.
 - **What M3 part 3 delivered (group chat):**
   - *Group chats* live in the Characters section, under "Group chats" in the list, with a **New group** button (shown once there are two characters). Pick two or more characters and a turn order, then start. A group keeps its members in its own table; deleting a character takes it out of groups but keeps the chats and what it said ("Removed character").
   - *Turn order*, changeable at any time in the side panel: **Natural** (whoever your message names answers, by full or first name, in the order named; if nobody is named, whoever has been quiet longest), **Everyone in turn** (every member who is not muted answers once, in list order; Stop ends the whole round), **You choose** (nobody answers until you pick). Under the message box a row of member buttons makes one of them speak now, and **Anyone** lets turn order pick (someone the last speaker named, else the quietest, never the one who just spoke). Members can be reordered, muted (they stay in the scene but only speak when picked), removed and added.
@@ -63,7 +91,7 @@
   - *Stable engine releases*: llama.cpp now marks numbered builds as pre-releases and publishes a stable release that names one build (b12110 on 2026-11-12). DOG AI installs that build, picking the newest CUDA version the driver supports (CUDA 13.4 here) plus its runtime.
   - *Curated picks* are in `src/DogAI.Core/Models/curated-models.json` (researched 2026-11-12). There is no "refresh" button yet: the only allowed hosts are Hugging Face and GitHub, and there is no online copy of the list. Publishing the JSON in a GitHub repo would make it refreshable. Uncensored role-play fine-tunes were left out of the defaults; they can be found through Browse. Voice picks come with M6.
 - **Left out of M2, still owed:**
-  - Per-mode defaults are saved and the model picker labels the current mode's default (General and Characters); Story will read them in M4. Nothing loads a default automatically yet.
+  - Per-mode defaults are saved and the model picker labels the current mode's default (General, Characters and, since M4, Story). Nothing loads a default automatically yet.
   - Links in model cards do not open. The confirm-then-open-in-browser prompt is still to do (planned for M7).
   - Not tried live: a gated model with a token, partial offload of a model bigger than the card, and the 30-minute idle unload. Unit tests cover the logic.
   - The download resume and checksum tests use an in-process fake server, not a real local web server as the Verification section suggests.
@@ -203,7 +231,7 @@ Each ends with a runnable app, passing tests, and a git commit.
 | M1 ✅ | Engine + General chat | Engine manager, load a GGUF from disk, streaming chat, markdown, message tree, presets, context budgeter, prompt inspector |
 | M2 ✅ | Models section | Hardware probe, HF browse, fit badges, download manager, library, curated picks, benchmark, engine updater |
 | M3 ✅ | Characters | Card import/export, editor, personas, lorebooks, swipes, rolling-summary memory, AI card builder, group chat |
-| M4 | Story | Story Bible, authored mode, CYOA with structured choices and state, branch map, exports |
+| M4 ✅ | Story | Story Bible, authored mode, CYOA with structured choices and state, branch map, exports |
 | M5 | Documents | Embedding server, ingestion, collections, citations; vector recall added to character and story memory |
 | M6 | Voice | Speech-to-text, text-to-speech, per-character voices |
 | M7 | Polish | Assistants, prompt library, search, backup/restore, self-contained publish profile |
