@@ -1,0 +1,145 @@
+@* The side-panel settings shared by character and group chats: persona, style, extra instructions, author's note
+   and memory. Changes are saved straight away on the conversation passed in. *@
+@inject IChatStore Store
+@inject ChatService Chat
+
+<div class="panel">
+    <h4>You are</h4>
+    @if (Personas.Count == 0)
+    {
+        <p class="small">"User", with no description. <a class="link-text" href="characters/personas">Make a persona</a> to give yourself a name and a description the @(Group ? "characters know" : "character knows").</p>
+    }
+    else
+    {
+        <select class="field" aria-label="Your persona" value="@(Persona?.Id ?? 0)" @onchange="SetPersonaAsync">
+            @foreach (var persona in Personas)
+            {
+                <option value="@persona.Id">@persona.Name</option>
+            }
+        </select>
+        <p class="small">@(Persona?.Description is { Length: > 0 } d ? Shorten(CharacterPrompt.Fill(d, CharacterName, Persona.Name), 140) : "No description.")</p>
+    }
+</div>
+<StylePanel Value="@Conversation.PresetId" ValueChanged="SetPresetAsync" />
+<div class="panel">
+    <h4>@(Group ? "Scene and instructions" : "Extra instructions")</h4>
+    <textarea class="field" rows="5" aria-label="Extra instructions" placeholder="@(Group ? "Optional. Where the group is and what is going on, or anything else every member should know. For this chat only." : "Optional. Added to the character's card for this chat only.")"
+              value="@Conversation.SystemPrompt" @onchange="SetInstructionsAsync"></textarea>
+</div>
+<div class="panel">
+    <h4>Author's note</h4>
+    <textarea class="field" rows="3" aria-label="Author's note" placeholder="Optional. A short reminder kept near the end of the chat, such as the mood or the weather. Sent with every reply."
+              value="@Conversation.AuthorsNote" @onchange="SetAuthorsNoteAsync"></textarea>
+    <label class="small inline-select">
+        Placed
+        <select class="field" aria-label="Where the note goes" value="@Conversation.AuthorsNoteDepth" @onchange="SetNoteDepthAsync">
+            @foreach (var depth in NoteDepths)
+            {
+                <option value="@depth">@(depth == 0 ? "with the newest message" : $"{depth} message{(depth == 1 ? "" : "s")} back")</option>
+            }
+        </select>
+    </label>
+</div>
+<div class="panel">
+    <h4>Memory</h4>
+    <label class="check"><input type="checkbox" checked="@Conversation.MemoryEnabled" @onchange="SetMemoryAsync" /> Summarise older messages when the chat outgrows the model's context</label>
+    @if (SummaryState is { } summary)
+    {
+        <p class="small">@summary</p>
+        @if (Conversation.Summary.Length > 0)
+        {
+            <textarea class="field" rows="6" aria-label="Summary of earlier messages" value="@Conversation.Summary" @onchange="EditSummaryAsync"></textarea>
+            <div class="row"><button class="btn" disabled="@Streaming" @onclick="ForgetSummaryAsync" title="Write a fresh summary when one is next needed">Forget summary</button></div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();
+    [Parameter] public IReadOnlyList<ChatMessage> Path { get; set; } = [];
+    [Parameter] public IReadOnlyList<Persona> Personas { get; set; } = [];
+    [Parameter] public Persona? Persona { get; set; }
+    [Parameter] public EventCallback<Persona?> PersonaChanged { get; set; }
+
+    /// <summary>Fills {{char}} in the persona's description. In a group, the members' names.</summary>
+    [Parameter] public string CharacterName { get; set; } = "";
+
+    /// <summary>Wording for a group chat.</summary>
+    [Parameter] public bool Group { get; set; }
+
+    /// <summary>True while a reply is being written in this chat.</summary>
+    [Parameter] public bool Streaming { get; set; }
+
+    private static readonly int[] NoteDepths = [0, 1, 2, 4, 6, 8];
+
+    /// <summary>A line saying what the summary covers, or why there is none. Null while memory is off.</summary>
+    private string? SummaryState
+    {
+        get
+        {
+            if (!Conversation.MemoryEnabled) return null;
+            if (Conversation.Summary.Length == 0)
+                return "No summary yet. One is written when older messages stop fitting in the context.";
+            var at = Conversation.SummaryThroughId is { } id ? Path.ToList().FindIndex(m => m.Id == id) : -1;
+            return at < 0
+                ? "This summary was written for another version of the chat and is not used here. A new one is written when needed."
+                : $"Covers the first {at + 1} message{(at == 0 ? "" : "s")}. It is sent instead of the ones left out; you can correct it.";
+        }
+    }
+
+    private async Task SetPersonaAsync(ChangeEventArgs e)
+    {
+        if (!long.TryParse(e.Value?.ToString(), out var id)) return;
+        Conversation.PersonaId = id;
+        await Store.UpdateAsync(Conversation);
+        await PersonaChanged.InvokeAsync(Personas.FirstOrDefault(p => p.Id == id));
+    }
+
+    private async Task SetPresetAsync(string id)
+    {
+        Conversation.PresetId = id;
+        await Store.UpdateAsync(Conversation);
+    }
+
+    private async Task SetInstructionsAsync(ChangeEventArgs e)
+    {
+        Conversation.SystemPrompt = e.Value?.ToString() ?? "";
+        await Store.UpdateAsync(Conversation);
+    }
+
+    private async Task SetAuthorsNoteAsync(ChangeEventArgs e)
+    {
+        Conversation.AuthorsNote = e.Value?.ToString()?.Trim() ?? "";
+        await Store.UpdateAsync(Conversation);
+    }
+
+    private async Task SetNoteDepthAsync(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var depth)) return;
+        Conversation.AuthorsNoteDepth = depth;
+        await Store.UpdateAsync(Conversation);
+    }
+
+    private async Task SetMemoryAsync(ChangeEventArgs e)
+    {
+        Conversation.MemoryEnabled = e.Value is true;
+        await Store.UpdateAsync(Conversation);
+    }
+
+    private async Task EditSummaryAsync(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString()?.Trim() ?? "";
+        Conversation.Summary = text;
+        if (text.Length == 0) Conversation.SummaryThroughId = null;
+        await Store.SetSummaryAsync(Conversation.Id, text, Conversation.SummaryThroughId);
+    }
+
+    private async Task ForgetSummaryAsync()
+    {
+        await Chat.ForgetSummaryAsync(Conversation.Id);
+        Conversation.Summary = "";
+        Conversation.SummaryThroughId = null;
+    }
+
+    private static string Shorten(string text, int max) => text.Length <= max ? text : text[..(max - 1)].TrimEnd() + "…";
+}

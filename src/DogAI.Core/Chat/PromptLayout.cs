@@ -8,10 +8,13 @@ public enum PromptPartKind
     Instruction = 0,
     LoreBefore = 1,
     Card = 2,
-    LoreAfter = 3,
-    Examples = 4,
-    ChatInstructions = 5,
-    Memory = 6,
+
+    /// <summary>Group chats: who else is in the scene.</summary>
+    Cast = 3,
+    LoreAfter = 4,
+    Examples = 5,
+    ChatInstructions = 6,
+    Memory = 7,
 }
 
 /// <summary>One piece of the system message, e.g. the card's description or the lore that fired.</summary>
@@ -20,13 +23,14 @@ public sealed record PromptPart(PromptPartKind Kind, string Text)
     /// <summary>
     /// When even the newest message does not fit, parts are left out in this order (lowest first) after all
     /// older turns are gone. Zero means never: the instruction, the card and the chat's own instructions stay.
-    /// The order follows the plan's priority: system &gt; card &gt; lore &gt; memory &gt; older turns.
+    /// The order follows the plan's priority: system &gt; card &gt; others in a group &gt; lore &gt; memory &gt; older turns.
     /// </summary>
     public int DropOrder => Kind switch
     {
         PromptPartKind.Examples => 1,
         PromptPartKind.Memory => 2,
         PromptPartKind.LoreBefore or PromptPartKind.LoreAfter => 3,
+        PromptPartKind.Cast => 4,
         _ => 0,
     };
 }

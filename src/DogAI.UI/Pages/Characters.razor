@@ -145,56 +145,8 @@ else
     </SectionContent>
 
     <SectionContent SectionName="aside">
-        <div class="panel">
-            <h4>You are</h4>
-            @if (_personas.Count == 0)
-            {
-                <p class="small">"User", with no description. <a class="link-text" href="characters/personas">Make a persona</a> to give yourself a name and a description the character knows.</p>
-            }
-            else
-            {
-                <select class="field" aria-label="Your persona" value="@(_persona?.Id ?? 0)" @onchange="SetPersonaAsync">
-                    @foreach (var persona in _personas)
-                    {
-                        <option value="@persona.Id">@persona.Name</option>
-                    }
-                </select>
-                <p class="small">@(_persona?.Description is { Length: > 0 } d ? Shorten(CharacterPrompt.Fill(d, _character.Name, _persona.Name), 140) : "No description.")</p>
-            }
-        </div>
-        <StylePanel Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />
-        <div class="panel">
-            <h4>Extra instructions</h4>
-            <textarea class="field" rows="5" aria-label="Extra instructions" placeholder="Optional. Added to the character's card for this chat only."
-                      value="@_conversation.SystemPrompt" @onchange="SetInstructionsAsync"></textarea>
-        </div>
-        <div class="panel">
-            <h4>Author's note</h4>
-            <textarea class="field" rows="3" aria-label="Author's note" placeholder="Optional. A short reminder kept near the end of the chat, such as the mood or the weather. Sent with every reply."
-                      value="@_conversation.AuthorsNote" @onchange="SetAuthorsNoteAsync"></textarea>
-            <label class="small inline-select">
-                Placed
-                <select class="field" aria-label="Where the note goes" value="@_conversation.AuthorsNoteDepth" @onchange="SetNoteDepthAsync">
-                    @foreach (var depth in NoteDepths)
-                    {
-                        <option value="@depth">@(depth == 0 ? "with the newest message" : $"{depth} message{(depth == 1 ? "" : "s")} back")</option>
-                    }
-                </select>
-            </label>
-        </div>
-        <div class="panel">
-            <h4>Memory</h4>
-            <label class="check"><input type="checkbox" checked="@_conversation.MemoryEnabled" @onchange="SetMemoryAsync" /> Summarise older messages when the chat outgrows the model's context</label>
-            @if (SummaryState is { } summary)
-            {
-                <p class="small">@summary</p>
-                @if (_conversation.Summary.Length > 0)
-                {
-                    <textarea class="field" rows="6" aria-label="Summary of earlier messages" value="@_conversation.Summary" @onchange="EditSummaryAsync"></textarea>
-                    <div class="row"><button class="btn" disabled="@Streaming" @onclick="ForgetSummaryAsync" title="Write a fresh summary when one is next needed">Forget summary</button></div>
-                }
-            }
-        </div>
+        <RoleplayPanels Conversation="@_conversation" Path="@_path" Personas="@_personas" Persona="@_persona" PersonaChanged="p => _persona = p"
+                        CharacterName="@_character.Name" Streaming="@Streaming" />
         <div class="panel">
             <h4>This chat</h4>
             <input class="field" aria-label="Chat name" value="@_conversation.Title" @onchange="RenameAsync" />
@@ -235,23 +187,6 @@ else
     private string? _saved;
     private ActiveReply? _seenActive;
     private int _loreCount;
-
-    private static readonly int[] NoteDepths = [0, 1, 2, 4, 6, 8];
-
-    /// <summary>A line saying what the summary covers, or why there is none. Null while memory is off.</summary>
-    private string? SummaryState
-    {
-        get
-        {
-            if (!_conversation.MemoryEnabled) return null;
-            if (_conversation.Summary.Length == 0)
-                return "No summary yet. One is written when older messages stop fitting in the context.";
-            var at = _conversation.SummaryThroughId is { } id ? _path.ToList().FindIndex(m => m.Id == id) : -1;
-            return at < 0
-                ? "This summary was written for another version of the chat and is not used here. A new one is written when needed."
-                : $"Covers the first {at + 1} message{(at == 0 ? "" : "s")}. It is sent instead of the ones left out; you can correct it.";
-        }
-    }
 
     private bool Streaming => Chat.Active is { } a && a.ConversationId == _conversation.Id && _conversation.Id != 0;
 
@@ -369,60 +304,6 @@ else
         }
     }
 
-    private async Task SetAuthorsNoteAsync(ChangeEventArgs e)
-    {
-        _conversation.AuthorsNote = e.Value?.ToString()?.Trim() ?? "";
-        await Store.UpdateAsync(_conversation);
-    }
-
-    private async Task SetNoteDepthAsync(ChangeEventArgs e)
-    {
-        if (!int.TryParse(e.Value?.ToString(), out var depth)) return;
-        _conversation.AuthorsNoteDepth = depth;
-        await Store.UpdateAsync(_conversation);
-    }
-
-    private async Task SetMemoryAsync(ChangeEventArgs e)
-    {
-        _conversation.MemoryEnabled = e.Value is true;
-        await Store.UpdateAsync(_conversation);
-    }
-
-    private async Task EditSummaryAsync(ChangeEventArgs e)
-    {
-        var text = e.Value?.ToString()?.Trim() ?? "";
-        _conversation.Summary = text;
-        if (text.Length == 0) _conversation.SummaryThroughId = null;
-        await Store.SetSummaryAsync(_conversation.Id, text, _conversation.SummaryThroughId);
-    }
-
-    private async Task ForgetSummaryAsync()
-    {
-        await Chat.ForgetSummaryAsync(_conversation.Id);
-        _conversation.Summary = "";
-        _conversation.SummaryThroughId = null;
-    }
-
-    private async Task SetPersonaAsync(ChangeEventArgs e)
-    {
-        if (!long.TryParse(e.Value?.ToString(), out var id)) return;
-        _conversation.PersonaId = id;
-        _persona = _personas.FirstOrDefault(p => p.Id == id);
-        await Store.UpdateAsync(_conversation);
-    }
-
-    private async Task SetPresetAsync(string id)
-    {
-        _conversation.PresetId = id;
-        await Store.UpdateAsync(_conversation);
-    }
-
-    private async Task SetInstructionsAsync(ChangeEventArgs e)
-    {
-        _conversation.SystemPrompt = e.Value?.ToString() ?? "";
-        await Store.UpdateAsync(_conversation);
-    }
-
     private async Task RenameAsync(ChangeEventArgs e)
     {
         var title = (e.Value?.ToString() ?? "").Trim();
@@ -476,8 +357,6 @@ else
             _notice = "Could not save the card: " + e.Message;
         }
     }
-
-    private static string Shorten(string text, int max) => text.Length <= max ? text : text[..(max - 1)].TrimEnd() + "…";
 
     public void Dispose()
     {

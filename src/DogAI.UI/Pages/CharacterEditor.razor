@@ -122,6 +122,20 @@
             <div class="row"><button class="btn" @onclick="() => _c.AlternateGreetings.Add(string.Empty)">Add a greeting</button></div>
         </div>
 
+        <div class="field-block">
+            <div class="field-label">Group-only greetings <span class="small">Openings used only in group chats, where other characters are present too. Optional.</span></div>
+            @for (var i = 0; i < _groupGreetings.Count; i++)
+            {
+                var index = i;
+                <div class="greeting">
+                    <textarea class="field" rows="3" aria-label="@($"Group greeting {index + 1}")" value="@_groupGreetings[index]"
+                              @onchange="e => _groupGreetings[index] = e.Value?.ToString() ?? string.Empty"></textarea>
+                    <button class="btn" @onclick="() => _groupGreetings.RemoveAt(index)">Remove</button>
+                </div>
+            }
+            <div class="row"><button class="btn" @onclick="() => _groupGreetings.Add(string.Empty)">Add a group greeting</button></div>
+        </div>
+
         @Area("Example dialogue", "Sample exchanges that show how the character talks. Start each one with <START>.", () => _c.ExampleMessages, v => _c.ExampleMessages = v, 6)
 
         <details class="card-text" open="@(_c.SystemPrompt.Length > 0 || _c.PostHistoryInstructions.Length > 0)">
@@ -217,6 +231,7 @@
 
     private Character _c = new();
     private string _tags = "";
+    private List<string> _groupGreetings = [];
     private string _presetId = SamplerPresets.DefaultId;
     private DateTime _pictureStamp = DateTime.UtcNow;
     private bool _loaded;
@@ -248,6 +263,7 @@
             _c = new Character();
         }
         _tags = string.Join(", ", _c.Tags);
+        _groupGreetings = CharacterCard.GroupGreetings(_c).ToList();
         _presetId = Presets.Get(_c.PresetId).Id;
         _pictureStamp = DateTime.UtcNow;
         _loaded = true;
@@ -326,6 +342,7 @@
         }
         _c.Tags = _tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         _c.AlternateGreetings = _c.AlternateGreetings.Where(g => !string.IsNullOrWhiteSpace(g)).ToList();
+        _c.ExtraJson = CharacterCard.WithGroupGreetings(_c, _groupGreetings);
         _c.PresetId = _presetId == SamplerPresets.DefaultId ? null : _presetId;
         _saving = true;
         try

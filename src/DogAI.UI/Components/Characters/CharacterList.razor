@@ -1,5 +1,6 @@
 @* The Characters list region: import a card, make a new character, open personas, pick a character. *@
 @inject ICharacterStore Characters
+@inject IChatStore Chats
 @inject IDesktopShell Desktop
 @inject NavigationManager Nav
 
@@ -32,6 +33,36 @@
 {
     <p class="list-note">No characters yet. Import a card or make a new one.</p>
 }
+<div class="list-head list-sub">
+    <h3>Group chats</h3>
+    @if (_all.Count >= 2)
+    {
+        <a class="btn" href="characters/group/new" title="A chat with several characters at once">New group</a>
+    }
+</div>
+@foreach (var g in _groups)
+{
+    <a class="li @(g.Chat.Id == ActiveGroupId ? "active" : "")" href="characters/group/@g.Chat.Id">
+        <span class="avatar-stack" aria-hidden="true">
+            @foreach (var c in g.Members.Take(3))
+            {
+                <CharacterAvatar Character="c" />
+            }
+            @if (g.Members.Count == 0)
+            {
+                <span class="avatar">?</span>
+            }
+        </span>
+        <span class="li-text">
+            <span class="li-title">@g.Chat.Title</span>
+            <span class="li-sub">@Format.When(g.Chat.UpdatedAt)</span>
+        </span>
+    </a>
+}
+@if (_groups.Count == 0 && _loaded)
+{
+    <p class="list-note">@(_all.Count >= 2 ? "None yet. Start one to put several characters in one scene." : "Make or import at least two characters to start a group chat.")</p>
+}
 <a class="li li-foot @(PersonasActive ? "active" : "")" href="characters/personas">
     <span class="avatar you" aria-hidden="true">You</span>
     <span class="li-text"><span class="li-title">Your personas</span><span class="li-sub">Who you are in chats</span></span>
@@ -41,10 +72,14 @@
     [Parameter] public long? ActiveId { get; set; }
     [Parameter] public bool PersonasActive { get; set; }
 
+    /// <summary>The group chat on screen, if any.</summary>
+    [Parameter] public long? ActiveGroupId { get; set; }
+
     /// <summary>Bump to make the list reload (after a save or delete elsewhere on the page).</summary>
     [Parameter] public int Version { get; set; }
 
     private List<Character> _all = [];
+    private List<(Conversation Chat, List<Character> Members)> _groups = [];
     private int _loadedVersion = -1;
     private bool _loaded;
     private string _filter = "";
@@ -60,6 +95,13 @@
         if (_loadedVersion == Version) return;
         _loadedVersion = Version;
         _all = (await Characters.ListAsync()).ToList();
+        var groups = new List<(Conversation, List<Character>)>();
+        foreach (var chat in await Chats.ListAsync(Conversation.GroupMode))
+        {
+            var ids = (await Chats.GetMembersAsync(chat.Id)).Select(m => m.CharacterId).ToList();
+            groups.Add((chat, ids.Select(id => _all.FirstOrDefault(c => c.Id == id)).OfType<Character>().ToList()));
+        }
+        _groups = groups;
         _loaded = true;
     }
 

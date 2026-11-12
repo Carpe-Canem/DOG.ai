@@ -132,6 +132,33 @@ namespace DogAI.Data.Migrations
                     b.ToTable("Personas");
                 });
 
+            modelBuilder.Entity("DogAI.Core.Chat.ChatMember", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CharacterId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConversationId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Muted")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CharacterId");
+
+                    b.HasIndex("ConversationId", "Position");
+
+                    b.ToTable("ChatMembers");
+                });
+
             modelBuilder.Entity("DogAI.Core.Chat.ChatMessage", b =>
                 {
                     b.Property<long>("Id")
@@ -248,6 +275,9 @@ namespace DogAI.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("TurnOrder")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -322,6 +352,21 @@ namespace DogAI.Data.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("Settings");
+                });
+
+            modelBuilder.Entity("DogAI.Core.Chat.ChatMember", b =>
+                {
+                    b.HasOne("DogAI.Core.Characters.Character", null)
+                        .WithMany()
+                        .HasForeignKey("CharacterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DogAI.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("DogAI.Core.Chat.ChatMessage", b =>

@@ -10,7 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace DogAI.Tests;
 
 /// <summary>The chat service against a real SQLite store and a scripted stand-in for the model.</summary>
-public sealed class ChatServiceTests : IDisposable
+public sealed partial class ChatServiceTests : IDisposable
 {
     /// <summary>Counts one token per word and replies with whatever <see cref="Reply"/> yields.</summary>
     private sealed class FakeEngine : IChatEngine

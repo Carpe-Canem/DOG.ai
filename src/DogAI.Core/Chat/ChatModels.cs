@@ -6,12 +6,39 @@ public enum ChatRole
     Assistant = 1,
 }
 
+/// <summary>Who answers in a group chat after the user writes.</summary>
+public enum TurnOrder
+{
+    /// <summary>Whoever the message names answers; otherwise the member who has been quiet longest.</summary>
+    Natural = 0,
+
+    /// <summary>Every member who is not muted answers once, in list order.</summary>
+    InTurn = 1,
+
+    /// <summary>Nobody answers on their own; the user picks who speaks.</summary>
+    Manual = 2,
+}
+
+/// <summary>One character taking part in a group chat.</summary>
+public sealed class ChatMember
+{
+    public long Id { get; set; }
+    public long ConversationId { get; set; }
+    public long CharacterId { get; set; }
+
+    /// <summary>Place in the member list, which is also the order for <see cref="TurnOrder.InTurn"/>.</summary>
+    public int Position { get; set; }
+
+    /// <summary>A muted member stays in the scene but only speaks when the user picks them.</summary>
+    public bool Muted { get; set; }
+}
+
 /// <summary>One chat. Its messages form a tree; <see cref="ActiveLeafId"/> says which branch is on screen.</summary>
 public sealed class Conversation
 {
     public long Id { get; set; }
 
-    /// <summary>Which area of the app owns it: "general" now, "characters" and "story" later.</summary>
+    /// <summary>Which area of the app owns it: "general", "characters" (one character), "group" (several), "story" later.</summary>
     public string Mode { get; set; } = "general";
 
     public string Title { get; set; } = "New chat";
@@ -44,6 +71,13 @@ public sealed class Conversation
 
     /// <summary>Whether older turns are summarised when the chat outgrows the context window.</summary>
     public bool MemoryEnabled { get; set; } = true;
+
+    /// <summary>Group chats: who answers after the user writes.</summary>
+    public TurnOrder TurnOrder { get; set; }
+
+    public bool IsGroup => Mode == GroupMode;
+
+    public const string GroupMode = "group";
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -114,4 +148,10 @@ public interface IChatStore
 
     /// <summary>Chats with one character, newest first.</summary>
     Task<IReadOnlyList<Conversation>> ListForCharacterAsync(long characterId, CancellationToken ct = default);
+
+    /// <summary>A group chat's members in list order. Empty for other chats.</summary>
+    Task<IReadOnlyList<ChatMember>> GetMembersAsync(long conversationId, CancellationToken ct = default);
+
+    /// <summary>Replaces a group chat's members; their order in the list becomes their position.</summary>
+    Task SetMembersAsync(long conversationId, IReadOnlyList<ChatMember> members, CancellationToken ct = default);
 }

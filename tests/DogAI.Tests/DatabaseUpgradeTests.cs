@@ -45,6 +45,29 @@ public sealed class DatabaseUpgradeTests : IDisposable
         Assert.Null(chat.SummaryThroughId);
     }
 
+    [Fact]
+    public async Task A_chat_from_m3_part_2_gets_natural_turn_order_and_no_members()
+    {
+        var factory = _services.GetRequiredService<IDbContextFactory<DogDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20261112133906_LoreAndMemory");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Conversations (Mode, Title, SystemPrompt, PresetId, AuthorsNote, AuthorsNoteDepth, Summary, MemoryEnabled, CreatedAt, UpdatedAt) " +
+                "VALUES ('characters', 'Part 2 chat', '', 'balanced', 'rainy', 2, '', 1, '2026-11-12 10:00:00', '2026-11-12 10:00:00')");
+        }
+
+        await _services.MigrateDogDatabaseAsync();
+
+        var store = _services.GetRequiredService<IChatStore>();
+        var chat = Assert.Single(await store.ListAsync("characters"));
+        Assert.Equal("Part 2 chat", chat.Title);
+        Assert.Equal("rainy", chat.AuthorsNote);
+        Assert.Equal(TurnOrder.Natural, chat.TurnOrder);
+        Assert.False(chat.IsGroup);
+        Assert.Empty(await store.GetMembersAsync(chat.Id));
+    }
+
     public void Dispose()
     {
         _services.Dispose();

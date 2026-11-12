@@ -18,6 +18,7 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
     public DbSet<ModelRecord> ModelRecords => Set<ModelRecord>();
     public DbSet<Character> Characters => Set<Character>();
     public DbSet<Persona> Personas => Set<Persona>();
+    public DbSet<ChatMember> ChatMembers => Set<ChatMember>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -29,6 +30,13 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
             // No foreign keys to characters or personas: adding them would make SQLite rebuild this table on upgrade.
             // SqliteCharacterStore removes or clears the links itself.
             e.HasIndex(c => c.CharacterId);
+        });
+        model.Entity<ChatMember>(e =>
+        {
+            // A new table, so links cost no rebuild here: members go with their chat and with their character.
+            e.HasIndex(m => new { m.ConversationId, m.Position });
+            e.HasOne<Conversation>().WithMany().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Character>().WithMany().HasForeignKey(m => m.CharacterId).OnDelete(DeleteBehavior.Cascade);
         });
         model.Entity<Character>(e =>
         {

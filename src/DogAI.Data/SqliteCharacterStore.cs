@@ -65,6 +65,8 @@ public sealed class SqliteCharacterStore(IDbContextFactory<DogDbContext> factory
         var chats = db.Conversations.Where(c => c.CharacterId == id).Select(c => c.Id);
         await db.Messages.Where(m => chats.Contains(m.ConversationId)).ExecuteDeleteAsync(ct);
         await db.Conversations.Where(c => c.CharacterId == id).ExecuteDeleteAsync(ct);
+        // Group chats stay; the character just leaves them. Their old replies keep a "SpeakerId" nobody has any more.
+        await db.ChatMembers.Where(m => m.CharacterId == id).ExecuteDeleteAsync(ct);
         await db.Characters.Where(c => c.Id == id).ExecuteDeleteAsync(ct);
     }
 

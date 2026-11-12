@@ -18,8 +18,10 @@
         var isLast = ReferenceEquals(m, Visible[^1]);
         // In character chats the last reply always shows its arrows; the right one past the newest writes another.
         var swipe = Swipes && isLast && !isUser && StreamingReply is null;
-        <MessageView IsUser="@isUser" Name="@(isUser ? UserName : AssistantName ?? m.ModelName ?? "Model")"
-                     Content="@m.Content" Reasoning="@m.Reasoning" AvatarUrl="@(isUser ? UserAvatar : AssistantAvatar)" Letter="@Letter"
+        var who = isUser ? null : SpeakerOf?.Invoke(m.SpeakerId);
+        <MessageView IsUser="@isUser" Name="@(isUser ? UserName : who?.Name ?? AssistantName ?? m.ModelName ?? "Model")"
+                     Content="@m.Content" Reasoning="@m.Reasoning" AvatarUrl="@(isUser ? UserAvatar : who is not null ? who.Avatar : AssistantAvatar)"
+                     Letter="@(who is not null ? who.Letter : Letter)"
                      Editor="@(_editingId == m.Id ? EditBox(m) : null)">
             <Actions>
                 @if (_editingId != m.Id)
@@ -78,8 +80,9 @@
     {
         @if (reply.Kind == ReplyKind.Reply)
         {
-            <MessageView Name="@(AssistantName ?? Engine.ModelName ?? "Model")" AvatarUrl="@AssistantAvatar" Letter="@Letter"
-                         Content="@reply.Content" Reasoning="@reply.Reasoning" Streaming="true" />
+            var writer = SpeakerOf?.Invoke(reply.SpeakerId);
+            <MessageView Name="@(writer?.Name ?? AssistantName ?? Engine.ModelName ?? "Model")" AvatarUrl="@(writer is not null ? writer.Avatar : AssistantAvatar)"
+                         Letter="@(writer is not null ? writer.Letter : Letter)" Content="@reply.Content" Reasoning="@reply.Reasoning" Streaming="true" />
         }
         @if (reply.Status is { } status)
         {
@@ -131,6 +134,9 @@
     /// <summary>Name shown on replies. Null shows the model's name.</summary>
     [Parameter] public string? AssistantName { get; set; }
     [Parameter] public string? AssistantAvatar { get; set; }
+
+    /// <summary>Group chats: who wrote a reply, from its speaker id. Used instead of the assistant name and picture when set.</summary>
+    [Parameter] public Func<long?, SpeakerInfo>? SpeakerOf { get; set; }
 
     private string? Letter => AssistantName is { Length: > 0 } n && char.IsLetterOrDigit(n[0]) ? n[..1].ToUpperInvariant() : null;
     [Parameter] public string UserName { get; set; } = "You";

@@ -39,7 +39,8 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
             .SetProperty(c => c.PersonaId, conversation.PersonaId)
             .SetProperty(c => c.AuthorsNote, conversation.AuthorsNote)
             .SetProperty(c => c.AuthorsNoteDepth, conversation.AuthorsNoteDepth)
-            .SetProperty(c => c.MemoryEnabled, conversation.MemoryEnabled), ct);
+            .SetProperty(c => c.MemoryEnabled, conversation.MemoryEnabled)
+            .SetProperty(c => c.TurnOrder, conversation.TurnOrder), ct);
     }
 
     public async Task SetSummaryAsync(long conversationId, string summary, long? throughId, CancellationToken ct = default)
@@ -63,6 +64,7 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         await db.Messages.Where(m => m.ConversationId == id).ExecuteDeleteAsync(ct);
+        await db.ChatMembers.Where(m => m.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.Conversations.Where(c => c.Id == id).ExecuteDeleteAsync(ct);
     }
 
@@ -108,5 +110,31 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
             .Where(c => c.CharacterId == characterId)
             .OrderByDescending(c => c.UpdatedAt)
             .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ChatMember>> GetMembersAsync(long conversationId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        return await db.ChatMembers.AsNoTracking()
+            .Where(m => m.ConversationId == conversationId)
+            .OrderBy(m => m.Position).ThenBy(m => m.Id)
+            .ToListAsync(ct);
+    }
+
+    public async Task SetMembersAsync(long conversationId, IReadOnlyList<ChatMember> members, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await db.ChatMembers.Where(m => m.ConversationId == conversationId).ExecuteDeleteAsync(ct);
+        var position = 0;
+        foreach (var member in members.DistinctBy(m => m.CharacterId))
+        {
+            member.Id = 0;
+            member.ConversationId = conversationId;
+            member.Position = position++;
+            db.ChatMembers.Add(member);
+        }
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
     }
 }

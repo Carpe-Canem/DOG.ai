@@ -12,6 +12,15 @@ public static partial class CharacterPrompt
         "Write {{char}}'s next reply only. Stay in character, keep replies vivid and in keeping with the story so far, " +
         "and never write {{user}}'s words or actions.";
 
+    /// <summary>The default instruction in a group chat. {0} is the other members' names.</summary>
+    public const string GroupInstruction =
+        "You are {{char}} in an ongoing fictional group role-play with {{user}} and {0}. " +
+        "Write {{char}}'s next reply only. Stay in character, keep replies vivid and in keeping with the story so far, " +
+        "and never write the words or actions of {{user}} or of {0}.";
+
+    /// <summary>The request at the end of a group prompt, so the model knows whose turn it is.</summary>
+    public const string GroupDirective = "[Write {{char}}'s next reply.]";
+
     /// <summary>
     /// The user turn put before a greeting when the prompt would otherwise open with the character speaking,
     /// because many chat templates refuse a conversation that starts with a reply.
@@ -34,10 +43,10 @@ public static partial class CharacterPrompt
 
     /// <summary>
     /// The request for the rolling summary. It goes after the messages, where small models follow it best.
-    /// {0} is "updated " when there is a summary so far, else empty.
+    /// {0} is "an updated " when there is a summary so far, else "a ".
     /// </summary>
     public const string SummaryTask =
-        "[Task: write an {0}summary of the story so far between {{char}} and {{user}}, so it can be remembered after the " +
+        "[Task: write {0}summary of the story so far between {{char}} and {{user}}, so it can be remembered after the " +
         "messages themselves are forgotten. Combine the summary so far (if any) with the messages above. Write in the past " +
         "tense, under 300 words. Keep names, facts about the characters and the world, what happened, how the characters " +
         "feel about each other, promises, and anything left unresolved. Leave out small talk. Reply with the summary only.]";
@@ -97,7 +106,7 @@ public static partial class CharacterPrompt
     /// </summary>
     public static PromptLayout Layout(Character character, Persona? persona, string chatInstructions = "",
         IReadOnlyList<LoreEntry>? lore = null, string authorsNote = "", int authorsNoteDepth = PromptLayout.DefaultAuthorsNoteDepth,
-        string memory = "")
+        string memory = "", string defaultInstruction = DefaultInstruction)
     {
         var user = persona?.Name is { Length: > 0 } n ? n : "User";
         string F(string text) => Fill(text, character.Name, user);
@@ -106,8 +115,8 @@ public static partial class CharacterPrompt
         var layout = new PromptLayout { AuthorsNoteDepth = authorsNoteDepth };
         // Cards may write {{original}} to keep the default instruction inside their own.
         layout.Add(PromptPartKind.Instruction, F(string.IsNullOrWhiteSpace(character.SystemPrompt)
-            ? DefaultInstruction
-            : character.SystemPrompt.Replace("{{original}}", DefaultInstruction, StringComparison.OrdinalIgnoreCase)));
+            ? defaultInstruction
+            : character.SystemPrompt.Replace("{{original}}", defaultInstruction, StringComparison.OrdinalIgnoreCase)));
 
         var card = new StringBuilder();
         foreach (var part in new[]
@@ -143,6 +152,45 @@ public static partial class CharacterPrompt
         layout.FinalInstruction = F(character.PostHistoryInstructions).Trim();
         layout.AuthorsNote = F(authorsNote).Trim();
         return layout;
+    }
+
+    /// <summary>
+    /// The prompt parts for one member's turn in a group chat: that member's own card (as in <see cref="Layout"/>),
+    /// a short note on each other member, the group instruction, and a closing request naming who speaks.
+    /// </summary>
+    public static PromptLayout GroupLayout(Character speaker, IReadOnlyList<Character> others, Persona? persona, string chatInstructions = "",
+        IReadOnlyList<LoreEntry>? lore = null, string authorsNote = "", int authorsNoteDepth = PromptLayout.DefaultAuthorsNoteDepth,
+        string memory = "")
+    {
+        var user = persona?.Name is { Length: > 0 } n ? n : "User";
+        var otherNames = GroupTurns.JoinNames(others.Select(o => o.Name).ToList());
+        var instruction = others.Count == 0 ? DefaultInstruction : GroupInstruction.Replace("{0}", otherNames);
+        var layout = Layout(speaker, persona, chatInstructions, lore, authorsNote, authorsNoteDepth, memory, instruction);
+
+        var cast = new StringBuilder();
+        foreach (var other in others)
+        {
+            // Each card's {{char}} means that card's own character.
+            var about = Fill(other.Description.Trim().Length > 0 ? other.Description : other.Personality, other.Name, user);
+            if (cast.Length > 0) cast.Append("\n\n");
+            cast.Append('[').Append(other.Name).Append(']');
+            if (Brief(about) is { Length: > 0 } brief) cast.Append('\n').Append(brief);
+        }
+        if (cast.Length > 0) layout.Add(PromptPartKind.Cast, "[Others in this scene]\n" + cast);
+        layout.Directive = Fill(GroupDirective, speaker.Name, user);
+        return layout;
+    }
+
+    /// <summary>The longest a note on another group member gets, in characters. Cut at a sentence end where possible.</summary>
+    public const int CastNoteLength = 700;
+
+    private static string Brief(string text)
+    {
+        text = text.Trim();
+        if (text.Length <= CastNoteLength) return text;
+        var cut = text[..CastNoteLength];
+        var end = cut.LastIndexOfAny(['.', '!', '?', '\n']);
+        return (end > CastNoteLength / 2 ? cut[..(end + 1)] : cut.TrimEnd() + "…").Trim();
     }
 
     /// <summary>How a lore entry is named to people: its name, else its first keys.</summary>

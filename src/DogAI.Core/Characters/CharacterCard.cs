@@ -144,6 +144,20 @@ public static class CharacterCard
         });
     }
 
+    /// <summary>The card's V3 group-only greetings: openings meant for group chats only. Empty when it has none.</summary>
+    public static IReadOnlyList<string> GroupGreetings(Character c) =>
+        Strings(Extra(c), "group_only_greetings").Where(g => !string.IsNullOrWhiteSpace(g)).ToList();
+
+    /// <summary>The card's kept-aside JSON with the group-only greetings replaced, keeping every other field.</summary>
+    public static string WithGroupGreetings(Character c, IEnumerable<string> greetings)
+    {
+        var extra = Extra(c);
+        var list = greetings.Where(g => !string.IsNullOrWhiteSpace(g)).ToList();
+        if (list.Count == 0) extra.Remove("group_only_greetings");
+        else extra["group_only_greetings"] = new JsonArray(list.Select(g => (JsonNode)JsonValue.Create(g)!).ToArray());
+        return extra.Count == 0 ? "" : extra.ToJsonString();
+    }
+
     /// <summary>The lorebook embedded in the card, as JSON, or null when it has none.</summary>
     public static string? EmbeddedLorebookJson(Character c) => Extra(c)["character_book"]?.ToJsonString();
 

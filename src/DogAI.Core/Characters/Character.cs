@@ -83,7 +83,7 @@ public interface ICharacterStore
     /// <summary>Adds a character (Id 0) or replaces one.</summary>
     Task<Character> SaveAsync(Character character, CancellationToken ct = default);
 
-    /// <summary>Deletes the character and all its chats.</summary>
+    /// <summary>Deletes the character and all its one-to-one chats, and takes it out of group chats.</summary>
     Task DeleteAsync(long id, CancellationToken ct = default);
 
     Task<IReadOnlyList<Persona>> ListPersonasAsync(CancellationToken ct = default);
