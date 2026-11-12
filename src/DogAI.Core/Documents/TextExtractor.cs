@@ -85,7 +85,12 @@ public static class TextExtractor
             {
                 if (text.Length > 0) text.Append("\n\n");
                 starts.Add(text.Length);
-                text.Append(Tidy(ContentOrderTextExtractor.GetText(page)));
+                // The layout-aware reader gives the best reading order, but finds nothing on some pages (unusual
+                // content streams); then fall back to the plain word list, and finally the page's raw letters.
+                var pageText = Tidy(ContentOrderTextExtractor.GetText(page));
+                if (pageText.Trim().Length == 0) pageText = Tidy(string.Join(" ", page.GetWords().Select(w => w.Text)));
+                if (pageText.Trim().Length == 0) pageText = Tidy(page.Text);
+                text.Append(pageText);
                 if (text.Length > MaxChars) break;
             }
             return new ExtractedText(text.ToString(), "pdf", starts);

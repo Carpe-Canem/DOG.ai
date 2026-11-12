@@ -69,11 +69,21 @@ public sealed class DocumentLibrary(ICollectionStore store, IEmbedder embedder)
     {
         var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         if (await store.HasFileAsync(collectionId, sha, ct)) return null;
-        var (extracted, chunks) = await Task.Run(() =>
+        // A file that cannot be read is reported back to this method rather than thrown on the worker thread, so
+        // the debugger does not stop on an expected, handled problem ("not handled in user code").
+        var (extracted, chunks, problem) = await Task.Run(() =>
         {
-            var text = TextExtractor.Read(fileName, bytes);
-            return (text, Chunker.Split(text));
+            try
+            {
+                var text = TextExtractor.Read(fileName, bytes);
+                return (text, Chunker.Split(text), (string?)null);
+            }
+            catch (DocumentReadException e)
+            {
+                return (null!, (IReadOnlyList<Chunk>)[], e.Message);
+            }
         }, ct);
+        if (problem is not null) throw new DocumentReadException(problem);
         var document = await store.AddDocumentAsync(new SourceDocument
         {
             CollectionId = collectionId,
