@@ -134,6 +134,36 @@ public static class FitEstimator
     }
 }
 
+/// <summary>What to do when asked to load a model: how many layers to put on the card, or why not to load it.</summary>
+/// <param name="GpuLayers">-1 means every layer.</param>
+/// <param name="Refusal">Set when the model should not be loaded; says why in plain words.</param>
+public sealed record LoadDecision(int GpuLayers, string? Refusal)
+{
+    /// <summary>
+    /// Uses settings a benchmark proved for this context size; otherwise follows the fit estimate.
+    /// A model that does not fit even with system memory is refused, because trying only ends in an
+    /// out-of-memory failure. With no estimate (header unreadable) it is loaded and left to the engine.
+    /// </summary>
+    public static LoadDecision Decide(string name, int context, FitResult? plan, FitBudget? budget, ModelRecord? record)
+    {
+        if (record is { TunedGpuLayers: { } tuned, TunedContext: { } tunedContext } && tunedContext == context)
+            return new LoadDecision(tuned, null);
+        return plan?.Kind switch
+        {
+            FitKind.Partial => new LoadDecision(plan.GpuLayers, null),
+            FitKind.TooLarge => new LoadDecision(0, TooLargeText(name, context, plan, budget)),
+            _ => new LoadDecision(-1, null),
+        };
+    }
+
+    private static string TooLargeText(string name, int context, FitResult plan, FitBudget? budget)
+    {
+        var free = budget is null ? "" : $", but only about {Sizes.Gb(budget.VramBytes + budget.RamBytes)} of graphics and system memory is free";
+        return $"{name} is too large for this PC. With a context of {context:N0} tokens it needs about {Sizes.Gb(plan.NeededBytes)}{free}. " +
+               "Try a smaller context size, a smaller version of the model, or closing other programs.";
+    }
+}
+
 /// <summary>Rated memory speed of common graphics cards, used for speed estimates before a benchmark.</summary>
 public static class GpuBandwidth
 {

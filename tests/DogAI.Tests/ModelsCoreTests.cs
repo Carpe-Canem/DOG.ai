@@ -254,3 +254,39 @@ public class CuratedPicksTests
         Assert.InRange(best!.Bits, 4.25, 5.7);
     }
 }
+
+public class LoadDecisionTests
+{
+    private static readonly FitBudget Budget = new(22 * Sizes.GiB, 20 * Sizes.GiB, 1008, 60);
+
+    [Fact]
+    public void A_model_that_cannot_fit_is_refused_with_a_reason()
+    {
+        var plan = new FitResult(FitKind.TooLarge, 0, 96, 75 * Sizes.GiB, 0);
+        var decision = LoadDecision.Decide("Colossus", 8192, plan, Budget, null);
+        Assert.NotNull(decision.Refusal);
+        Assert.Contains("too large", decision.Refusal);
+        Assert.Contains("needs about 75", decision.Refusal);
+        Assert.Contains("about 42", decision.Refusal);
+    }
+
+    [Fact]
+    public void Partial_fits_load_with_the_estimated_layers_and_full_fits_with_all()
+    {
+        Assert.Equal(new LoadDecision(37, null), LoadDecision.Decide("m", 8192, new FitResult(FitKind.Partial, 37, 80, 1, 1), Budget, null));
+        Assert.Equal(new LoadDecision(-1, null), LoadDecision.Decide("m", 8192, new FitResult(FitKind.Full, 40, 40, 1, 1), Budget, null));
+    }
+
+    [Fact]
+    public void Without_an_estimate_the_model_is_loaded_anyway() =>
+        Assert.Null(LoadDecision.Decide("m", 8192, null, null, null).Refusal);
+
+    [Fact]
+    public void Benchmarked_settings_for_the_same_context_win_over_the_estimate()
+    {
+        var record = new ModelRecord { Path = "x", TunedGpuLayers = 50, TunedContext = 8192 };
+        var tooLarge = new FitResult(FitKind.TooLarge, 0, 80, 1, 0);
+        Assert.Equal(new LoadDecision(50, null), LoadDecision.Decide("m", 8192, tooLarge, Budget, record));
+        Assert.NotNull(LoadDecision.Decide("m", 32768, tooLarge, Budget, record).Refusal);
+    }
+}

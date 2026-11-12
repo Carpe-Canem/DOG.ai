@@ -197,6 +197,10 @@
             }
             else Say(Engine.Error ?? "The model could not be loaded.", bad: true);
         }
+        catch (ModelTooLargeException e)
+        {
+            Say(e.Message, bad: true);
+        }
         finally
         {
             _working = false;
@@ -218,6 +222,10 @@
         catch (EngineException e)
         {
             Say("The benchmark failed: " + e.Message, bad: true);
+        }
+        catch (ModelTooLargeException e)
+        {
+            Say(e.Message, bad: true);
         }
         finally
         {

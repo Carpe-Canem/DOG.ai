@@ -30,6 +30,11 @@
             </div>
         }
 
+        @if (_refused is not null)
+        {
+            <div class="notice bad"><span>@_refused</span></div>
+        }
+
         @if (_engineMissing)
         {
             <div class="notice bad"><span>The model engine (llama-server) was not found on this PC. Install it with <code>winget install llama.cpp</code>, then try again.</span></div>
@@ -85,6 +90,7 @@
 
     private bool _open;
     private bool _engineMissing;
+    private string? _refused;
     private AppSettings _settings = new();
     private List<ModelFile> _models = [];
 
@@ -112,6 +118,7 @@
     {
         _settings = await SettingsStore.LoadAsync();
         _engineMissing = Engine.FindExecutable() is null;
+        _refused = null;
         var folders = new[] { _settings.ModelsDirectory }.Concat(_settings.ExtraModelFolders);
         var models = await Task.Run(() => ModelLibrary.ScanAll(folders).ToList());
 
@@ -131,7 +138,16 @@
 
     private async Task LoadAsync(string path)
     {
-        await Launcher.LoadAsync(path, _settings.ContextLength);
+        _refused = null;
+        try
+        {
+            await Launcher.LoadAsync(path, _settings.ContextLength);
+        }
+        catch (ModelTooLargeException e)
+        {
+            _refused = e.Message;
+            return;
+        }
         if (Engine.State != EngineState.Ready) return;
         _settings = await SettingsStore.LoadAsync() with { LastModelPath = path };
         await SettingsStore.SaveAsync(_settings);

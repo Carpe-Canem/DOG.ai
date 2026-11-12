@@ -8,6 +8,7 @@
 - **How M2 behaves, decided while building it:**
   - *Going online* is a button in the Models section, off at start. Leaving the section goes offline, unless a download or engine install is running; then it goes offline when that finishes. "Go offline" pauses running downloads.
   - *Fit* adds the model file, the memory for the chosen context (read from the model's header where possible), and working memory, then compares with free graphics memory. Memory held by the currently loaded model counts as free, since loading another model releases it. A partial fit gives a layer count, which loading now uses instead of "all layers".
+  - *Too large* models are refused before anything is unloaded, with a message saying how much memory they need and how much is free. A benchmark's proven settings override the estimate for the same context size. If the header cannot be read, the model is loaded anyway and the engine decides.
   - *Benchmark* loads the model with the estimated layer count, steps down if loading fails, measures, and saves the layers and speed for later loads. It tunes GPU layers only; it does not change the context size.
   - *Stable engine releases*: llama.cpp now marks numbered builds as pre-releases and publishes a stable release that names one build (b12110 on 2026-11-12). DOG AI installs that build, picking the newest CUDA version the driver supports (CUDA 13.4 here) plus its runtime.
   - *Curated picks* are in `src/DogAI.Core/Models/curated-models.json` (researched 2026-11-12). There is no "refresh" button yet: the only allowed hosts are Hugging Face and GitHub, and there is no online copy of the list. Publishing the JSON in a GitHub repo would make it refreshable. Uncensored role-play fine-tunes were left out of the defaults; they can be found through Browse. Voice picks come with M6.
@@ -15,7 +16,6 @@
   - Per-mode defaults are saved, but only General uses them (the model picker labels its default); Characters and Story will read them in M3 and M4.
   - Links in model cards do not open. The confirm-then-open-in-browser prompt is still to do (planned for M7).
   - Not tried live: a gated model with a token, partial offload of a model bigger than the card, and the 30-minute idle unload. Unit tests cover the logic.
-  - A model judged "Too large" still tries to load with every layer on the card, so it fails with an out-of-memory error instead of being refused up front.
   - The download resume and checksum tests use an in-process fake server, not a real local web server as the Verification section suggests.
   - Model cards written in HTML have their tags removed (the text stays) so they read cleanly; images show as links, since remote images are blocked.
   - The real data folder still uses the winget engine until Install is clicked once in Models → Engine.

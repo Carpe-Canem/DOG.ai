@@ -2,9 +2,13 @@ using DogAI.Core.Models;
 
 namespace DogAI.Engine;
 
+/// <summary>Thrown when a model is refused because it cannot fit on this PC. The message says why, in plain words.</summary>
+public sealed class ModelTooLargeException(string message) : Exception(message);
+
 /// <summary>
 /// Loads models with settings that suit this PC: measured ones from a benchmark when there are any,
-/// otherwise the number of graphics-card layers the fit estimate says will fit.
+/// otherwise the number of graphics-card layers the fit estimate says will fit. Models that cannot
+/// fit at all are refused before anything is unloaded.
 /// </summary>
 public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IModelRecordStore records)
 {
@@ -25,21 +29,23 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
         return FitBudget.From(hw, held);
     }
 
+    /// <summary>Decides how to load a model, without loading it. <see cref="LoadDecision.Refusal"/> is set when it cannot fit.</summary>
+    public async Task<LoadDecision> DecideAsync(string path, int context, CancellationToken ct = default)
+    {
+        var record = await records.FindAsync(path, ct).ConfigureAwait(false);
+        var file = ModelLibrary.Describe(path);
+        var info = file is null ? null : await Task.Run(() => GgufReader.TryRead(file.Path), ct).ConfigureAwait(false);
+        if (file is null || info is null) return LoadDecision.Decide(Path.GetFileNameWithoutExtension(path), context, null, null, record);
+        var budget = await BudgetAsync(ct).ConfigureAwait(false);
+        var plan = FitEstimator.Estimate(info.ToShape(file.SizeBytes), context, budget);
+        return LoadDecision.Decide(info.DisplayName(path), context, plan, budget, record);
+    }
+
+    /// <exception cref="ModelTooLargeException">The model cannot fit; nothing was unloaded.</exception>
     public async Task LoadAsync(string path, int context)
     {
-        var record = await records.FindAsync(path).ConfigureAwait(false);
-        int layers;
-        if (record is { TunedGpuLayers: { } tuned, TunedContext: { } tunedContext } && tunedContext == context)
-        {
-            layers = tuned;
-        }
-        else
-        {
-            var file = ModelLibrary.Describe(path);
-            var plan = file is null ? null : await PlanAsync(file, context).ConfigureAwait(false);
-            // A full fit lets the engine take every layer; a partial fit names how many go on the card.
-            layers = plan is { Kind: FitKind.Partial } ? plan.GpuLayers : -1;
-        }
-        await engine.LoadAsync(path, new EngineOptions(context, layers)).ConfigureAwait(false);
+        var decision = await DecideAsync(path, context).ConfigureAwait(false);
+        if (decision.Refusal is { } why) throw new ModelTooLargeException(why);
+        await engine.LoadAsync(path, new EngineOptions(context, decision.GpuLayers)).ConfigureAwait(false);
     }
 }
