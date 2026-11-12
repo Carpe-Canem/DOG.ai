@@ -179,6 +179,49 @@ public sealed class DownloadManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task Going_offline_stops_a_transfer_already_in_progress()
+    {
+        var manager = Manager();
+        _server.Hold = new TaskCompletionSource();
+        var job = await manager.EnqueueAsync(Job());
+        await Task.Delay(100);
+
+        _session.SetWanted(false);
+        await manager.IdleAsync();
+
+        Assert.Equal(DownloadStatus.Paused, job.Status);
+        Assert.Contains("offline", job.Message);
+    }
+
+    [Fact]
+    public async Task Queued_downloads_keep_going_after_leaving_the_models_section()
+    {
+        const string url2 = "https://huggingface.co/acme/tiny-GGUF/resolve/main/tiny-Q8_0.gguf";
+        _server.Files[url2] = _data;
+        var manager = Manager();
+        _server.Hold = new TaskCompletionSource();
+        var first = await manager.EnqueueAsync(Job());
+        var second = await manager.EnqueueAsync(new DownloadJob
+        {
+            Repo = "acme/tiny-GGUF",
+            Title = "tiny-Q8_0",
+            Folder = _folder,
+            Parts = [new DownloadPart { Url = url2, FileName = "tiny-Q8_0.gguf", Size = _data.Length, Sha256 = Convert.ToHexStringLower(SHA256.HashData(_data)) }],
+        });
+
+        _session.LeaveModels();
+        Assert.True(_gate.IsOnline);
+        var hold = _server.Hold;
+        _server.Hold = null;
+        hold.SetResult();
+        await manager.IdleAsync();
+
+        Assert.Equal(DownloadStatus.Done, first.Status);
+        Assert.Equal(DownloadStatus.Done, second.Status);
+        Assert.False(_gate.IsOnline);
+    }
+
+    [Fact]
     public async Task Removing_an_unfinished_download_deletes_its_partial_file()
     {
         var manager = Manager();

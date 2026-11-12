@@ -18,7 +18,7 @@ public sealed record MarkdownSegment(string? Html, string? Code, string? Languag
 /// Turns markdown from a model (untrusted text) into safe HTML. Raw HTML in the source is shown
 /// as text, never passed through, and links can only point at http, https or mailto addresses.
 /// </summary>
-public static class MarkdownRenderer
+public static partial class MarkdownRenderer
 {
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UsePipeTables()
@@ -73,6 +73,42 @@ public static class MarkdownRenderer
         Flush();
         return segments;
     }
+
+    /// <summary>
+    /// Removes HTML tags from third-party markdown (model cards), keeping the text between them, so
+    /// cards written with HTML read cleanly instead of showing tags. Fenced code is left alone.
+    /// The result still goes through <see cref="Render"/>, which never passes HTML through.
+    /// </summary>
+    public static string StripHtmlTags(string markdown)
+    {
+        var output = new System.Text.StringBuilder(markdown.Length);
+        var inFence = false;
+        var blank = false;
+        foreach (var line in markdown.Split('\n'))
+        {
+            var trimmed = line.TrimStart();
+            var fence = trimmed.StartsWith("```", StringComparison.Ordinal) || trimmed.StartsWith("~~~", StringComparison.Ordinal);
+            if (fence) inFence = !inFence;
+            var text = line;
+            if (!inFence && !fence)
+            {
+                text = Tag().Replace(Comment().Replace(line, ""), "");
+                // Indented HTML would otherwise turn into a code block once its tags are gone.
+                if (text != line) text = text.Trim();
+                var isBlank = text.Trim().Length == 0;
+                if (isBlank && blank) continue;
+                blank = isBlank;
+            }
+            output.Append(text).Append('\n');
+        }
+        return output.ToString();
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"</?[A-Za-z][^<>]*>")]
+    private static partial System.Text.RegularExpressions.Regex Tag();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"<!--.*?-->")]
+    private static partial System.Text.RegularExpressions.Regex Comment();
 
     private static bool IsSafeLink(string? url)
     {

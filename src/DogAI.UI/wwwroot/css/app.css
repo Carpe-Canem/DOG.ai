@@ -321,6 +321,7 @@ textarea.field { resize: vertical; line-height: 1.45; display: block; }
 .skin-playhouse .msg-body { background: var(--surface2); padding: 10px 14px; border-radius: 18px; border-top-left-radius: 6px; max-width: 100%; }
 .skin-playhouse .msg.user .msg-body { background: var(--accent); color: var(--ink); border-radius: 18px; border-top-right-radius: 6px; }
 .skin-playhouse .msg-body > :last-child { margin-bottom: .2em; }
+.skin-playhouse .card-text .msg-body { background: none; padding: 0; border-radius: 0; }
 .skin-playhouse .msg-body .code { background: var(--bg); }
 .skin-playhouse .msg-body :not(pre) > code { background: var(--bg); }
 .skin-playhouse .msg-actions { margin-top: 6px; }

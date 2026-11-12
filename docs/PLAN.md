@@ -15,6 +15,10 @@
   - Per-mode defaults are saved, but only General uses them (the model picker labels its default); Characters and Story will read them in M3 and M4.
   - Links in model cards do not open. The confirm-then-open-in-browser prompt is still to do (planned for M7).
   - Not tried live: a gated model with a token, partial offload of a model bigger than the card, and the 30-minute idle unload. Unit tests cover the logic.
+  - A model judged "Too large" still tries to load with every layer on the card, so it fails with an out-of-memory error instead of being refused up front.
+  - The download resume and checksum tests use an in-process fake server, not a real local web server as the Verification section suggests.
+  - Model cards written in HTML have their tags removed (the text stays) so they read cleanly; images show as links, since remote images are blocked.
+  - The real data folder still uses the winget engine until Install is clicked once in Models → Engine.
 - **What M1 delivered:** the app starts and stops `llama-server` itself (found from winget for now), loads any GGUF from the models folder or picked by hand, and General mode has streaming chat with stop, regenerate, edit-and-branch, version switching, markdown with code copy buttons, collapsed "thinking", four style presets, per-chat instructions, a context meter with automatic trimming of old turns, and a prompt inspector. Chats are saved in SQLite as a message tree.
 - **Left out of M1 on purpose, still owed by a later milestone:**
   - "Continue" a stopped reply, and editing your own sampler presets (the four built-in ones are fixed). Best done early in M3, where characters need both.

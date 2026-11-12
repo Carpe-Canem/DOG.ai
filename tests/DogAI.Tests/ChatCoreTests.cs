@@ -125,6 +125,18 @@ public class MarkdownRendererTests
         string.Concat(MarkdownRenderer.Render(markdown).Select(s => s.Html ?? $"[code:{s.Language}:{s.Code}]"));
 
     [Fact]
+    public void Model_card_html_tags_are_removed_but_their_text_and_code_stay()
+    {
+        var text = MarkdownRenderer.StripHtmlTags(
+            "<div align=\"center\"><a href=\"x\">Guide</a></div>\n<!-- note -->\n```html\n<b>kept</b>\n```\nA < B and 2<3");
+        Assert.Contains("Guide", text);
+        Assert.DoesNotContain("<div", text);
+        Assert.DoesNotContain("note", text);
+        Assert.Contains("<b>kept</b>", text);
+        Assert.Contains("A < B and 2<3", text);
+    }
+
+    [Fact]
     public void Images_become_links_so_nothing_remote_loads()
     {
         var html = Html("![banner](https://example.com/b.png) and ![](https://example.com/c.png)");

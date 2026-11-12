@@ -146,7 +146,7 @@ else
                 PickBest();
                 StateHasChanged();
             }
-            _readme = await readme;
+            _readme = MarkdownRenderer.StripHtmlTags(await readme);
         }
         catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException)
         {

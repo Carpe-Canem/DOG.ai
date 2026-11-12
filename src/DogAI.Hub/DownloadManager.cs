@@ -100,7 +100,24 @@ public sealed class DownloadManager : IDisposable
         _online = online;
         _token = token;
         _freeSpace = freeSpace;
+        _online.Closed += OnOffline;
     }
+
+    /// <summary>The gate only checks new requests, so a transfer already streaming is stopped here.</summary>
+    private void OnOffline()
+    {
+        CancellationTokenSource? cts;
+        lock (_lock)
+        {
+            if (_current is null) return;
+            _stoppedForOffline = true;
+            cts = _currentCts;
+        }
+        try { cts?.Cancel(); }
+        catch (ObjectDisposedException) { }
+    }
+
+    private bool _stoppedForOffline;
 
     /// <summary>Raised when anything changes, including progress (at most a few times a second). May come from a background thread.</summary>
     public event Action? Changed;
@@ -227,31 +244,48 @@ public sealed class DownloadManager : IDisposable
     }
 
     /// <summary>Waits for the download in progress, if any. For tests.</summary>
-    public Task IdleAsync()
+    public async Task IdleAsync()
     {
-        lock (_lock) return _runner ?? Task.CompletedTask;
+        while (true)
+        {
+            Task runner;
+            lock (_lock) runner = _runner ?? Task.CompletedTask;
+            await runner.ConfigureAwait(false);
+            lock (_lock)
+            {
+                if (_current is null && ReferenceEquals(runner, _runner ?? Task.CompletedTask)) return;
+            }
+            await Task.Delay(10).ConfigureAwait(false);
+        }
     }
 
     private Task? _runner;
 
     private void Pump()
     {
+        DownloadJob? next;
+        CancellationToken ct;
         lock (_lock)
         {
             if (_current is not null) return;
-            var next = _jobs.FirstOrDefault(j => j.Status == DownloadStatus.Queued);
+            next = _jobs.FirstOrDefault(j => j.Status == DownloadStatus.Queued);
             if (next is null) return;
             _current = next;
             _currentCts = new CancellationTokenSource();
+            _stoppedForOffline = false;
             next.Status = DownloadStatus.Running;
-            var ct = _currentCts.Token;
-            _runner = Task.Run(() => RunAsync(next, ct));
+            ct = _currentCts.Token;
         }
+        // Hold the connection for the next job before the previous job lets go of it, so the gate
+        // does not close in between when the user has left the Models section. Taken outside _lock:
+        // the session raises Closed under its own lock order.
+        var work = _online.BeginWork();
+        var runner = Task.Run(() => RunAsync(next, ct, work));
+        lock (_lock) _runner = runner;
     }
 
-    private async Task RunAsync(DownloadJob job, CancellationToken ct)
+    private async Task RunAsync(DownloadJob job, CancellationToken ct, IDisposable work)
     {
-        using var work = _online.BeginWork();
         Changed?.Invoke();
         try
         {
@@ -303,12 +337,12 @@ public sealed class DownloadManager : IDisposable
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             job.Status = DownloadStatus.Paused;
-            job.Message = null;
+            job.Message = _stoppedForOffline ? OfflineMessage : null;
         }
         catch (OfflineException)
         {
             job.Status = DownloadStatus.Paused;
-            job.Message = "Paused because DOG AI went offline. Go online in the Models section to continue.";
+            job.Message = OfflineMessage;
         }
         catch (Exception e) when (e is HubException or HttpRequestException or IOException or HostNotAllowedException or UnauthorizedAccessException)
         {
@@ -330,6 +364,7 @@ public sealed class DownloadManager : IDisposable
             if (!removing) await SaveAsync().ConfigureAwait(false);
             Changed?.Invoke();
             Pump();
+            work.Dispose();
         }
     }
 
@@ -379,7 +414,13 @@ public sealed class DownloadManager : IDisposable
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     }
 
-    public void Dispose() => _currentCts?.Cancel();
+    private const string OfflineMessage = "Paused because DOG AI went offline. Go online in the Models section to continue.";
+
+    public void Dispose()
+    {
+        _online.Closed -= OnOffline;
+        _currentCts?.Cancel();
+    }
 
     /// <summary>Download speed over the last few seconds.</summary>
     private sealed class SpeedMeter

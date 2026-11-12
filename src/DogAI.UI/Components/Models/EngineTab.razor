@@ -98,6 +98,10 @@
             _release = await Updater.LatestAsync(Ctx.Hardware.DriverCuda);
             if (_release is null) Say("No Windows build of llama.cpp suits this PC in the latest release.", bad: true);
         }
+        catch (OperationCanceledException)
+        {
+            Say("The install stopped because DOG AI went offline. The engine was not changed; it continues from where it stopped next time.", bad: true);
+        }
         catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException)
         {
             Say(e is HttpRequestException ? "Could not reach GitHub: " + e.Message : e.Message, bad: true);
@@ -116,6 +120,10 @@
         _done = 0;
         _step = "Downloading…";
         using var work = Session.BeginWork();
+        // The gate only checks new requests; going offline must also stop a transfer in progress.
+        using var cts = new CancellationTokenSource();
+        Action stop = () => cts.Cancel();
+        Session.Closed += stop;
         try
         {
             await Engine.UnloadAsync();
@@ -125,7 +133,7 @@
                 _done = n;
                 _step = n >= release.TotalBytes ? "Unpacking…" : $"{n * 100 / Math.Max(1, release.TotalBytes)}%";
                 _ = InvokeAsync(StateHasChanged);
-            }));
+            }, cts.Token));
             _exe = Engine.FindExecutable();
             Say($"llama.cpp {release.Tag} is installed. Models load with it from now on.");
         }
@@ -135,6 +143,7 @@
         }
         finally
         {
+            Session.Closed -= stop;
             _installing = false;
         }
     }
