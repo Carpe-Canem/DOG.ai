@@ -16,6 +16,9 @@ public sealed class AppPaths
     /// <summary>A file with this name next to DogAI.exe turns on portable mode.</summary>
     public const string PortableMarker = "portable.txt";
 
+    /// <summary>A program folder with this name may keep the marker, data and models in its parent folder instead.</summary>
+    public const string AppSubfolder = "app";
+
     public AppPaths(string? root = null)
     {
         Root = root
@@ -41,10 +44,15 @@ public sealed class AppPaths
     {
         if (overrideRoot is { Length: > 0 } root)
             return new AppPaths(root);
-        var home = Path.GetFullPath(programFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        return File.Exists(Path.Combine(home, PortableMarker))
-            ? new AppPaths(Path.Combine(home, "data"), home)
-            : new AppPaths();
+        var program = Path.GetFullPath(programFolder).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (File.Exists(Path.Combine(program, PortableMarker)))
+            return new AppPaths(Path.Combine(program, "data"), program);
+        // Tidy layout: the program files sit in an "app" folder and the marker, data and models in its parent.
+        if (string.Equals(Path.GetFileName(program), AppSubfolder, StringComparison.OrdinalIgnoreCase)
+            && Path.GetDirectoryName(program) is { Length: > 0 } parent
+            && File.Exists(Path.Combine(parent, PortableMarker)))
+            return new AppPaths(Path.Combine(parent, "data"), parent);
+        return new AppPaths();
     }
 
     public string Root { get; }

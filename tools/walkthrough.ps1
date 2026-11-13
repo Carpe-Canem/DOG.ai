@@ -6,7 +6,8 @@
 #             that the previous step opened (it types the path and presses Enter)
 #   -DataDir  data folder for the run (default: a fresh temp folder, deleted afterwards)
 #   -OutDir   where screenshots are written (default: a temp folder, printed at the end)
-#   -Exe      run this DogAI.exe instead of the Debug build (for example the one in publish\win-x64)
+#   -Exe      run this DogAI.exe instead of the Debug build (for example publish\win-x64\app\DogAI.exe; point at the one
+#             in app\, not the launcher in the root, which exits as soon as it has started the app)
 #   -Keep     keep the data folder, e.g. to restart and check that something persisted
 #   -Portable run the exe in portable mode (with -Exe pointing at a folder that has portable.txt): no data folder is
 #             forced, the app keeps its data in its own data\ folder, which is never deleted
@@ -27,9 +28,12 @@ $ErrorActionPreference = 'Stop'
 $exe = if ($Exe) { $Exe } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'src\DogAI.App\bin\Debug\net9.0-windows\DogAI.exe' }
 if (-not (Test-Path $exe)) { throw "Build the solution first; $exe does not exist." }
 if ($Portable) {
-    if (-not (Test-Path (Join-Path (Split-Path $exe -Parent) 'portable.txt'))) { throw "-Portable needs portable.txt next to $exe." }
+    # The home is the exe's folder, or its parent when the exe is in an "app" folder (the tidy publish layout).
+    $homeDir = Split-Path $exe -Parent
+    if (-not (Test-Path (Join-Path $homeDir 'portable.txt')) -and (Split-Path $homeDir -Leaf) -eq 'app') { $homeDir = Split-Path $homeDir -Parent }
+    if (-not (Test-Path (Join-Path $homeDir 'portable.txt'))) { throw "-Portable needs portable.txt next to $exe (or one folder above it, for an app folder)." }
     $temporary = $false
-    $DataDir = Join-Path (Split-Path $exe -Parent) 'data'
+    $DataDir = Join-Path $homeDir 'data'
     Remove-Item Env:DOGAI_DATA_DIR -ErrorAction SilentlyContinue
 } else {
     $temporary = -not $DataDir

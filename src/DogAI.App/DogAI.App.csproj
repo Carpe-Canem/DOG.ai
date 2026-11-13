@@ -35,10 +35,35 @@
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
   </ItemGroup>
 
-  <!-- A published copy is portable: this marker keeps all data next to DogAI.exe. Debug and test builds leave it out. -->
+  <!--
+    A published copy is portable and tidy: the program files go in <install>\app\ (this project's PublishDir), and the install
+    folder's root gets only the small DogAI.exe launcher and portable.txt, with data\ and models\ created beside them at run time.
+    The marker must NOT be inside app\ (the app looks one level up for it). Debug and test builds are not affected.
+  -->
   <ItemGroup>
-    <None Include="portable.txt" CopyToOutputDirectory="Never" CopyToPublishDirectory="PreserveNewest" />
+    <None Include="portable.txt" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
   </ItemGroup>
+
+  <!--
+    Publishing again replaces the program cleanly: old files from earlier builds are removed first, so they cannot pile up.
+    Safety: only a folder named "app" is ever emptied, and the install root (data\, models\) is never touched.
+  -->
+  <Target Name="CleanAppFolderBeforePublish" BeforeTargets="PrepareForPublish" Condition="'$(RuntimeIdentifier)' != ''">
+    <PropertyGroup>
+      <AppFolderToClean>$([System.IO.Path]::GetFullPath('$(PublishDir)'))</AppFolderToClean>
+      <AppFolderName>$([System.IO.Path]::GetFileName($(AppFolderToClean.TrimEnd('\'))))</AppFolderName>
+    </PropertyGroup>
+    <RemoveDir Directories="$(AppFolderToClean)" Condition="'$(AppFolderName)' == 'app' And Exists('$(AppFolderToClean)')" />
+  </Target>
+
+  <Target Name="PublishLauncherAndMarker" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''">
+    <PropertyGroup>
+      <InstallRoot>$([System.IO.Path]::GetFullPath('$(PublishDir)..'))</InstallRoot>
+      <LauncherProject>$(MSBuildThisFileDirectory)..\DogAI.Launcher\DogAI.Launcher.csproj</LauncherProject>
+    </PropertyGroup>
+    <Exec Command="dotnet publish &quot;$(LauncherProject)&quot; -c Release -r $(RuntimeIdentifier) --self-contained -p:PublishSingleFile=true -p:PublishTrimmed=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o &quot;$(InstallRoot)&quot;" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)portable.txt" DestinationFolder="$(InstallRoot)" />
+  </Target>
 
   <!--
     The voice packages (Whisper.net) ship native libraries for every platform. A publish keeps only what this app can use: Windows

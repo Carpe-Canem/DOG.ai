@@ -38,6 +38,28 @@ public sealed class PortableTests : IDisposable
     }
 
     [Fact]
+    public void Program_in_an_app_subfolder_keeps_its_data_in_the_parent()
+    {
+        File.WriteAllText(Path.Combine(_home, AppPaths.PortableMarker), "portable");
+        var program = Path.Combine(_home, AppPaths.AppSubfolder);
+        Directory.CreateDirectory(program);
+        var paths = AppPaths.Resolve(program, overrideRoot: null);
+        Assert.True(paths.IsPortable);
+        Assert.Equal(_home, paths.PortableHome);
+        Assert.Equal(Path.Combine(_home, "data"), paths.Root);
+        Assert.Equal(Path.Combine(_home, "models"), paths.PortableModelsDirectory);
+    }
+
+    [Fact]
+    public void A_marker_in_the_parent_of_some_other_folder_does_not_count()
+    {
+        File.WriteAllText(Path.Combine(_home, AppPaths.PortableMarker), "portable");
+        var program = Path.Combine(_home, "bin");
+        Directory.CreateDirectory(program);
+        Assert.False(AppPaths.Resolve(program, overrideRoot: null).IsPortable);
+    }
+
+    [Fact]
     public void Without_the_marker_the_usual_folder_is_used()
     {
         var paths = AppPaths.Resolve(_home, overrideRoot: null);
