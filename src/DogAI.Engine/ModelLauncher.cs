@@ -55,6 +55,17 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
             : null;
 
     private int _loadingDefault;
+    private volatile bool _heldUnloaded;
+
+    /// <summary>
+    /// Unloads (or stops loading) because the user asked. Defaults are then not loaded on their own until the user
+    /// loads a model again; unloading after idle time does not count.
+    /// </summary>
+    public async Task UnloadByUserAsync()
+    {
+        _heldUnloaded = true;
+        await engine.UnloadAsync().ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Loads the default model for a mode ("general", "characters", "story") when no model is loaded, loading or failed.
@@ -64,7 +75,7 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
     /// <exception cref="ModelRefusedException">The default cannot fit or cannot chat.</exception>
     public async Task<string?> LoadDefaultIfIdleAsync(AppSettings settings, string mode)
     {
-        if (engine.State != EngineState.Idle) return null;
+        if (engine.State != EngineState.Idle || _heldUnloaded) return null;
         if (!settings.DefaultModels.TryGetValue(mode, out var path) || !File.Exists(path)) return null;
         if (engine.FindExecutable() is null) return null;
         if (Interlocked.Exchange(ref _loadingDefault, 1) == 1) return null;
@@ -87,6 +98,7 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
         if (ChatRefusal(info, path) is { } cannotChat) throw new ModelRefusedException(cannotChat);
         var decision = await DecideAsync(path, context).ConfigureAwait(false);
         if (decision.Refusal is { } why) throw new ModelRefusedException(why);
+        _heldUnloaded = false;
         await engine.LoadAsync(path, new EngineOptions(context, decision.GpuLayers)).ConfigureAwait(false);
     }
 }

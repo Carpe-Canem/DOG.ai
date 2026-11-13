@@ -16,7 +16,7 @@
         {
             <div class="notice">
                 <span>Loading <b>@Engine.ModelName</b>. Large models can take a minute.</span>
-                <button class="btn" @onclick="Engine.UnloadAsync">Cancel</button>
+                <button class="btn" @onclick="Launcher.UnloadByUserAsync">Cancel</button>
             </div>
         }
         else if (Engine.State == EngineState.Failed)
@@ -27,7 +27,7 @@
         {
             <div class="notice ok">
                 <span><b>@Engine.ModelName</b> is loaded with a @Engine.ContextLength.ToString("N0") token context.</span>
-                <button class="btn" @onclick="Engine.UnloadAsync">Unload</button>
+                <button class="btn" @onclick="Launcher.UnloadByUserAsync">Unload</button>
             </div>
         }
 
