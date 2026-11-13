@@ -61,6 +61,21 @@ public class SpeakerGuessTests
         Assert.Equal([null], Guess("“Hi,” said Ben2.", "(.*)", "Ben"));
     }
 
+    [Fact]
+    public void Someone_giving_their_own_name_is_the_speaker()
+    {
+        string[] cast = ["Suckbot", "Jimmy 'Jive Turkey' Malone"];
+        // From a real story: the tag names nobody ("the object"), the line says who it is, and the next line carries on.
+        Assert.Equal([0, 0], Guess("\"I am Suckbot,\" the object said. \"And I am tired.\"", cast));
+        Assert.Equal([1], Guess("“I'm Jimmy, pal,” came a voice.", cast));
+        Assert.Equal([1], Guess("“My name is Jimmy.”", cast));
+        Assert.Equal([0], Guess("“Call me Suckbot,” she said.", cast));
+        // A tag that names someone wins; a possessive or two different names pin nobody.
+        Assert.Equal([0], Guess("“I am Jimmy,” Suckbot mocked.", cast));
+        Assert.Equal([null], Guess("“I am Jimmy's friend,” the object said.", cast));
+        Assert.Equal([null], Guess("“I'm Jimmy and I'm Suckbot.”", cast));
+    }
+
     private const string Passage =
         "Mara looked up from the map. “You're late.”\n\n" +
         "“The bridge was out,” Ben said. “We went round.” He dropped his pack. \"Is there food?\"\n\n" +
@@ -96,6 +111,7 @@ public class SpeakerGuessTests
     [InlineData("\"Hi,\" said Mara. \"Hello,\" Ben said, \"and goodbye.\"\n\nA \"word\" in narration, then «Bonjour», said Ben.")]
     [InlineData("“An open quote that never closes, said Mara.\n\nBen said: “Fine.”")]
     [InlineData("> “Quoted block,” said Mara.\n\n1. “One,” Ben said.\n2. Mara: “Two.”")]
+    [InlineData("\"I'm Ben,\" the stranger said. \"And I am tired.\"\n\n\"My name is Mara Vell,\" came the reply.")]
     public void Colour_and_voice_find_the_same_lines_with_the_same_speakers(string markdown)
     {
         var tones = new[] { 3, 4 };

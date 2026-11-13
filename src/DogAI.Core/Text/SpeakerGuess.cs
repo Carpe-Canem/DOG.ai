@@ -46,7 +46,8 @@ public static class Pronouns
 /// a dialogue tag after the line ("…," said Mara / Mara whispered), else the sentence just before it (Mara turned.
 /// "…"), else the speaker of the line before in the same paragraph when nothing in between brings in someone else.
 /// A "she said" or "He shrugged." counts when exactly one person named nearby (in this paragraph or the one before,
-/// or who spoke there) can be that "she" or "he", and their card says so. A line that cannot be pinned to one person
+/// or who spoke there) can be that "she" or "he", and their card says so. A line in which someone gives their own
+/// name ("I am Suckbot," the object said.) is theirs unless its tag names someone else. A line that cannot be pinned to one person
 /// gets no speaker: a wrong colour or voice is worse than the plain one. Names come from character cards, which are
 /// untrusted, so they are matched as plain text, never as patterns. One instance reads one passage, in order.
 /// </summary>
@@ -129,7 +130,7 @@ public sealed class SpeakerGuess
             // quotations left out, since a name inside a line is usually who is spoken to) and who has spoken there.
             var window = _previousNarration + " " + narration;
             var spoke = _previousSpeakers.Concat(speakers.OfType<int>());
-            var who = Guess(before, after, last, speakers.Count > 0, window, spoke);
+            var who = Guess(parts[k].Text, before, after, last, speakers.Count > 0, window, spoke);
             speakers.Add(who);
             last = who;
         }
@@ -147,8 +148,10 @@ public sealed class SpeakerGuess
         return speakers;
     }
 
-    private int? Guess(string before, string after, int? last, bool hadLine, string window, IEnumerable<int> spoke)
+    private int? Guess(string quote, string before, string after, int? last, bool hadLine, string window, IEnumerable<int> spoke)
     {
+        // Someone saying who they are ("I am Suckbot," the object said.) is that person, unless a tag names another.
+        var introduced = Introduces(quote);
         // A tag after the line: "…," said Mara. / "…!" Mara shouted. / "…," she said.
         var tag = after.TrimStart();
         Pronoun? newSentence = null;
@@ -157,11 +160,13 @@ public sealed class SpeakerGuess
             var clause = FirstClause(tag);
             var subject = Subject(clause, out var pronoun);
             if (subject is not null) return subject;
+            if (introduced is not null) return introduced;
             // A lower-case tag belongs to the line: "she said", or a tag without a name ("came a voice").
             if (char.IsLower(tag[0])) return pronoun is { } p ? Resolve(p, window, spoke, Mentions(clause)) : null;
             // A new sentence ("She smiled.") is not a tag: the action before the line comes first.
             newSentence = pronoun;
         }
+        if (introduced is not null) return introduced;
         // An action just before the line: Mara turned. "…" / She turned. "…"
         var beat = LastSentence(before);
         if (beat.Length > 0)
@@ -216,6 +221,34 @@ public sealed class SpeakerGuess
         return null;
     }
 
+    /// <summary>What a speaker says right before giving their own name.</summary>
+    private static readonly string[] Introductions = ["I am ", "I'm ", "I’m ", "I&#39;m ", "my name is ", "my name's ", "my name’s ", "call me "];
+
+    /// <summary>
+    /// The one person a line introduces as its speaker: "I am Suckbot", "I'm Mara", "My name is Ben", "Call me Ben".
+    /// Not "I am Ben's sister", and nobody when the line gives two different names this way.
+    /// </summary>
+    private int? Introduces(string quote)
+    {
+        int? found = null;
+        foreach (var phrase in Introductions)
+        {
+            for (var i = quote.IndexOf(phrase, StringComparison.OrdinalIgnoreCase); i >= 0;
+                 i = quote.IndexOf(phrase, i + 1, StringComparison.OrdinalIgnoreCase))
+            {
+                // Whole words only: not "Miami am ".
+                if (i > 0 && char.IsLetterOrDigit(quote[i - 1])) continue;
+                var at = i + phrase.Length;
+                if (at >= quote.Length || MatchAlias(quote, at) is not { } hit) continue;
+                var (who, end) = (hit.Speaker, at + hit.Length);
+                if (end + 1 < quote.Length && quote[end] is '\'' or '’' && quote[end + 1] is 's' or 'S') continue;
+                if (found is not null && found != who) return null;
+                found = who;
+            }
+        }
+        return found;
+    }
+
     /// <summary>Everyone named in <paramref name="text"/>.</summary>
     private IEnumerable<int> Mentions(string text)
     {
@@ -224,14 +257,17 @@ public sealed class SpeakerGuess
     }
 
     /// <summary>The speaker whose name starts at <paramref name="i"/> and ends at a word boundary, if any.</summary>
-    private int? Match(string text, int i)
+    private int? Match(string text, int i) => MatchAlias(text, i)?.Speaker;
+
+    /// <summary>The speaker whose name starts at <paramref name="i"/>, and how long that name is there.</summary>
+    private (int Speaker, int Length)? MatchAlias(string text, int i)
     {
         foreach (var (alias, speaker) in _aliases)
         {
             if (string.CompareOrdinal(text, i, alias, 0, alias.Length) != 0) continue;
             var end = i + alias.Length;
             if (end < text.Length && char.IsLetterOrDigit(text[end])) continue;
-            return speaker;
+            return (speaker, alias.Length);
         }
         return null;
     }
