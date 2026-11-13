@@ -21,6 +21,7 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
     public DbSet<Character> Characters => Set<Character>();
     public DbSet<Persona> Personas => Set<Persona>();
     public DbSet<ChatMember> ChatMembers => Set<ChatMember>();
+    public DbSet<ChatFolder> ChatFolders => Set<ChatFolder>();
     public DbSet<Story> Stories => Set<Story>();
     public DbSet<DocumentCollection> Collections => Set<DocumentCollection>();
     public DbSet<SourceDocument> Documents => Set<SourceDocument>();
@@ -38,7 +39,10 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
             // No foreign keys to characters or personas: adding them would make SQLite rebuild this table on upgrade.
             // SqliteCharacterStore removes or clears the links itself.
             e.HasIndex(c => c.CharacterId);
+            // No foreign key to the folder either, for the same reason; DeleteFolderAsync clears it.
+            e.HasIndex(c => c.FolderId);
         });
+        model.Entity<ChatFolder>(e => e.Property(f => f.Name).HasMaxLength(DogAI.Core.Chat.ChatFolders.MaxNameLength));
         model.Entity<ChatMember>(e =>
         {
             // A new table, so links cost no rebuild here: members go with their chat and with their character.

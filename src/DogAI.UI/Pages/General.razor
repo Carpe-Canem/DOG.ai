@@ -21,14 +21,84 @@
     <div class="list-head"><h3>Chats</h3><a class="btn" href="general">New chat</a></div>
     <a class="li li-link" href="general/documents"><Icon Name="docs" Size="18" /><span class="li-text"><span class="li-title">Document collections</span></span></a>
     <a class="li li-link" href="general/library"><Icon Name="prompt" Size="18" /><span class="li-text"><span class="li-title">Assistants and prompts</span></span></a>
-    @foreach (var chat in _chats)
+    @foreach (var chat in _layout.Pinned)
     {
-        <a class="li @(chat.Id == _conversation.Id ? "active" : "")" href="general/@chat.Id">
-            <span class="li-text">
-                <span class="li-title">@if (chat.Pinned) {<Icon Name="pin" Size="13" />} @chat.Title</span>
-                <span class="li-sub">@Format.When(chat.UpdatedAt)</span>
-            </span>
-        </a>
+        @ChatLink(chat)
+    }
+    @foreach (var group in _layout.Folders)
+    {
+        var folder = group.Folder;
+        var holdsOpenChat = group.Chats.Any(c => c.Id == _conversation.Id);
+        var filed = _chats.Count(c => c.FolderId == folder.Id);   // pinned ones too, though they are listed at the top
+        <div class="folder @(folder.Collapsed ? "shut" : "")">
+            @if (_renamingFolder == folder.Id)
+            {
+                <div class="folder-edit">
+                    <input class="field" aria-label="Folder name" maxlength="@ChatFolders.MaxNameLength" @bind="_folderName" @bind:event="oninput"
+                           @onkeydown="e => FolderNameKeyAsync(e, folder)" @ref="_renameBox" />
+                    <div class="row">
+                        <button class="btn primary" @onclick="() => RenameFolderAsync(folder)">Save</button>
+                        <button class="btn" @onclick="CloseFolderMenu">Cancel</button>
+                    </div>
+                    @if (_folderNotice is { } note) { <p class="list-note">@note</p> }
+                </div>
+            }
+            else
+            {
+                <div class="folder-head">
+                    <button class="li folder-toggle @(folder.Collapsed && holdsOpenChat ? "active" : "")" aria-expanded="@(folder.Collapsed ? "false" : "true")"
+                            title="@(folder.Collapsed ? "Show the chats in this folder" : "Hide the chats in this folder")" @onclick="() => ToggleFolderAsync(folder)">
+                        <span class="folder-chevron"><Icon Name="chevron" Size="14" /></span>
+                        <Icon Name="folder" Size="16" />
+                        <span class="li-text"><span class="li-title">@folder.Name</span></span>
+                        <span class="folder-count" title="Chats in this folder">@filed</span>
+                    </button>
+                    <button class="icon-btn" aria-label="@($"Options for {folder.Name}")" title="Rename or delete this folder"
+                            aria-pressed="@(_folderMenu == folder.Id ? "true" : "false")" @onclick="() => OpenFolderMenu(folder.Id)"><Icon Name="more" Size="16" /></button>
+                </div>
+                @if (_folderMenu == folder.Id)
+                {
+                    <div class="folder-menu">
+                        @if (_confirmFolderDelete)
+                        {
+                            <p class="list-note">Delete "@folder.Name"? @(filed == 0 ? "It is empty." : "Its chats are kept and move to the main list.")</p>
+                            <div class="row">
+                                <button class="btn danger" @onclick="() => DeleteFolderAsync(folder)">Delete folder</button>
+                                <button class="btn" @onclick="CloseFolderMenu">Keep</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="row">
+                                <button class="btn" @onclick="() => StartRename(folder)">Rename</button>
+                                <button class="btn" @onclick="() => _confirmFolderDelete = true">Delete…</button>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+            @if (!folder.Collapsed)
+            {
+                <div class="folder-chats">
+                    @foreach (var chat in group.Chats)
+                    {
+                        @ChatLink(chat)
+                    }
+                    @if (filed == 0)
+                    {
+                        <p class="list-note">Empty. Choose this folder in a chat's side panel to file it here.</p>
+                    }
+                    else if (group.Chats.Count == 0)
+                    {
+                        <p class="list-note">Its chats are pinned, so they are at the top.</p>
+                    }
+                </div>
+            }
+        </div>
+    }
+    @foreach (var chat in _layout.Loose)
+    {
+        @ChatLink(chat)
     }
     @if (_chats.Count == 0)
     {
@@ -79,6 +149,26 @@ else
                 <button class="btn" @onclick="TogglePinAsync">@(_conversation.Pinned ? "Unpin" : "Pin to top")</button>
                 <button class="btn" disabled="@(_path.Count == 0)" @onclick="ExportAsync" title="Save this conversation as a markdown file">Save as markdown</button>
             </div>
+            <label class="field-block folder-pick">
+                <span class="field-label">Folder</span>
+                <select class="field" @key="_folderPickKey" @onchange="PickFolderAsync">
+                    <option value="" selected="@(_conversation.FolderId is null)">None</option>
+                    @foreach (var folder in _folders)
+                    {
+                        <option value="@folder.Id" selected="@(_conversation.FolderId == folder.Id)">@folder.Name</option>
+                    }
+                    <option value="new" selected="@_creatingFolder">New folder…</option>
+                </select>
+            </label>
+            @if (_creatingFolder)
+            {
+                <input class="field" aria-label="New folder name" placeholder="Folder name" maxlength="@ChatFolders.MaxNameLength"
+                       @bind="_newFolderName" @bind:event="oninput" @onkeydown="NewFolderKeyAsync" @ref="_newFolderBox" />
+                <div class="row">
+                    <button class="btn primary" @onclick="CreateFolderAsync">Create and file here</button>
+                    <button class="btn" @onclick="CancelNewFolder">Cancel</button>
+                </div>
+            }
             <div class="row">
                 @if (_confirmDelete)
                 {
@@ -98,7 +188,36 @@ else
     [Parameter] public long? ChatId { get; set; }
 
     private List<Conversation> _chats = [];
+    private IReadOnlyList<ChatFolder> _folders = [];
+    private ChatListLayout _layout = new([], [], []);
     private Conversation _conversation = new();
+
+    // Folder menu in the list: which folder's options are open, and whether it is being renamed or asked to delete.
+    private long? _folderMenu;
+    private long? _renamingFolder;
+    private bool _confirmFolderDelete;
+    private string _folderName = "";
+    private string? _folderNotice;
+    private ElementReference _renameBox;
+    private bool _focusRename;
+
+    // Side panel: making a new folder for this chat.
+    private bool _creatingFolder;
+    private string _newFolderName = "";
+    private ElementReference _newFolderBox;
+    private bool _focusNewFolder;
+    private int _folderPickKey;
+
+    private RenderFragment ChatLink(Conversation chat) => __builder =>
+    {
+        var folder = chat.Pinned && chat.FolderId is { } fid ? _folders.FirstOrDefault(f => f.Id == fid) : null;
+        <a class="li @(chat.Id == _conversation.Id ? "active" : "")" href="general/@chat.Id">
+            <span class="li-text">
+                <span class="li-title">@if (chat.Pinned) {<Icon Name="pin" Size="13" />} @chat.Title</span>
+                <span class="li-sub">@(folder is null ? Format.When(chat.UpdatedAt) : $"{folder.Name} · {Format.When(chat.UpdatedAt)}")</span>
+            </span>
+        </a>
+    };
     private MessageTree _tree = new([]);
     private IReadOnlyList<ChatMessage> _path = [];
     private int _loadVersion;
@@ -119,6 +238,7 @@ else
     {
         _confirmDelete = false;
         _notice = null;
+        _creatingFolder = false;
         await LoadAsync();
     }
 
@@ -126,6 +246,7 @@ else
     {
         var version = ++_loadVersion;
         var chats = (await Store.ListAsync("general")).ToList();
+        var folders = await Store.ListFoldersAsync();
         Conversation? conversation = null;
         IReadOnlyList<ChatMessage> messages = [];
         if (ChatId is { } id)
@@ -136,6 +257,8 @@ else
         if (version != _loadVersion) return;
 
         _chats = chats;
+        _folders = folders;
+        _layout = ChatFolders.Arrange(_folders, _chats);
         if (ChatId is not null && conversation is null)
         {
             Nav.NavigateTo("general", replace: true);
@@ -205,7 +328,130 @@ else
         if (title.Length == 0) return;
         _conversation.Title = title;
         await SaveConversationAsync();
+        await ReloadListAsync();
+    }
+
+    /// <summary>Reads the chats and folders again and re-sorts the list.</summary>
+    private async Task ReloadListAsync()
+    {
         _chats = (await Store.ListAsync("general")).ToList();
+        _folders = await Store.ListFoldersAsync();
+        _layout = ChatFolders.Arrange(_folders, _chats);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusRename) { _focusRename = false; await _renameBox.FocusAsync(); }
+        if (_focusNewFolder) { _focusNewFolder = false; await _newFolderBox.FocusAsync(); }
+    }
+
+    private async Task ToggleFolderAsync(ChatFolder folder)
+    {
+        folder.Collapsed = !folder.Collapsed;
+        await Store.SetFolderCollapsedAsync(folder.Id, folder.Collapsed);
+    }
+
+    private void OpenFolderMenu(long id)
+    {
+        var wasOpen = _folderMenu == id;
+        CloseFolderMenu();
+        if (!wasOpen) _folderMenu = id;
+    }
+
+    private void CloseFolderMenu()
+    {
+        _folderMenu = null;
+        _renamingFolder = null;
+        _confirmFolderDelete = false;
+        _folderNotice = null;
+    }
+
+    private void StartRename(ChatFolder folder)
+    {
+        _renamingFolder = folder.Id;
+        _folderName = folder.Name;
+        _folderNotice = null;
+        _focusRename = true;
+    }
+
+    private async Task FolderNameKeyAsync(KeyboardEventArgs e, ChatFolder folder)
+    {
+        if (e.Key == "Enter") await RenameFolderAsync(folder);
+        else if (e.Key == "Escape") CloseFolderMenu();
+    }
+
+    private async Task RenameFolderAsync(ChatFolder folder)
+    {
+        var name = ChatFolders.CleanName(_folderName);
+        if (name is null)
+        {
+            _folderNotice = "A folder needs a name.";
+            return;
+        }
+        if (ChatFolders.Named(_folders.Where(f => f.Id != folder.Id), name) is { } taken)
+        {
+            _folderNotice = $"There is already a folder called \"{taken.Name}\".";
+            return;
+        }
+        await Store.RenameFolderAsync(folder.Id, name);
+        CloseFolderMenu();
+        await ReloadListAsync();
+    }
+
+    private async Task DeleteFolderAsync(ChatFolder folder)
+    {
+        await Store.DeleteFolderAsync(folder.Id);
+        if (_conversation.FolderId == folder.Id) _conversation.FolderId = null;
+        CloseFolderMenu();
+        _folderPickKey++;
+        await ReloadListAsync();
+    }
+
+    private async Task PickFolderAsync(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString() ?? "";
+        if (value == "new")
+        {
+            _creatingFolder = true;
+            _newFolderName = "";
+            _focusNewFolder = true;
+            return;
+        }
+        _creatingFolder = false;
+        await FileChatAsync(long.TryParse(value, out var id) ? id : null);
+    }
+
+    private async Task NewFolderKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await CreateFolderAsync();
+        else if (e.Key == "Escape") CancelNewFolder();
+    }
+
+    private async Task CreateFolderAsync()
+    {
+        var name = ChatFolders.CleanName(_newFolderName);
+        if (name is null) return;
+        // A name that is already taken files the chat in that folder instead of making a second one.
+        var folder = ChatFolders.Named(_folders, name) ?? await Store.CreateFolderAsync(name);
+        _creatingFolder = false;
+        await FileChatAsync(folder.Id);
+    }
+
+    private void CancelNewFolder()
+    {
+        _creatingFolder = false;
+        _folderPickKey++;   // redraw the list so it shows the chat's folder again, not "New folder…"
+    }
+
+    private async Task FileChatAsync(long? folderId)
+    {
+        _conversation.FolderId = folderId;
+        await Store.SetFolderAsync(_conversation.Id, folderId);
+        // Open the folder the chat went into, so it does not seem to vanish from the list.
+        if (folderId is { } id && _folders.FirstOrDefault(f => f.Id == id) is { Collapsed: true })
+            await Store.SetFolderCollapsedAsync(id, false);
+        _folderPickKey++;
+        await ReloadListAsync();
     }
 
     private async Task SaveConversationAsync()
@@ -217,7 +463,7 @@ else
     {
         _conversation.Pinned = !_conversation.Pinned;
         await Store.SetPinnedAsync(_conversation.Id, _conversation.Pinned);
-        _chats = (await Store.ListAsync("general")).ToList();
+        await ReloadListAsync();
     }
 
     private async Task ExportAsync()

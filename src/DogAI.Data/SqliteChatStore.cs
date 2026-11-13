@@ -59,6 +59,52 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
         await db.Conversations.Where(c => c.Id == conversationId).ExecuteUpdateAsync(s => s.SetProperty(c => c.Pinned, pinned), ct);
     }
 
+    public async Task SetFolderAsync(long conversationId, long? folderId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.Conversations.Where(c => c.Id == conversationId).ExecuteUpdateAsync(s => s.SetProperty(c => c.FolderId, folderId), ct);
+    }
+
+    public async Task<IReadOnlyList<ChatFolder>> ListFoldersAsync(CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var folders = await db.ChatFolders.AsNoTracking().ToListAsync(ct);
+        // Sorted here rather than in SQL so names compare the way people read them, not by byte.
+        return folders.OrderBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(f => f.Id).ToList();
+    }
+
+    public async Task<ChatFolder> CreateFolderAsync(string name, CancellationToken ct = default)
+    {
+        var clean = ChatFolders.CleanName(name) ?? throw new ArgumentException("A folder needs a name.", nameof(name));
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var folder = new ChatFolder { Name = clean, CreatedAt = DateTime.UtcNow };
+        db.ChatFolders.Add(folder);
+        await db.SaveChangesAsync(ct);
+        return folder;
+    }
+
+    public async Task RenameFolderAsync(long folderId, string name, CancellationToken ct = default)
+    {
+        var clean = ChatFolders.CleanName(name) ?? throw new ArgumentException("A folder needs a name.", nameof(name));
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.ChatFolders.Where(f => f.Id == folderId).ExecuteUpdateAsync(s => s.SetProperty(f => f.Name, clean), ct);
+    }
+
+    public async Task SetFolderCollapsedAsync(long folderId, bool collapsed, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await db.ChatFolders.Where(f => f.Id == folderId).ExecuteUpdateAsync(s => s.SetProperty(f => f.Collapsed, collapsed), ct);
+    }
+
+    public async Task DeleteFolderAsync(long folderId, CancellationToken ct = default)
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        await db.Conversations.Where(c => c.FolderId == folderId).ExecuteUpdateAsync(s => s.SetProperty(c => c.FolderId, (long?)null), ct);
+        await db.ChatFolders.Where(f => f.Id == folderId).ExecuteDeleteAsync(ct);
+        await tx.CommitAsync(ct);
+    }
+
     public async Task SetActiveLeafAsync(long conversationId, long? leafId, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);

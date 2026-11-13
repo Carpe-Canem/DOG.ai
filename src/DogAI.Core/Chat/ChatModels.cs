@@ -84,6 +84,9 @@ public sealed class Conversation
     /// <summary>Pinned chats are listed first.</summary>
     public bool Pinned { get; set; }
 
+    /// <summary>The folder this chat is filed in (General). Null means none.</summary>
+    public long? FolderId { get; set; }
+
     public bool IsGroup => Mode == GroupMode;
 
     public const string GroupMode = "group";
@@ -154,6 +157,19 @@ public interface IChatStore
 
     /// <summary>Pins a chat to the top of its list, or lets it go. Does not count as using the chat.</summary>
     Task SetPinnedAsync(long conversationId, bool pinned, CancellationToken ct = default);
+
+    /// <summary>Files a chat in a folder, or takes it out (null). Does not count as using the chat.</summary>
+    Task SetFolderAsync(long conversationId, long? folderId, CancellationToken ct = default);
+
+    /// <summary>All folders, in name order.</summary>
+    Task<IReadOnlyList<ChatFolder>> ListFoldersAsync(CancellationToken ct = default);
+
+    Task<ChatFolder> CreateFolderAsync(string name, CancellationToken ct = default);
+    Task RenameFolderAsync(long folderId, string name, CancellationToken ct = default);
+    Task SetFolderCollapsedAsync(long folderId, bool collapsed, CancellationToken ct = default);
+
+    /// <summary>Deletes a folder. Its chats are kept and move out to the main list.</summary>
+    Task DeleteFolderAsync(long folderId, CancellationToken ct = default);
 
     /// <summary>Chooses which branch is shown and marks the chat as just used.</summary>
     Task SetActiveLeafAsync(long conversationId, long? leafId, CancellationToken ct = default);

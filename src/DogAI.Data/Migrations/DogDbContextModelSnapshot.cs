@@ -135,6 +135,28 @@ namespace DogAI.Data.Migrations
                     b.ToTable("Personas");
                 });
 
+            modelBuilder.Entity("DogAI.Core.Chat.ChatFolder", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Collapsed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ChatFolders");
+                });
+
             modelBuilder.Entity("DogAI.Core.Chat.ChatMember", b =>
                 {
                     b.Property<long>("Id")
@@ -253,6 +275,9 @@ namespace DogAI.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("FolderId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("MemoryEnabled")
                         .HasColumnType("INTEGER");
 
@@ -299,6 +324,8 @@ namespace DogAI.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CharacterId");
+
+                    b.HasIndex("FolderId");
 
                     b.HasIndex("Mode", "UpdatedAt");
 
