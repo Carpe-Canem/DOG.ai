@@ -13,8 +13,10 @@ public static class DataServices
 {
     public static IServiceCollection AddDogData(this IServiceCollection services)
     {
+        // Locked data (M8): the app registers a DatabaseKey once the owner has unlocked; without one the database is plain.
         services.AddDbContextFactory<DogDbContext>((sp, o) =>
-            o.UseSqlite($"Data Source={sp.GetRequiredService<AppPaths>().DatabaseFile}"));
+            o.UseSqlite(DatabaseLock.ConnectionString(sp.GetRequiredService<AppPaths>().DatabaseFile,
+                sp.GetService<DogAI.Core.Privacy.DatabaseKey>()?.Bytes, pooling: true)));
         services.AddSingleton<ISettingsStore, SqliteSettingsStore>();
         services.AddSingleton<IChatStore, SqliteChatStore>();
         services.AddSingleton<DogAI.Core.Search.ISearchStore, SqliteSearchStore>();

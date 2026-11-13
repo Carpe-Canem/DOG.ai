@@ -5,6 +5,7 @@ using DogAI.Core.Appearance;
 using DogAI.Core.Chat;
 using DogAI.Core.Models;
 using DogAI.Core.Net;
+using DogAI.Core.Privacy;
 using DogAI.Engine;
 using DogAI.Core.Settings;
 using DogAI.Data;
@@ -54,12 +55,26 @@ public partial class App : Application
         try
         {
             if (renamedDatabase) Log.Information("Renamed the database from {Old} to {New}.", AppPaths.LegacyDatabaseName, AppPaths.DatabaseName);
-            // A restore waiting from last time is swapped in now, before anything opens the database.
+            // The order matters (locked data, M8):
+            // 1. A restore waiting from last time is swapped in. This only moves files, so it needs no key, and it has to
+            //    come first because a restored backup can bring its own lock.
             if (DatabaseBackup.ApplyPending(paths) is { } restored) Log.Information(restored);
-            // A portable folder that was moved or copied: saved model paths follow it.
-            if (PortableMove.Apply(paths) is { } moved) Log.Information(moved);
+            // 2. A portable folder that was moved or copied is noticed (the saved paths are inside the database, so they
+            //    can only be rewritten once it is open).
+            if (PortableMove.MovedFrom(paths) is { } movedFrom) Log.Information("This portable folder used to be at {Old}.", movedFrom);
+            // 3. Unlock. While the lock screen is up nothing else exists: no services, no tray icon, no global key, no model.
+            //    The lock screen is not the main window, so closing it must not end the app by itself.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            if (Unlock(paths) is not { } key)
+            {
+                Shutdown(0);
+                return;
+            }
+            // 4. Only now may anything open the database.
+            DatabaseBackup.FinishRestore(paths, key.Bytes);
+            if (PortableMove.Apply(paths, key.Bytes) is { } moved) Log.Information(moved);
 
-            _services = BuildServices(paths);
+            _services = BuildServices(paths, key);
             var log = _services.GetRequiredService<ILogger<App>>();
             log.LogInformation("DOG.ai starting. Data folder: {Root}{Portable}", paths.Root, paths.IsPortable ? " (portable)" : "");
 
@@ -93,7 +108,11 @@ public partial class App : Application
             await _services.GetRequiredService<PresetCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Library.LibraryCatalog>().LoadAsync();
 
-            new MainWindow(_services).Show();
+            var window = new MainWindow(_services);
+            // WPF takes the first window it ever shows as the main one; after a lock screen that would be a closed window.
+            MainWindow = window;
+            ShutdownMode = ShutdownMode.OnLastWindowClose;
+            window.Show();
             await _services.GetRequiredService<WindowsIntegration>().ApplyAsync();
         }
         catch (Exception ex)
@@ -104,11 +123,46 @@ public partial class App : Application
         }
     }
 
-    private static ServiceProvider BuildServices(AppPaths paths)
+    /// <summary>
+    /// Finds out whether the data is locked and, if so, shows the lock screen until the owner opens it. Returns the key to
+    /// run with (<see cref="DatabaseKey.None"/> when there is no lock), or null when DOG.ai should close instead: the owner
+    /// closed the lock screen, or the lock file is damaged or missing.
+    /// </summary>
+    private static DatabaseKey? Unlock(AppPaths paths)
+    {
+        DataLockState state;
+        DogAI.Core.Privacy.LockFile? file;
+        try
+        {
+            state = DataLock.Look(paths, out file);
+        }
+        catch (DogAI.Core.Privacy.LockFileException ex)
+        {
+            Log.Fatal("The data lock cannot be read: {Problem}", ex.Message);
+            MessageBox.Show(ex.Message, "DOG.ai cannot open your data", MessageBoxButton.OK, MessageBoxImage.Error);
+            return null;
+        }
+        if (state == DataLockState.Off || file is null) return DatabaseKey.None;
+
+        Log.Information("The data is locked ({State}); waiting at the lock screen.", state);
+        var screen = new LockWindow(paths, file, state, new WindowsHello());
+        if (screen.ShowDialog() != true || screen.Result is null)
+        {
+            Log.Information("The lock screen was closed without unlocking.");
+            return null;
+        }
+        Log.Information("Unlocked.");
+        return screen.Result;
+    }
+
+    private static ServiceProvider BuildServices(AppPaths paths, DatabaseKey key)
     {
         var services = new ServiceCollection();
         services.AddLogging(b => b.AddSerilog(dispose: true));
         services.AddSingleton(paths);
+        // The key the database opens with during this run (no key when the lock is off). AddDogData reads it.
+        services.AddSingleton(key);
+        services.AddSingleton<DogAI.Core.Privacy.IHelloSigner, WindowsHello>();
         services.AddSingleton<OnlineGate>();
         services.AddSingleton<NetworkAudit>();
         services.AddSingleton<HubHttp>();

@@ -136,6 +136,16 @@ public sealed class AppPaths
             return false;
         }
     }
+
+    /// <summary>
+    /// The lock file (see <c>DogAI.Core.Privacy.LockFile</c>). It exists only while the data is locked with a password,
+    /// and sits beside the database so a moved or copied data folder still opens with the password.
+    /// </summary>
+    public string LockFile => Path.Combine(Root, "lock.json");
+
+    /// <summary>Counts wrong tries at the lock screen, so restarting DOG.ai does not clear the wait.</summary>
+    public string UnlockTriesFile => Path.Combine(Root, "unlock-tries.json");
+
     public string LogsDirectory => Path.Combine(Root, "logs");
     public string WebViewDataDirectory => Path.Combine(Root, "webview");
 

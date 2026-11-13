@@ -11,7 +11,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="9.0.23" />
+    <!-- Locked data (M8): the SQLite build is SQLite3 Multiple Ciphers, so the .Core package (no bundled plain SQLite) is used.
+         Microsoft.Data.Sqlite is raised to 10.x on purpose (owner's decision, 2026-11-13): 9.0.x cannot reopen an encrypted
+         database through the connection string's Password. EF Core itself stays on 9.0.x. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite.Core" Version="9.0.23" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.15" />
+    <PackageReference Include="SQLite3MC.PCLRaw.bundle" Version="2.6.1" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.23">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
