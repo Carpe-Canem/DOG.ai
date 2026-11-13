@@ -7,8 +7,11 @@ using Microsoft.Win32;
 
 namespace DogAI.App;
 
-public sealed class WpfDesktopShell : IDesktopShell
+public sealed class WpfDesktopShell(ISettingsStore settings, DogAI.Core.Privacy.DatabaseKey key) : IDesktopShell
 {
+    /// <summary>Set once DOG.ai is quitting or restarting, so closing the window really closes it (never hides it in the tray).</summary>
+    public static bool Exiting { get; private set; }
+
     public Task<string?> PickModelFileAsync(string? startFolder) =>
         Application.Current.Dispatcher.InvokeAsync(() =>
         {
@@ -90,13 +93,27 @@ public sealed class WpfDesktopShell : IDesktopShell
         }
     }
 
-    public void Restart()
+    public void Restart() => RestartProcess(hidden: false);
+
+    /// <summary>
+    /// Starts a new DOG.ai (which waits for this one to end) and ends this one. With <paramref name="hidden"/> a locked
+    /// DOG.ai keeps its lock screen in the tray, as the window was.
+    /// </summary>
+    public static void RestartProcess(bool hidden)
     {
+        Exiting = true;
         var self = Environment.ProcessPath;
         if (self is not null)
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(self) { UseShellExecute = false, ArgumentList = { App.AfterArgument, Environment.ProcessId.ToString() } })?.Dispose();
+        {
+            var start = new System.Diagnostics.ProcessStartInfo(self) { UseShellExecute = false, ArgumentList = { App.AfterArgument, Environment.ProcessId.ToString() } };
+            if (hidden) start.ArgumentList.Add(App.HiddenArgument);
+            System.Diagnostics.Process.Start(start)?.Dispose();
+        }
         Application.Current.Dispatcher.InvokeAsync(() => Application.Current.Shutdown());
     }
+
+    /// <summary>Quitting from the tray: the window must close, not hide.</summary>
+    public static void MarkExiting() => Exiting = true;
 
     private static Task<string?> PickFileAsync(string title, string filter) =>
         Application.Current.Dispatcher.InvokeAsync(() =>
@@ -107,8 +124,24 @@ public sealed class WpfDesktopShell : IDesktopShell
 
     public async Task<string?> SaveFileAsync(string suggestedName, string filter, byte[] content)
     {
+        // Exports (chats, cards, stories) are ordinary files. With the data lock on, say so once, the first time.
+        var noteFirst = false;
+        if (key.Locked)
+        {
+            var s = await settings.LoadAsync();
+            if (!s.PlainExportNoted)
+            {
+                noteFirst = true;
+                await settings.SaveAsync(s with { PlainExportNoted = true });
+            }
+        }
         var path = await Application.Current.Dispatcher.InvokeAsync(() =>
         {
+            if (noteFirst)
+                MessageBox.Show(Application.Current.MainWindow!,
+                    "The file you save next is not locked: anyone who can open it can read it. Your data inside DOG.ai stays locked. " +
+                    "(This note is shown once.)",
+                    "Exported files are plain files", MessageBoxButton.OK, MessageBoxImage.Information);
             var dialog = new SaveFileDialog { Title = "Save", Filter = filter, FileName = SafeFileName(suggestedName), OverwritePrompt = true };
             return dialog.ShowDialog(Application.Current.MainWindow) == true ? dialog.FileName : null;
         }).Task;

@@ -1,0 +1,44 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject DogAI.Core.Privacy.IAppLock AppLock
+
+@* Ctrl+L locks DOG.ai when the data lock is on. Draws nothing. *@
+
+@code {
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<LockKey>? _self;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
+            _self = DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("watchLockKey", _self);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Without the listener Ctrl+L does nothing; Lock now in Settings and the tray still work.
+        }
+    }
+
+    [JSInvokable]
+    public void LockNow() => AppLock.LockNow();
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_module is not null)
+            {
+                await _module.InvokeVoidAsync("unwatchLockKey", _self);
+                await _module.DisposeAsync();
+            }
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException or JSException)
+        {
+        }
+        _self?.Dispose();
+    }
+}

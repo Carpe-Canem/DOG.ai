@@ -42,6 +42,50 @@ public sealed class WindowsHello : IHelloSigner
 
     public async Task<byte[]?> SignAsync(byte[] challenge, bool create)
     {
+        // Windows shows Hello's prompt behind every other window when a desktop program asks for it (a known Windows bug;
+        // Chromium and KeePassXC work around it the same way): look for the prompt and bring it to the front.
+        using var stop = new CancellationTokenSource();
+        var front = BringPromptForwardAsync(stop.Token);
+        try
+        {
+            return await SignNowAsync(challenge, create);
+        }
+        finally
+        {
+            stop.Cancel();
+            try { await front; } catch (OperationCanceledException) { }
+        }
+    }
+
+    private const string PromptClass = "Credential Dialog Xaml Host";
+
+    private static async Task BringPromptForwardAsync(CancellationToken stop)
+    {
+        // Each prompt is a new window; keep watching for as long as the request runs (creating a key shows more than one).
+        IntPtr last = IntPtr.Zero;
+        while (!stop.IsCancellationRequested)
+        {
+            var prompt = FindWindow(PromptClass, null);
+            if (prompt != IntPtr.Zero && (prompt != last || GetForegroundWindow() != prompt))
+            {
+                SetForegroundWindow(prompt);
+                last = prompt;
+            }
+            await Task.Delay(150, stop);
+        }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern IntPtr FindWindow(string className, string? windowName);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr window);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    private static async Task<byte[]?> SignNowAsync(byte[] challenge, bool create)
+    {
         try
         {
             var opened = await KeyCredentialManager.OpenAsync(KeyName);

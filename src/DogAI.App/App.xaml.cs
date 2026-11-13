@@ -65,7 +65,7 @@ public partial class App : Application
             // 3. Unlock. While the lock screen is up nothing else exists: no services, no tray icon, no global key, no model.
             //    The lock screen is not the main window, so closing it must not end the app by itself.
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
-            if (Unlock(paths) is not { } key)
+            if (Unlock(paths, e.Args.Contains(HiddenArgument)) is not { } key)
             {
                 Shutdown(0);
                 return;
@@ -114,6 +114,7 @@ public partial class App : Application
             ShutdownMode = ShutdownMode.OnLastWindowClose;
             window.Show();
             await _services.GetRequiredService<WindowsIntegration>().ApplyAsync();
+            await _services.GetRequiredService<AppLock>().StartAsync();
         }
         catch (Exception ex)
         {
@@ -123,12 +124,15 @@ public partial class App : Application
         }
     }
 
+    /// <summary>Given to a DOG.ai restarted by a lock while its window was hidden in the tray: the lock screen waits there too.</summary>
+    public const string HiddenArgument = "--hidden";
+
     /// <summary>
     /// Finds out whether the data is locked and, if so, shows the lock screen until the owner opens it. Returns the key to
     /// run with (<see cref="DatabaseKey.None"/> when there is no lock), or null when DOG.ai should close instead: the owner
-    /// closed the lock screen, or the lock file is damaged or missing.
+    /// closed the lock screen or chose Quit, or the lock file is damaged or missing.
     /// </summary>
-    private static DatabaseKey? Unlock(AppPaths paths)
+    private static DatabaseKey? Unlock(AppPaths paths, bool hidden)
     {
         DataLockState state;
         DogAI.Core.Privacy.LockFile? file;
@@ -146,13 +150,42 @@ public partial class App : Application
 
         Log.Information("The data is locked ({State}); waiting at the lock screen.", state);
         var screen = new LockWindow(paths, file, state, new WindowsHello());
-        if (screen.ShowDialog() != true || screen.Result is null)
+        // While locked, the tray icon (when it is on) offers nothing but Quit; clicking it shows the lock screen.
+        using var tray = file.Tray ? LockedTray(screen) : null;
+        if (tray is not null) Log.Information("Locked: tray icon shown with Quit only.");
+        var frame = new System.Windows.Threading.DispatcherFrame();
+        screen.Closed += (_, _) => frame.Continue = false;
+        // Hidden only when there is a tray icon to bring it back with.
+        if (!(hidden && tray is not null)) screen.Show();
+        System.Windows.Threading.Dispatcher.PushFrame(frame);
+        if (screen.Result is null)
         {
             Log.Information("The lock screen was closed without unlocking.");
             return null;
         }
         Log.Information("Unlocked.");
         return screen.Result;
+    }
+
+    private static System.Windows.Forms.NotifyIcon LockedTray(LockWindow screen)
+    {
+        var menu = new System.Windows.Forms.ContextMenuStrip();
+        menu.Items.Add("Quit", null, (_, _) => screen.Close());
+        var tray = new System.Windows.Forms.NotifyIcon
+        {
+            Text = "DOG.ai (locked)",
+            Icon = Environment.ProcessPath is { } exe ? System.Drawing.Icon.ExtractAssociatedIcon(exe) : System.Drawing.SystemIcons.Application,
+            ContextMenuStrip = menu,
+            Visible = true,
+        };
+        tray.MouseClick += (_, e) =>
+        {
+            if (e.Button != System.Windows.Forms.MouseButtons.Left) return;
+            screen.Show();
+            if (screen.WindowState == WindowState.Minimized) screen.WindowState = WindowState.Normal;
+            screen.Activate();
+        };
+        return tray;
     }
 
     private static ServiceProvider BuildServices(AppPaths paths, DatabaseKey key)
@@ -163,6 +196,9 @@ public partial class App : Application
         // The key the database opens with during this run (no key when the lock is off). AddDogData reads it.
         services.AddSingleton(key);
         services.AddSingleton<DogAI.Core.Privacy.IHelloSigner, WindowsHello>();
+        services.AddSingleton(sp => new DogAI.Core.Privacy.PrivacyLock(paths, key, sp.GetRequiredService<DogAI.Core.Privacy.IHelloSigner>()));
+        services.AddSingleton<AppLock>();
+        services.AddSingleton<DogAI.Core.Privacy.IAppLock>(sp => sp.GetRequiredService<AppLock>());
         services.AddSingleton<OnlineGate>();
         services.AddSingleton<NetworkAudit>();
         services.AddSingleton<HubHttp>();

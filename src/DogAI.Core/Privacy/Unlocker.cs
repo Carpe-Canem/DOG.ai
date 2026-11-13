@@ -67,6 +67,28 @@ public sealed class Unlocker(LockFile file, string lockFilePath, string triesFil
         return true;
     }
 
+    /// <summary>
+    /// True when Windows Hello should be offered after this unlock: it is set up in Windows, not on for this lock here, and
+    /// the owner has not said "Not now" on this PC before.
+    /// </summary>
+    public async Task<bool> ShouldOfferHelloAsync() =>
+        hello is not null && !file.HelloDeclined(hello.PcId) && await CanTurnOnHelloAsync();
+
+    /// <summary>Remembers "Not now" for Windows Hello on this PC (it can still be turned on in Settings).</summary>
+    public void DeclineHello()
+    {
+        if (hello is null) return;
+        file.SetHelloDeclined(hello.PcId, true);
+        file.Write(lockFilePath);
+    }
+
+    /// <summary>Takes back a request to turn the lock off. Needs no key: it only keeps things as they are.</summary>
+    public void KeepLocked()
+    {
+        file.Pending = LockPending.None;
+        file.Write(lockFilePath);
+    }
+
     /// <summary>Sets a new password (after the recovery key opened the lock) and saves the lock file.</summary>
     public void ChangePassword(byte[] databaseKey, string newPassword)
     {

@@ -80,6 +80,11 @@ public sealed class LockFile
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Theme { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool Tray { get; set; }
+
+        public List<string> HelloDeclined { get; set; } = [];
     }
 
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
@@ -131,10 +136,20 @@ public sealed class LockFile
     /// <summary>Makes a new recovery key and returns it. The old one stops working.</summary>
     public string NewRecoveryKey(byte[] databaseKey)
     {
-        RequireKey(databaseKey);
         var recovery = RecoveryKey.New();
-        _doc.Recovery = Wrap(databaseKey, Encoding.UTF8.GetBytes(recovery), _doc.Recovery!.Rounds, RecoveryPurpose);
+        UseRecoveryKey(databaseKey, recovery);
         return recovery;
+    }
+
+    /// <summary>
+    /// Makes <paramref name="recovery"/> (a key from <see cref="RecoveryKey.New"/>, already shown to the owner) the recovery
+    /// key. The old one stops working. Settings shows a new key and asks for part of it back before calling this.
+    /// </summary>
+    public void UseRecoveryKey(byte[] databaseKey, string recovery)
+    {
+        RequireKey(databaseKey);
+        var read = RecoveryKey.Read(recovery) ?? throw new ArgumentException("That is not a recovery key.", nameof(recovery));
+        _doc.Recovery = Wrap(databaseKey, Encoding.UTF8.GetBytes(read), _doc.Recovery!.Rounds, RecoveryPurpose);
     }
 
     // ---- Windows Hello, one entry per PC ----
@@ -178,11 +193,22 @@ public sealed class LockFile
     /// <summary>Turns Windows Hello off for one PC. True if there was an entry.</summary>
     public bool RemoveHello(string pcId) => _doc.Hello.RemoveAll(h => h.Pc == pcId) > 0;
 
+    /// <summary>True when the owner said "Not now" to Windows Hello on this PC; it is not offered again after unlocking here.</summary>
+    public bool HelloDeclined(string pcId) => _doc.HelloDeclined.Contains(pcId);
+
+    /// <summary>Remembers (or forgets) that the owner did not want Windows Hello on this PC.</summary>
+    public void SetHelloDeclined(string pcId, bool declined)
+    {
+        _doc.HelloDeclined.Remove(pcId);
+        if (declined) _doc.HelloDeclined.Add(pcId);
+    }
+
     /// <summary>A copy for a backup: Windows Hello entries only work on their own PC, so they are left out.</summary>
     public LockFile WithoutHello()
     {
         var copy = Parse(ToJson());
         copy._doc.Hello.Clear();
+        copy._doc.HelloDeclined.Clear();
         copy._doc.Pending = LockPending.None;
         return copy;
     }
@@ -205,11 +231,18 @@ public sealed class LockFile
         set => _doc.Skin = value;
     }
 
-    /// <summary>"dark" or "light", copied here like <see cref="Skin"/>.</summary>
+    /// <summary>"dark" or "light", copied here like <see cref="Skin"/>; null follows Windows.</summary>
     public string? Theme
     {
         get => _doc.Theme;
         set => _doc.Theme = value;
+    }
+
+    /// <summary>The tray icon is on in Settings, copied here so a locked DOG.ai can show it (with Quit only).</summary>
+    public bool Tray
+    {
+        get => _doc.Tray;
+        set => _doc.Tray = value;
     }
 
     /// <summary>The PBKDF2 round count used for the password.</summary>
@@ -237,6 +270,7 @@ public sealed class LockFile
         // A damaged Windows Hello entry must not stand in the way of the password: it is dropped.
         doc.Hello = (doc.Hello ?? []).Where(h => h is { Pc.Length: > 0, Challenge.Length: > 0, Salt.Length: > 0, Nonce.Length: NonceBytes, Wrapped.Length: KeyBytes, Tag.Length: TagBytes }).ToList();
         if (!Enum.IsDefined(doc.Pending)) doc.Pending = LockPending.None;
+        doc.HelloDeclined = (doc.HelloDeclined ?? []).Where(p => !string.IsNullOrEmpty(p)).Distinct().ToList();
         return new LockFile(doc);
     }
 

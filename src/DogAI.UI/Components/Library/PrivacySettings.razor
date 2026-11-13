@@ -1,0 +1,409 @@
+@* Settings → Privacy: locking DOG.ai's data with a password (M8). The work is done by PrivacyLock (Core); encrypting and
+   decrypting happen at the lock screen after a restart, because the database must be closed for them. *@
+@using DogAI.Core.Privacy
+@inject PrivacyLock Lock
+@inject IAppLock AppLock
+@inject AppearanceState Appearance
+@inject ISettingsStore SettingsStore
+@inject IDesktopShell Desktop
+
+<div class="voice-settings privacy">
+    @switch (_status)
+    {
+        case LockStatus.Off:
+            <p class="small">
+                Lock DOG.ai with a password and everything it keeps (chats, characters, stories, documents, settings) is stored encrypted.
+                Without the password nobody can read it: not on this PC, not from a copy of the data folder, not from a backup.
+                Models are not encrypted; they are public downloads.
+            </p>
+            <p class="small"><b>@LostSentence</b></p>
+            <div class="row"><button class="btn primary" @onclick="StartTurnOn">Lock DOG.ai with a password…</button></div>
+            break;
+
+        case LockStatus.TurningOn:
+            <div class="notice" role="status">
+                <span>A password has been chosen. DOG.ai restarts and asks for it; your data is encrypted as soon as you enter it.</span>
+                <span class="row">
+                    <button class="btn primary" @onclick="Desktop.Restart">Restart now</button>
+                    <button class="btn" @onclick="CancelTurnOn">Don't lock after all</button>
+                </span>
+            </div>
+            break;
+
+        case LockStatus.TurningOff:
+            <div class="notice" role="status">
+                <span>The lock is turned off at the next start, once you enter your password. Until then your data stays encrypted.</span>
+                <span class="row">
+                    <button class="btn primary" @onclick="Desktop.Restart">Restart now</button>
+                    <button class="btn" @onclick="KeepLocked">Keep my data locked</button>
+                </span>
+            </div>
+            break;
+
+        default:
+            <p class="small">Your data is locked with a password. DOG.ai asks for it every time it starts and after every lock. @LostSentence</p>
+            <div class="row">
+                <button class="btn primary" @onclick="AppLock.LockNow">Lock now</button>
+                <span class="small hint">or press <b>Ctrl+L</b> anywhere in DOG.ai</span>
+            </div>
+            <label>
+                Lock when nobody has used this PC for
+                <select class="field narrow" value="@_idleMinutes" @onchange="SetIdleAsync" aria-label="Idle lock time">
+                    @foreach (var minutes in IdleLock.Choices)
+                    {
+                        <option value="@minutes" selected="@(minutes == _idleMinutes)">@(minutes == 0 ? "Never" : minutes == 60 ? "1 hour" : $"{minutes} minutes")</option>
+                    }
+                </select>
+                <span class="small">Counted from the last key press or mouse move anywhere on the PC. It waits while a reply is being written or read aloud. Locking unloads the model; it loads again after you unlock.</span>
+            </label>
+            @if (_helloAvailable)
+            {
+                <label class="check">
+                    <input type="checkbox" checked="@_helloOn" disabled="@_busy" @onchange="SetHelloAsync" />
+                    <span>Unlock with Windows Hello on this PC <span class="small">Your face, fingerprint or Windows PIN instead of the password. Only on this PC; the password and recovery key keep working.</span></span>
+                </label>
+            }
+            <div class="row">
+                <button class="btn" @onclick="StartChangePassword">Change password…</button>
+                <button class="btn" @onclick="StartNewRecoveryKey">New recovery key…</button>
+                <button class="btn" @onclick="StartTurnOff">Turn the lock off…</button>
+            </div>
+            break;
+    }
+    @if (_note is not null)
+    {
+        <div class="notice @(_noteBad ? "bad" : "ok")" role="status"><span>@_note</span></div>
+    }
+</div>
+
+@if (_flow is not Flow.None)
+{
+    <Modal Title="@FlowTitle" OnClose="CloseFlow" Class="privacy-modal">
+        <div class="voice-settings">
+            @switch (_step)
+            {
+                case Step.Password:
+                    @if (_flow == Flow.TurnOn)
+                    {
+                        <p>Choose a password. You will type it every time DOG.ai starts (or use Windows Hello, once it is set up).</p>
+                        <p class="small"><b>@LostSentence</b></p>
+                    }
+                    @if (_flow is Flow.ChangePassword or Flow.NewRecoveryKey or Flow.TurnOff)
+                    {
+                        @if (_flow == Flow.TurnOff)
+                        {
+                            <p>Your data will be stored as plain files again, readable by anyone with access to this PC or a copy of the folder. DOG.ai restarts and decrypts it once you enter your password; this can take up to a minute.</p>
+                        }
+                        @if (_flow == Flow.NewRecoveryKey)
+                        {
+                            <p>A new recovery key replaces the old one, which then stops working. Have paper or a printer ready.</p>
+                        }
+                        <label>
+                            Current password
+                            <input class="field" type="password" name="current-password" autocomplete="off" @bind="_current" @bind:event="oninput" @onkeydown="Enter" />
+                        </label>
+                    }
+                    @if (_flow is Flow.TurnOn or Flow.ChangePassword)
+                    {
+                        <label>
+                            @(_flow == Flow.TurnOn ? "Password" : "New password")
+                            <input class="field" type="password" name="new-password" autocomplete="off" @bind="_password" @bind:event="oninput" />
+                            <span class="small">At least @LockPassword.MinLength characters. A few unrelated words make a strong password you can remember.</span>
+                        </label>
+                        <label>
+                            Same password again
+                            <input class="field" type="password" name="repeat-password" autocomplete="off" @bind="_repeat" @bind:event="oninput" @onkeydown="Enter" />
+                        </label>
+                    }
+                    <div class="row">
+                        <button class="btn primary" disabled="@_busy" @onclick="PasswordStepAsync">@(_busy ? "Checking…" : PasswordAction)</button>
+                        <button class="btn" disabled="@_busy" @onclick="CloseFlow">Cancel</button>
+                    </div>
+                    break;
+
+                case Step.ShowKey:
+                    <p>This is your <b>recovery key</b>. If you forget your password, it is the only way back in. Write it down or print this window, and keep it somewhere safe, away from this PC.</p>
+                    <div class="recovery-key" aria-label="Recovery key">@RecoveryKey.Format(_recovery!)</div>
+                    <p class="small">@LostSentence DOG.ai does not keep a readable copy of this key and cannot show it again.</p>
+                    <label class="check">
+                        <input type="checkbox" name="wrote-it-down" @bind="_wroteDown" />
+                        <span>I have written down or printed my recovery key</span>
+                    </label>
+                    <div class="row">
+                        <button class="btn primary" disabled="@(!_wroteDown)" @onclick="ToCheck">Next</button>
+                        <button class="btn" @onclick="CloseFlow">Cancel</button>
+                    </div>
+                    break;
+
+                case Step.CheckKey:
+                    <p>To be sure it was written down correctly, type two of its six groups. Groups are counted from the left.</p>
+                    <div class="two">
+                        <label>
+                            Group @_check!.First
+                            <input class="field mono" name="group-a" autocomplete="off" maxlength="6" @bind="_groupA" @bind:event="oninput" />
+                        </label>
+                        <label>
+                            Group @_check.Second
+                            <input class="field mono" name="group-b" autocomplete="off" maxlength="6" @bind="_groupB" @bind:event="oninput" @onkeydown="Enter" />
+                        </label>
+                    </div>
+                    @if (_flow == Flow.TurnOn)
+                    {
+                        <p class="small">Next, DOG.ai restarts and asks for your new password. Your data is encrypted as soon as you enter it; that can take up to a minute.</p>
+                    }
+                    <div class="row">
+                        <button class="btn primary" disabled="@_busy" @onclick="FinishAsync">@(_busy ? "Working…" : _flow == Flow.TurnOn ? "Lock my data and restart" : "Use the new recovery key")</button>
+                        <button class="btn" disabled="@_busy" @onclick="BackToKey">Show the key again</button>
+                    </div>
+                    break;
+            }
+            @if (_problem is not null)
+            {
+                <div class="notice bad" role="alert"><span>@_problem</span></div>
+            }
+        </div>
+    </Modal>
+}
+
+@code {
+    private const string LostSentence = "If you lose both the password and the recovery key, your data is gone for good: nobody can open it, not even DOG.ai.";
+
+    private enum Flow { None, TurnOn, ChangePassword, NewRecoveryKey, TurnOff }
+    private enum Step { Password, ShowKey, CheckKey }
+
+    private LockStatus _status;
+    private int _idleMinutes = IdleLock.DefaultMinutes;
+    private bool _helloAvailable;
+    private bool _helloOn;
+    private string? _note;
+    private bool _noteBad;
+
+    private Flow _flow;
+    private Step _step;
+    private bool _busy;
+    private string? _problem;
+    private string _current = "", _password = "", _repeat = "", _groupA = "", _groupB = "";
+    private bool _wroteDown;
+    private NewLock? _made;
+    private string? _recovery;
+    private RecoveryCheck? _check;
+
+    private string FlowTitle => _flow switch
+    {
+        Flow.TurnOn => "Lock DOG.ai with a password",
+        Flow.ChangePassword => "Change password",
+        Flow.NewRecoveryKey => "New recovery key",
+        _ => "Turn the lock off",
+    };
+
+    private string PasswordAction => _flow switch
+    {
+        Flow.TurnOn or Flow.NewRecoveryKey => "Next",
+        Flow.ChangePassword => "Change password",
+        _ => "Turn the lock off and restart",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _status = Lock.Status;
+        _idleMinutes = (await SettingsStore.LoadAsync()).IdleLockMinutes;
+        _helloAvailable = _status == LockStatus.On && await Lock.HelloAvailableAsync();
+        _helloOn = Lock.HelloOnHere;
+    }
+
+    private void Refresh() => _status = Lock.Status;
+
+    private void Begin(Flow flow)
+    {
+        _flow = flow;
+        _step = Step.Password;
+        _problem = null;
+        _note = null;
+        _current = _password = _repeat = _groupA = _groupB = "";
+        _wroteDown = false;
+        _made = null;
+        _recovery = null;
+        _check = null;
+    }
+
+    private void StartTurnOn() => Begin(Flow.TurnOn);
+    private void StartChangePassword() => Begin(Flow.ChangePassword);
+    private void StartNewRecoveryKey() => Begin(Flow.NewRecoveryKey);
+    private void StartTurnOff() => Begin(Flow.TurnOff);
+
+    private void CloseFlow()
+    {
+        if (_busy) return;
+        _flow = Flow.None;
+        // Nothing typed is kept once the window closes.
+        _current = _password = _repeat = _groupA = _groupB = "";
+        _made = null;
+        _recovery = null;
+    }
+
+    private async Task Enter(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || _busy) return;
+        if (_step == Step.Password) await PasswordStepAsync();
+        else if (_step == Step.CheckKey) await FinishAsync();
+    }
+
+    private async Task PasswordStepAsync()
+    {
+        _problem = null;
+        if (_flow is Flow.TurnOn or Flow.ChangePassword && LockPassword.Problem(_password, _repeat) is { } problem)
+        {
+            _problem = problem;
+            return;
+        }
+        if (_flow is not Flow.TurnOn && _current.Length == 0)
+        {
+            _problem = "Enter your current password.";
+            return;
+        }
+        _busy = true;
+        try
+        {
+            switch (_flow)
+            {
+                case Flow.TurnOn:
+                    _made = await Lock.PrepareAsync(_password);
+                    _recovery = _made.RecoveryKey;
+                    _step = Step.ShowKey;
+                    break;
+                case Flow.ChangePassword:
+                    if (!await Lock.ChangePasswordAsync(_current, _password)) { _problem = "That is not your current password."; return; }
+                    Done("Your password was changed. The recovery key and Windows Hello keep working.");
+                    break;
+                case Flow.NewRecoveryKey:
+                    if (await Lock.NewRecoveryKeyAsync(_current) is not { } key) { _problem = "That is not your current password."; return; }
+                    _recovery = key;
+                    _step = Step.ShowKey;
+                    break;
+                case Flow.TurnOff:
+                    if (!await Lock.TurnOffAsync(_current)) { _problem = "That is not your password."; return; }
+                    _busy = false;
+                    CloseFlow();
+                    Refresh();
+                    Desktop.Restart();
+                    break;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or LockFileException)
+        {
+            _problem = "The lock file could not be saved: " + e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void ToCheck()
+    {
+        _check = RecoveryCheck.Pick();
+        _groupA = _groupB = "";
+        _problem = null;
+        _step = Step.CheckKey;
+    }
+
+    private void BackToKey()
+    {
+        _problem = null;
+        _step = Step.ShowKey;
+    }
+
+    private async Task FinishAsync()
+    {
+        if (_recovery is null || _check is null) return;
+        if (!_check.Matches(_recovery, _groupA, _groupB))
+        {
+            _problem = "Those groups do not match the recovery key. Check what you wrote down, or show the key again.";
+            return;
+        }
+        _problem = null;
+        _busy = true;
+        try
+        {
+            if (_flow == Flow.TurnOn && _made is not null)
+            {
+                var settings = await SettingsStore.LoadAsync();
+                var theme = Appearance.Theme == Themes.System ? null : Appearance.Theme;
+                Lock.TurnOn(_made, new LockLook(Appearance.Skin, theme, settings.TrayIcon));
+                _busy = false;
+                CloseFlow();
+                Refresh();
+                Desktop.Restart();
+            }
+            else if (_flow == Flow.NewRecoveryKey)
+            {
+                await Lock.UseRecoveryKeyAsync(_recovery);
+                Done("The new recovery key is in use. The old one no longer works.");
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or LockFileException or InvalidOperationException)
+        {
+            _problem = "The lock file could not be saved: " + e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Done(string note)
+    {
+        _busy = false;
+        CloseFlow();
+        _note = note;
+        _noteBad = false;
+    }
+
+    private void CancelTurnOn()
+    {
+        Lock.CancelTurningOn();
+        Refresh();
+        _note = "The lock was not turned on. Nothing changed.";
+        _noteBad = false;
+    }
+
+    private void KeepLocked()
+    {
+        Lock.KeepLocked();
+        Refresh();
+        _note = "Your data stays locked.";
+        _noteBad = false;
+    }
+
+    private async Task SetIdleAsync(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var minutes)) return;
+        _idleMinutes = minutes;
+        await SettingsStore.SaveAsync(await SettingsStore.LoadAsync() with { IdleLockMinutes = minutes });
+        await AppLock.ApplyAsync();
+    }
+
+    private async Task SetHelloAsync(ChangeEventArgs e)
+    {
+        _busy = true;
+        _note = null;
+        try
+        {
+            if (e.Value is true)
+            {
+                if (await Lock.TurnOnHelloAsync()) { _note = "Windows Hello unlocks DOG.ai on this PC from now on."; _noteBad = false; }
+                else { _note = "Windows Hello was not turned on (it was cancelled, or Windows refused)."; _noteBad = true; }
+            }
+            else if (Lock.TurnOffHello())
+            {
+                _note = "Windows Hello no longer unlocks DOG.ai on this PC.";
+                _noteBad = false;
+            }
+        }
+        finally
+        {
+            _helloOn = Lock.HelloOnHere;
+            _busy = false;
+        }
+    }
+}

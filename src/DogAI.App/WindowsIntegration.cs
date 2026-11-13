@@ -29,8 +29,11 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
     private volatile bool _closeToTray;
     private volatile bool _quitting;
 
-    public WindowsIntegration(ISettingsStore settings, Dictation dictation, ILogger<WindowsIntegration> log)
+    private readonly DogAI.Core.Privacy.IAppLock _appLock;
+
+    public WindowsIntegration(ISettingsStore settings, Dictation dictation, DogAI.Core.Privacy.IAppLock appLock, ILogger<WindowsIntegration> log)
     {
+        _appLock = appLock;
         _settings = settings;
         _dictation = dictation;
         _log = log;
@@ -40,7 +43,7 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
     public string? Problem { get; private set; }
 
     /// <summary>True when closing the window should hide it (the tray icon is there to bring it back).</summary>
-    public bool ShouldHideOnClose => _closeToTray && !_quitting;
+    public bool ShouldHideOnClose => _closeToTray && !_quitting && !WpfDesktopShell.Exiting;
 
     public async Task ApplyAsync()
     {
@@ -52,6 +55,8 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
             SetTray(s.TrayIcon);
             SetHook(s.DictateAnywhere);
         });
+        // The lock screen shows a tray icon (Quit only) when the tray icon is on; it learns that from lock.json.
+        await _appLock.ApplyAsync();
     }
 
     // --- tray -------------------------------------------------------------------------------------------------------
@@ -72,6 +77,9 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
 
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("Open DOG.ai", null, (_, _) => ShowWindow());
+        // Only while the data lock is on (checked each time the menu opens, since it can be turned on or off meanwhile).
+        var lockNow = menu.Items.Add("Lock now", null, (_, _) => Application.Current.Dispatcher.InvokeAsync(_appLock.LockNow));
+        menu.Opening += (_, _) => lockNow.Visible = _appLock.CanLock;
         menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
         menu.Items.Add("Quit", null, (_, _) => Quit());
         _tray = new System.Windows.Forms.NotifyIcon
@@ -99,6 +107,7 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
     private void Quit()
     {
         _quitting = true;
+        WpfDesktopShell.MarkExiting();
         Application.Current.Shutdown();
     }
 
@@ -207,6 +216,7 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
                     if (Held(VkControl) && Held(VkMenu) && !OwnWindowHasFocus())
                     {
                         _combo = true;
+                        _log.LogInformation("Ctrl+Alt+Space: listening for another program.");
                         Enqueue(() => _dictation.StartForOtherProgramsAsync());
                         return 1;
                     }

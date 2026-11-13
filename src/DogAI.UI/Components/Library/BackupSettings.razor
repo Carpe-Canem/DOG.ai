@@ -11,6 +11,21 @@
     <button class="btn" disabled="@_busy" @onclick="RestoreAsync">Restore from a backup…</button>
 </div>
 
+@if (_lockedPath is not null)
+{
+    <div class="notice" role="status">
+        <span class="voice-settings">
+            <span>This backup is locked. Enter the password it was made with, or its recovery key.</span>
+            <input class="field" type="password" name="backup-password" autocomplete="off" aria-label="Backup password or recovery key"
+                   @bind="_backupPassword" @bind:event="oninput" @onkeydown="EnterAsync" />
+        </span>
+        <span class="row">
+            <button class="btn primary" disabled="@_busy" @onclick="OpenLockedAsync">@(_busy ? "Checking…" : "Open backup")</button>
+            <button class="btn" disabled="@_busy" @onclick="ForgetLocked">Cancel</button>
+        </span>
+    </div>
+}
+
 @if (_message is not null)
 {
     <div class="notice @(_problem ? "bad" : "")" role="status"><span>@_message</span></div>
@@ -22,7 +37,14 @@
         <span>
             @if (_staged is { } staged)
             {
-                <text>Ready to restore the backup from @staged.CreatedUtc.ToLocalTime().ToString("d MMM yyyy, HH:mm") (@staged.Chats chats, @staged.Messages messages).</text>
+                @if (staged.Locked)
+                {
+                    <text>Ready to restore the locked backup from @staged.CreatedUtc.ToLocalTime().ToString("d MMM yyyy, HH:mm").</text>
+                }
+                else
+                {
+                    <text>Ready to restore the backup from @staged.CreatedUtc.ToLocalTime().ToString("d MMM yyyy, HH:mm") (@staged.Chats chats, @staged.Messages messages).</text>
+                }
             }
             else
             {
@@ -46,6 +68,23 @@ else if (Backup.SafetyCopy is { } safety)
     private bool _problem;
     private string? _message;
     private BackupManifest? _staged;
+    private string? _lockedPath;
+    private string _backupPassword = "";
+
+    private void ForgetLocked()
+    {
+        _lockedPath = null;
+        _backupPassword = "";
+        _message = null;
+    }
+
+    private Task EnterAsync(KeyboardEventArgs e) => e.Key == "Enter" ? OpenLockedAsync() : Task.CompletedTask;
+
+    private async Task OpenLockedAsync()
+    {
+        if (_lockedPath is null || _backupPassword.Length == 0 || _busy) return;
+        await StageAsync(_lockedPath, _backupPassword);
+    }
 
     private void CancelRestore()
     {
@@ -85,12 +124,27 @@ else if (Backup.SafetyCopy is { } safety)
     {
         var path = await Desktop.PickOpenPathAsync("Choose a DOG.ai backup", "DOG.ai backup (*.zip)|*.zip|All files (*.*)|*.*");
         if (path is null) return;
+        ForgetLocked();
+        await StageAsync(path, null);
+    }
+
+    private async Task StageAsync(string path, string? password)
+    {
         _busy = true;
         _message = null;
         _staged = null;
         try
         {
-            _staged = await Backup.StageAsync(path);
+            _staged = await Backup.StageAsync(path, default, password);
+            ForgetLocked();
+        }
+        catch (BackupLockedException e)
+        {
+            // Ask for the backup's password; say so only when one was given and it did not open it.
+            _lockedPath = path;
+            _backupPassword = "";
+            _problem = e.Wrong;
+            _message = e.Wrong ? "That password (or recovery key) does not open this backup." : null;
         }
         catch (BackupException e)
         {

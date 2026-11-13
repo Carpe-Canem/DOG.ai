@@ -116,3 +116,22 @@ export function watchLinks(dotnet) {
 export function unwatchLinks(dotnet) {
   if (linkTarget === dotnet) linkTarget = null;
 }
+
+// Ctrl+L anywhere in DOG.ai locks it (only when the data lock is on; the C# side decides).
+let lockTarget = null;
+export function watchLockKey(dotnet) {
+  lockTarget = dotnet;
+  if (document._dogLockKey) return;
+  document._dogLockKey = true;
+  document.addEventListener('keydown', e => {
+    if (!lockTarget || !e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.repeat) return;
+    if (e.key !== 'l' && e.key !== 'L') return;
+    e.preventDefault();
+    e.stopPropagation();
+    lockTarget.invokeMethodAsync('LockNow');
+  }, true);
+}
+
+export function unwatchLockKey(dotnet) {
+  if (lockTarget === dotnet) lockTarget = null;
+}

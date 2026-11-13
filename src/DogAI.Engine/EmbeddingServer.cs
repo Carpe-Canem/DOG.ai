@@ -165,6 +165,7 @@ public sealed class EmbeddingServer : IEmbedder, IDisposable
                 "--gpu-layers", "999", "--no-webui",
             })
                 start.ArgumentList.Add(arg);
+            EngineEnvironment.Clean(start);
             start.Environment["LLAMA_API_KEY"] = key;
 
             var process = new Process { StartInfo = start, EnableRaisingEvents = true };

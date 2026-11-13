@@ -474,6 +474,12 @@ button.cite:hover { border-color: var(--accent); }
 .voice-settings { display: grid; gap: 14px; }
 .voice-settings label:not(.check) { display: grid; gap: 4px; font-weight: 600; font-size: .92em; align-content: start; }
 .voice-settings label .field { font-weight: 400; }
+.privacy .field.narrow { max-width: 220px; }
+.privacy .hint { align-self: center; }
+.privacy p { margin: 0; }
+.privacy-modal p { margin: 0; }
+.recovery-key { padding: 14px 16px; border: 1px dashed var(--accent); border-radius: min(var(--r), 12px); background: var(--bg); font: 600 1.35em/1.3 var(--mono); letter-spacing: .08em; text-align: center; overflow-wrap: anywhere; user-select: all; }
+.field.mono { font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .voice-settings .two { gap: 16px; }
 .voice-settings input[type=range] { width: 100%; max-width: 360px; accent-color: var(--accent); }
 .voice-settings .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-weight: 400; }

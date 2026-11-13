@@ -4,6 +4,7 @@ using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using DogAI.Core;
 using DogAI.Core.Privacy;
@@ -13,9 +14,10 @@ using Serilog;
 namespace DogAI.App;
 
 /// <summary>
-/// The lock screen, in its first plain form (M8 part 1): the only thing DOG.ai shows while its data is locked. Nothing
-/// else is running behind it: no database, no tray icon, no global key, no model. It asks for the password, offers Windows
-/// Hello when that is on for this PC, and lets a forgotten password be replaced through the recovery key.
+/// The lock screen: the only thing DOG.ai shows while its data is locked. Nothing else is running behind it: no database,
+/// no web view, no global key, no model (a tray icon with Quit only, when the tray icon is on). It asks for the password,
+/// offers Windows Hello when that is on for this PC, and lets a forgotten password be replaced through the recovery key.
+/// It wears the look chosen in Settings (copied into <c>lock.json</c>, since the settings themselves are locked away).
 ///
 /// The same screen finishes turning the lock on (the database is encrypted the first time the new password is entered
 /// here, so data is never encrypted under a password the owner cannot repeat) and off.
@@ -23,16 +25,21 @@ namespace DogAI.App;
 public sealed class LockWindow : Window
 {
     private readonly AppPaths _paths;
-    private readonly DataLockState _state;
+    private DataLockState _state;
     private readonly Unlocker _unlocker;
+    private readonly LockPalette _look;
+    private readonly bool _dark;
+
+    private readonly TextBlock _heading = new() { FontSize = 24, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
+    private readonly TextBlock _explanation = new() { TextWrapping = TextWrapping.Wrap, LineHeight = 21 };
 
     private readonly PasswordBox _password = new();
     private readonly Button _unlock = new() { IsDefault = true };
     private readonly Button _hello = new() { Content = "Use Windows Hello", Visibility = Visibility.Collapsed };
-    private readonly CheckBox _useHello = new() { Content = "Use Windows Hello on this PC from now on", Visibility = Visibility.Collapsed };
     private readonly TextBlock _message = new() { TextWrapping = TextWrapping.Wrap };
     private readonly Button _forgot = new() { Content = "I forgot my password" };
     private readonly Button _cancelLock = new() { Content = "Don't lock my data after all", Visibility = Visibility.Collapsed };
+    private readonly Button _keepLocked = new() { Content = "Keep my data locked", Visibility = Visibility.Collapsed };
 
     private readonly StackPanel _passwordPanel = new();
     private readonly StackPanel _recoveryPanel = new() { Visibility = Visibility.Collapsed };
@@ -42,8 +49,12 @@ public sealed class LockWindow : Window
     private readonly Button _setPassword = new() { Content = "Set new password and unlock" };
     private readonly Button _back = new() { Content = "Back" };
 
+    private readonly StackPanel _helloPanel = new() { Visibility = Visibility.Collapsed };
+    private readonly Button _offerHello = new() { Content = "Set up Windows Hello" };
+    private readonly Button _notNow = new() { Content = "Not now" };
+    private byte[]? _keyWaiting;
+
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly bool _dark;
     private bool _busy;
 
     /// <summary>Set when the window closes with a result: the key to run with (its bytes are null when the lock was just turned off).</summary>
@@ -54,43 +65,125 @@ public sealed class LockWindow : Window
         _paths = paths;
         _state = state;
         _unlocker = new Unlocker(file, paths.LockFile, paths.UnlockTriesFile, hello);
-        // The look saved with the lock, else what Windows is set to.
-        using (var windows = new WindowsSystemTheme()) _dark = file.Theme is { } theme ? theme == "dark" : windows.IsDark;
+        // The look saved with the lock; "Match Windows" (no theme saved) follows what Windows is set to.
+        using (var windows = new WindowsSystemTheme()) _dark = file.Theme switch { "dark" => true, "light" => false, _ => windows.IsDark };
+        _look = LockPalette.For(file.Skin, _dark);
+        Resources.MergedDictionaries.Add((ResourceDictionary)Application.LoadComponent(new Uri("/DOG.ai;component/LockStyles.xaml", UriKind.Relative)));
+        _look.ApplyTo(this);
 
         Title = "DOG.ai";
-        Width = 460;
+        Width = 500;
         SizeToContent = SizeToContent.Height;
         ResizeMode = ResizeMode.NoResize;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
-        FontSize = 14;
-        Background = new SolidColorBrush(_dark ? Color.FromRgb(0x1f, 0x1f, 0x22) : Color.FromRgb(0xf6, 0xf5, 0xf2));
-        Foreground = new SolidColorBrush(_dark ? Color.FromRgb(0xea, 0xea, 0xea) : Color.FromRgb(0x1c, 0x1c, 0x1c));
+        FontSize = _look.FontSize;
+        FontFamily = (FontFamily)Resources["UiFont"];
+        Background = (Brush)Resources["Bg"];
+        Foreground = (Brush)Resources["Text"];
+        Icon = AppIcon();
         SourceInitialized += (_, _) => ApplyTitleBar();
 
-        _useHello.Foreground = Foreground;
         Content = Build();
+        ShowState();
         _unlock.Click += async (_, _) => await UnlockWithPasswordAsync();
         _hello.Click += async (_, _) => await UnlockWithHelloAsync();
         _forgot.Click += (_, _) => ShowRecovery(true);
         _back.Click += (_, _) => ShowRecovery(false);
         _setPassword.Click += async (_, _) => await RecoverAsync();
         _cancelLock.Click += (_, _) => CancelTurningOn();
+        _keepLocked.Click += (_, _) => KeepLocked();
+        _offerHello.Click += async (_, _) => await SetUpHelloAsync();
+        _notNow.Click += async (_, _) => await NotNowAsync();
         _clock.Tick += (_, _) => ShowWait();
-        Loaded += async (_, _) =>
+        Loaded += (_, _) =>
         {
             _password.Focus();
             ShowWait();
             _clock.Start();
-            if (_unlocker.HelloIsOn) _hello.Visibility = Visibility.Visible;
-            // Hello is offered once the password has opened the lock on this PC; not while the lock is being turned off.
-            else if (_state != DataLockState.TurningOff && await _unlocker.CanTurnOnHelloAsync()) _useHello.Visibility = Visibility.Visible;
+            if (_unlocker.HelloIsOn && _state != DataLockState.TurningOff) _hello.Visibility = Visibility.Visible;
+        };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible) _password.Focus();
         };
         Closed += (_, _) => _clock.Stop();
     }
 
     private UIElement Build()
     {
-        var (heading, explanation, action) = _state switch
+        Id(_password, "Password");
+        Id(_unlock, "Unlock");
+        Id(_hello, "Hello");
+        Id(_message, "Message");
+        Id(_forgot, "Forgot");
+        Id(_cancelLock, "CancelLock");
+        Id(_keepLocked, "KeepLocked");
+        Id(_recoveryKey, "RecoveryKey");
+        Id(_newPassword, "NewPassword");
+        Id(_repeatPassword, "RepeatPassword");
+        Id(_setPassword, "SetPassword");
+        Id(_back, "Back");
+        Id(_offerHello, "OfferHello");
+        Id(_notNow, "NotNow");
+        Id(_heading, "Heading");
+
+        _unlock.Style = (Style)Resources["Primary"];
+        _setPassword.Style = (Style)Resources["Primary"];
+        _offerHello.Style = (Style)Resources["Primary"];
+        foreach (var link in new[] { _forgot, _cancelLock, _keepLocked }) link.Style = (Style)Resources["Link"];
+
+        _heading.FontFamily = (FontFamily)Resources["HeadFont"];
+        _explanation.Foreground = (Brush)Resources["Muted"];
+
+        var card = new StackPanel();
+        card.Children.Add(Wordmark());
+        card.Children.Add(Spaced(_heading, 18));
+        card.Children.Add(Spaced(_explanation, 6));
+
+        _passwordPanel.Children.Add(Spaced(Caption("Password", _password), 20));
+        _passwordPanel.Children.Add(Spaced(_password, 6));
+        _passwordPanel.Children.Add(Spaced(Row(_unlock, _hello), 16));
+        _passwordPanel.Children.Add(Spaced(Row(_forgot, _cancelLock, _keepLocked), 20));
+        card.Children.Add(_passwordPanel);
+
+        _recoveryPanel.Children.Add(Spaced(Words(
+            "Enter the recovery key you printed or wrote down when you turned the lock on, then choose a new password."), 20));
+        _recoveryPanel.Children.Add(Spaced(Words(
+            "If you lose both the password and the recovery key, your data is gone for good: nobody can open it, not even DOG.ai.", muted: true), 8));
+        _recoveryPanel.Children.Add(Spaced(Caption("Recovery key", _recoveryKey), 16));
+        _recoveryPanel.Children.Add(Spaced(_recoveryKey, 6));
+        _recoveryPanel.Children.Add(Spaced(Caption("New password", _newPassword), 12));
+        _recoveryPanel.Children.Add(Spaced(_newPassword, 6));
+        _recoveryPanel.Children.Add(Spaced(Caption("New password again", _repeatPassword), 12));
+        _recoveryPanel.Children.Add(Spaced(_repeatPassword, 6));
+        _recoveryPanel.Children.Add(Spaced(Row(_setPassword, _back), 18));
+        card.Children.Add(_recoveryPanel);
+
+        _helloPanel.Children.Add(Spaced(Words(
+            "Next time, open DOG.ai on this PC with your face, fingerprint or Windows PIN instead of typing the password. " +
+            "The password and recovery key keep working, and other PCs are not affected."), 20));
+        _helloPanel.Children.Add(Spaced(Words("Windows asks for your face, fingerprint or PIN a few times while it sets this up.", muted: true), 8));
+        _helloPanel.Children.Add(Spaced(Row(_offerHello, _notNow), 18));
+        card.Children.Add(_helloPanel);
+
+        card.Children.Add(Spaced(_message, 16));
+
+        var frame = new Border
+        {
+            Background = (Brush)Resources["Surface"],
+            BorderBrush = (Brush)Resources["Line"],
+            BorderThickness = new Thickness(1),
+            CornerRadius = (CornerRadius)Resources["Radius"],
+            Padding = new Thickness(30, 26, 30, 26),
+            Child = card,
+        };
+        return new Border { Padding = new Thickness(22), Child = frame };
+    }
+
+    /// <summary>Heading and wording for where the lock stands; called again after "Keep my data locked".</summary>
+    private void ShowState()
+    {
+        (_heading.Text, _explanation.Text, _unlock.Content) = _state switch
         {
             DataLockState.TurningOn => ("Enter your new password",
                 "Your data is locked as soon as you enter the password you just chose. Encrypting it can take up to a minute.",
@@ -100,55 +193,40 @@ public sealed class LockWindow : Window
                 "Turn the lock off"),
             _ => ("DOG.ai is locked", "Enter your password to open your chats, characters, stories and documents.", "Unlock"),
         };
-        _unlock.Content = action;
+        // While the lock is being turned on the data is still plain, so backing out loses nothing; and without a recovery
+        // key in hand yet, "forgot" has no use.
+        _cancelLock.Visibility = _state == DataLockState.TurningOn ? Visibility.Visible : Visibility.Collapsed;
+        _forgot.Visibility = _state == DataLockState.TurningOn ? Visibility.Collapsed : Visibility.Visible;
+        _keepLocked.Visibility = _state == DataLockState.TurningOff ? Visibility.Visible : Visibility.Collapsed;
+        _hello.Visibility = _unlocker.HelloIsOn && _state != DataLockState.TurningOff ? Visibility.Visible : Visibility.Collapsed;
+    }
 
-        Id(_password, "Password");
-        Id(_unlock, "Unlock");
-        Id(_hello, "Hello");
-        Id(_useHello, "UseHello");
-        Id(_message, "Message");
-        Id(_forgot, "Forgot");
-        Id(_cancelLock, "CancelLock");
-        Id(_recoveryKey, "RecoveryKey");
-        Id(_newPassword, "NewPassword");
-        Id(_repeatPassword, "RepeatPassword");
-        Id(_setPassword, "SetPassword");
-        Id(_back, "Back");
+    private FrameworkElement Wordmark()
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        if (Icon is not null) row.Children.Add(new Image { Source = Icon, Width = 30, Height = 30, Margin = new Thickness(0, 0, 10, 0), VerticalAlignment = VerticalAlignment.Center });
+        var name = new TextBlock { FontSize = 19, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center, FontFamily = (FontFamily)Resources["HeadFont"] };
+        name.Inlines.Add(new System.Windows.Documents.Run("DOG"));
+        name.Inlines.Add(new System.Windows.Documents.Run(".ai") { Foreground = _look.AccentWordmark ? (Brush)Resources["Accent"] : (Brush)Resources["Text"] });
+        row.Children.Add(name);
+        return row;
+    }
 
-        var root = new StackPanel { Margin = new Thickness(28, 24, 28, 24) };
-        root.Children.Add(new TextBlock { Text = heading, FontSize = 22, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-        root.Children.Add(Spaced(new TextBlock { Text = explanation, TextWrapping = TextWrapping.Wrap, Opacity = 0.8 }, 8));
-
-        _passwordPanel.Children.Add(Spaced(Caption("Password", _password), 18));
-        _passwordPanel.Children.Add(Spaced(Padded(_password), 4));
-        _passwordPanel.Children.Add(Spaced(_useHello, 12));
-        _passwordPanel.Children.Add(Spaced(Row(Padded(_unlock), Padded(_hello)), 16));
-        _passwordPanel.Children.Add(Spaced(Row(Plain(_forgot), Plain(_cancelLock)), 18));
-        if (_state == DataLockState.TurningOn)
+    private static ImageSource? AppIcon()
+    {
+        try
         {
-            // The data is still plain, so backing out loses nothing; and without a recovery key in hand yet, "forgot" has no use.
-            _cancelLock.Visibility = Visibility.Visible;
-            _forgot.Visibility = Visibility.Collapsed;
+            if (Environment.ProcessPath is not { } exe) return null;
+            using var icon = System.Drawing.Icon.ExtractAssociatedIcon(exe);
+            if (icon is null) return null;
+            var source = Imaging.CreateBitmapSourceFromHIcon(icon.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            source.Freeze();
+            return source;
         }
-        root.Children.Add(_passwordPanel);
-
-        _recoveryPanel.Children.Add(Spaced(new TextBlock
+        catch (Exception e) when (e is ArgumentException or System.ComponentModel.Win32Exception or System.IO.IOException)
         {
-            Text = "Enter the recovery key you printed or wrote down when you turned the lock on, then choose a new password. " +
-                   "Without the password and without the recovery key, the data cannot be opened by anyone.",
-            TextWrapping = TextWrapping.Wrap,
-        }, 18));
-        _recoveryPanel.Children.Add(Spaced(Caption("Recovery key", _recoveryKey), 14));
-        _recoveryPanel.Children.Add(Spaced(Padded(_recoveryKey), 4));
-        _recoveryPanel.Children.Add(Spaced(Caption("New password", _newPassword), 12));
-        _recoveryPanel.Children.Add(Spaced(Padded(_newPassword), 4));
-        _recoveryPanel.Children.Add(Spaced(Caption("New password again", _repeatPassword), 12));
-        _recoveryPanel.Children.Add(Spaced(Padded(_repeatPassword), 4));
-        _recoveryPanel.Children.Add(Spaced(Row(Padded(_setPassword), Padded(_back)), 16));
-        root.Children.Add(_recoveryPanel);
-
-        root.Children.Add(Spaced(_message, 16));
-        return root;
+            return null;
+        }
     }
 
     private static void Id(DependencyObject control, string id) => AutomationProperties.SetAutomationId(control, id);
@@ -156,8 +234,16 @@ public sealed class LockWindow : Window
     private TextBlock Caption(string text, UIElement target)
     {
         AutomationProperties.SetName(target, text);
-        return new TextBlock { Text = text, Foreground = Foreground };
+        return new TextBlock { Text = text, FontWeight = FontWeights.SemiBold };
     }
+
+    private TextBlock Words(string text, bool muted = false) => new()
+    {
+        Text = text,
+        TextWrapping = TextWrapping.Wrap,
+        LineHeight = 21,
+        Foreground = muted ? (Brush)Resources["Muted"] : (Brush)Resources["Text"],
+    };
 
     private static T Spaced<T>(T element, double top) where T : FrameworkElement
     {
@@ -165,29 +251,13 @@ public sealed class LockWindow : Window
         return element;
     }
 
-    private static T Padded<T>(T control) where T : Control
+    private static WrapPanel Row(params FrameworkElement[] items)
     {
-        control.Padding = new Thickness(10, 6, 10, 6);
-        return control;
-    }
-
-    private Button Plain(Button link)
-    {
-        link.Background = Brushes.Transparent;
-        link.BorderThickness = new Thickness(0);
-        link.Foreground = Foreground;
-        link.Cursor = System.Windows.Input.Cursors.Hand;
-        link.Padding = new Thickness(0);
-        link.Content = new TextBlock { Text = (string)link.Content, TextDecorations = TextDecorations.Underline };
-        return link;
-    }
-
-    private static StackPanel Row(params FrameworkElement[] items)
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        var row = new WrapPanel { Orientation = Orientation.Horizontal };
         foreach (var item in items)
         {
-            item.Margin = new Thickness(0, 0, 10, 0);
+            item.Margin = new Thickness(0, 0, 14, 0);
+            item.VerticalAlignment = VerticalAlignment.Center;
             row.Children.Add(item);
         }
         return row;
@@ -196,13 +266,13 @@ public sealed class LockWindow : Window
     private void Say(string text, bool problem = true)
     {
         _message.Text = text;
-        _message.Foreground = problem ? new SolidColorBrush(_dark ? Color.FromRgb(0xff, 0x9d, 0x8a) : Color.FromRgb(0xa3, 0x1d, 0x0a)) : Foreground;
+        _message.Foreground = problem ? (Brush)Resources["Bad"] : (Brush)Resources["Muted"];
     }
 
     private void SetBusy(bool busy, string? saying = null)
     {
         _busy = busy;
-        foreach (var control in new Control[] { _password, _unlock, _hello, _useHello, _forgot, _cancelLock, _recoveryKey, _newPassword, _repeatPassword, _setPassword, _back })
+        foreach (var control in new Control[] { _password, _unlock, _hello, _forgot, _cancelLock, _keepLocked, _recoveryKey, _newPassword, _repeatPassword, _setPassword, _back, _offerHello, _notNow })
             control.IsEnabled = !busy;
         if (saying is not null) Say(saying, problem: false);
         if (!busy) ShowWait();
@@ -222,12 +292,29 @@ public sealed class LockWindow : Window
             Say("");
     }
 
+    private void ShowPanel(StackPanel shown)
+    {
+        foreach (var panel in new[] { _passwordPanel, _recoveryPanel, _helloPanel })
+            panel.Visibility = panel == shown ? Visibility.Visible : Visibility.Collapsed;
+        _unlock.IsDefault = shown == _passwordPanel;
+        _setPassword.IsDefault = shown == _recoveryPanel;
+        _offerHello.IsDefault = shown == _helloPanel;
+    }
+
     private void ShowRecovery(bool show)
     {
-        _passwordPanel.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
-        _recoveryPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        _unlock.IsDefault = !show;
-        _setPassword.IsDefault = show;
+        ShowPanel(show ? _recoveryPanel : _passwordPanel);
+        if (show)
+        {
+            _heading.Text = "Use your recovery key";
+            _explanation.Text = "";
+            _explanation.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            _explanation.Visibility = Visibility.Visible;
+            ShowState();
+        }
         Say("");
         if (show) _recoveryKey.Focus();
         else _password.Focus();
@@ -249,11 +336,42 @@ public sealed class LockWindow : Window
             _password.Focus();
             return;
         }
-        if (_useHello.Visibility == Visibility.Visible && _useHello.IsChecked == true)
+        await AfterPasswordAsync(key);
+    }
+
+    /// <summary>
+    /// The password (or recovery key) opened the lock. On a PC where Windows Hello is set up but not yet used for DOG.ai,
+    /// offer it once before going on; "Not now" is remembered for this PC.
+    /// </summary>
+    private async Task AfterPasswordAsync(byte[] key)
+    {
+        if (_state != DataLockState.TurningOff && await _unlocker.ShouldOfferHelloAsync())
         {
-            Say("Windows Hello will ask for your face, fingerprint or PIN a few times to set itself up.", problem: false);
-            if (!await _unlocker.TurnOnHelloAsync(key)) Log.Information("Windows Hello was not turned on for the data lock (cancelled or not available).");
+            _keyWaiting = key;
+            SetBusy(false);
+            Say("", problem: false);
+            _heading.Text = "Use Windows Hello on this PC?";
+            _explanation.Visibility = Visibility.Collapsed;
+            ShowPanel(_helloPanel);
+            _offerHello.Focus();
+            return;
         }
+        await FinishAsync(key);
+    }
+
+    private async Task SetUpHelloAsync()
+    {
+        if (_keyWaiting is not { } key) return;
+        SetBusy(true, "Waiting for Windows Hello…");
+        if (await _unlocker.TurnOnHelloAsync(key)) Log.Information("Windows Hello was turned on for the data lock on this PC.");
+        else Log.Information("Windows Hello was not turned on for the data lock (cancelled or not available).");
+        await FinishAsync(key);
+    }
+
+    private async Task NotNowAsync()
+    {
+        if (_keyWaiting is not { } key) return;
+        _unlocker.DeclineHello();
         await FinishAsync(key);
     }
 
@@ -280,14 +398,9 @@ public sealed class LockWindow : Window
             return;
         }
         var password = _newPassword.Password;
-        if (password.Length == 0)
+        if (LockPassword.Problem(password, _repeatPassword.Password) is { } problem)
         {
-            Say("Choose a new password.");
-            return;
-        }
-        if (password != _repeatPassword.Password)
-        {
-            Say("The two new passwords are not the same.");
+            Say(problem);
             return;
         }
         var typed = _recoveryKey.Text;
@@ -305,12 +418,13 @@ public sealed class LockWindow : Window
             return;
         }
         Log.Information("The data lock's password was replaced using the recovery key.");
-        await FinishAsync(key);
+        await AfterPasswordAsync(key);
     }
 
     /// <summary>The key is known: finish whatever was pending (encrypt, decrypt), then hand the key to the app.</summary>
     private async Task FinishAsync(byte[] key)
     {
+        SetBusy(true);
         Say(_state switch
         {
             DataLockState.TurningOn => "Encrypting your data. This can take up to a minute; please leave DOG.ai open.",
@@ -323,12 +437,13 @@ public sealed class LockWindow : Window
             if (_state == DataLockState.TurningOn) Log.Information("The data lock was turned on: the database is now encrypted.");
             if (_state == DataLockState.TurningOff) Log.Information("The data lock was turned off: the database is a plain file again.");
             Result = new DatabaseKey(runWith);
-            DialogResult = true;
+            Close();
         }
         catch (DataLockException e)
         {
             Log.Error(e, "The data lock could not be settled");
             SetBusy(false);
+            ShowRecovery(false);
             Say(e.Message);
         }
     }
@@ -342,7 +457,18 @@ public sealed class LockWindow : Window
         if (!DataLock.CancelTurningOn(_paths)) return;
         Log.Information("Turning the data lock on was cancelled before anything was encrypted.");
         Result = DatabaseKey.None;
-        DialogResult = true;
+        Close();
+    }
+
+    /// <summary>Backs out of turning the lock off: the data stays encrypted and this becomes the ordinary lock screen.</summary>
+    private void KeepLocked()
+    {
+        _unlocker.KeepLocked();
+        Log.Information("Turning the data lock off was cancelled; the data stays locked.");
+        _state = DataLockState.Locked;
+        ShowState();
+        Say("Your data stays locked. Enter your password to open DOG.ai.", problem: false);
+        _password.Focus();
     }
 
     private void ApplyTitleBar()

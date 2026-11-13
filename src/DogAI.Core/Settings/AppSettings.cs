@@ -76,6 +76,12 @@ public sealed record AppSettings
     /// <summary>Which models to list: "usable", "top" or "uncensored" (see <see cref="DogAI.Core.Models.ModelFilters"/>).</summary>
     public string ModelsFilter { get; init; } = "usable";
 
+    /// <summary>With the data lock on: lock DOG.ai after nobody has used this PC for this many minutes. 0 is off.</summary>
+    public int IdleLockMinutes { get; init; } = DogAI.Core.Privacy.IdleLock.DefaultMinutes;
+
+    /// <summary>The note that exported files are not locked has been shown once.</summary>
+    public bool PlainExportNoted { get; init; }
+
     /// <summary>Compares lists and dictionaries by content, so two loads of the same settings are equal.</summary>
     public bool Equals(AppSettings? other) =>
         other is not null &&
@@ -87,6 +93,7 @@ public sealed record AppSettings
         ReadRepliesAloud == other.ReadRepliesAloud && HandsFreeSensitivity == other.HandsFreeSensitivity &&
         TrayIcon == other.TrayIcon && CloseToTray == other.CloseToTray && DictateAnywhere == other.DictateAnywhere &&
         ModelsShowAll == other.ModelsShowAll && ModelsFilter == other.ModelsFilter && StoryThinking == other.StoryThinking &&
+        IdleLockMinutes == other.IdleLockMinutes && PlainExportNoted == other.PlainExportNoted &&
         ExtraModelFolders.SequenceEqual(other.ExtraModelFolders) &&
         DefaultModels.Count == other.DefaultModels.Count &&
         DefaultModels.All(kv => other.DefaultModels.TryGetValue(kv.Key, out var v) && v == kv.Value);
@@ -94,7 +101,7 @@ public sealed record AppSettings
     public override int GetHashCode() => HashCode.Combine(
         HashCode.Combine(ModelsDirectory, Theme, Skin, ContextLength, LastModelPath, IdleUnloadMinutes),
         HashCode.Combine(SpeechModel, SpeechLanguage, Microphone, Speakers, Voice, VoiceSpeed, ReadRepliesAloud, HandsFreeSensitivity),
-        HashCode.Combine(TrayIcon, CloseToTray, DictateAnywhere, ModelsShowAll, ModelsFilter, StoryThinking));
+        HashCode.Combine(TrayIcon, CloseToTray, DictateAnywhere, ModelsShowAll, ModelsFilter, StoryThinking, IdleLockMinutes, PlainExportNoted));
 
     /// <summary>Where voice models are kept: a "voice" folder inside the models folder.</summary>
     public string? VoiceFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, "voice");

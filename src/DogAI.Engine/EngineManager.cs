@@ -121,6 +121,7 @@ public sealed class EngineManager : IChatEngine, IDisposable
             })
                 start.ArgumentList.Add(arg);
             // The key keeps other programs on this PC from using the engine; it goes in the environment, not the command line.
+            EngineEnvironment.Clean(start);
             start.Environment["LLAMA_API_KEY"] = key;
 
             var process = new Process { StartInfo = start, EnableRaisingEvents = true };
