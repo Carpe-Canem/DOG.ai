@@ -18,6 +18,22 @@
     { "useCase": "story", "repo": "unsloth/gemma-4-26B-A4B-it-GGUF", "title": "Gemma 4 26B-A4B", "params": 25.2, "experts": true, "blurb": "Fast storytelling with a large context." },
     { "useCase": "story", "repo": "unsloth/gemma-4-12b-it-GGUF", "title": "Gemma 4 12B", "params": 11.9, "blurb": "Story writing on mid-range cards." },
 
+    { "useCase": "general", "uncensored": true, "repo": "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF", "title": "Qwen3.8 27B abliterated", "params": 27.3, "blurb": "Qwen3.8 27B with its refusals removed. The most liked uncensored model of this size." },
+    { "useCase": "general", "uncensored": true, "repo": "llmfan46/Qwen3.6-35B-A3B-uncensored-heretic-GGUF", "title": "Qwen3.6 35B-A3B uncensored", "params": 34.7, "experts": true, "blurb": "The fast mixture-of-experts Qwen with its refusals removed." },
+    { "useCase": "general", "uncensored": true, "repo": "mradermacher/Huihui-gemma-4-12B-it-abliterated-GGUF", "title": "Gemma 4 12B abliterated", "params": 11.9, "blurb": "Uncensored mid-size model for 8 to 12 GB cards." },
+    { "useCase": "general", "uncensored": true, "repo": "mradermacher/Huihui-Qwen3.5-9B-abliterated-GGUF", "title": "Qwen3.5 9B abliterated", "params": 9.0, "blurb": "Small, quick and uncensored." },
+    { "useCase": "general", "uncensored": true, "repo": "mradermacher/Huihui-Qwen3.5-4B-abliterated-GGUF", "title": "Qwen3.5 4B abliterated", "params": 4.2, "blurb": "Uncensored and runs on almost anything." },
+
+    { "useCase": "characters", "uncensored": true, "repo": "llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF", "title": "Gemma 4 31B uncensored", "params": 30.7, "blurb": "Gemma's prose and character voice without refusals." },
+    { "useCase": "characters", "uncensored": true, "repo": "llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF", "title": "Gemma 4 26B-A4B uncensored", "params": 25.2, "experts": true, "blurb": "Uncensored character chat at mixture-of-experts speed." },
+    { "useCase": "characters", "uncensored": true, "repo": "mradermacher/Huihui-gemma-4-12B-it-abliterated-GGUF", "title": "Gemma 4 12B abliterated", "params": 11.9, "blurb": "Uncensored character chat on mid-range cards." },
+    { "useCase": "characters", "uncensored": true, "repo": "mradermacher/Huihui-Qwen3.5-9B-abliterated-GGUF", "title": "Qwen3.5 9B abliterated", "params": 9.0, "blurb": "A light uncensored option for 8 GB cards." },
+
+    { "useCase": "story", "uncensored": true, "repo": "llmfan46/gemma-4-31B-it-uncensored-heretic-GGUF", "title": "Gemma 4 31B uncensored", "params": 30.7, "blurb": "Rich prose for stories that go to dark places." },
+    { "useCase": "story", "uncensored": true, "repo": "huihui-ai/Huihui-Qwen3.8-27B-abliterated-GGUF", "title": "Qwen3.8 27B abliterated", "params": 27.3, "blurb": "Keeps long plots straight, without refusals." },
+    { "useCase": "story", "uncensored": true, "repo": "llmfan46/gemma-4-26B-A4B-it-ultra-uncensored-heretic-GGUF", "title": "Gemma 4 26B-A4B uncensored", "params": 25.2, "experts": true, "blurb": "Fast uncensored storytelling." },
+    { "useCase": "story", "uncensored": true, "repo": "mradermacher/Huihui-gemma-4-12B-it-abliterated-GGUF", "title": "Gemma 4 12B abliterated", "params": 11.9, "blurb": "Uncensored story writing on mid-range cards." },
+
     { "useCase": "embedding", "repo": "Qwen/Qwen3-Embedding-0.6B-GGUF", "title": "Qwen3 Embedding 0.6B", "params": 0.6, "blurb": "Finds the passages in your documents that answer a question, and earlier messages in long chats. Small, multilingual, Apache 2.0." }
   ]
 }

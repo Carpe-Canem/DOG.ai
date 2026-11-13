@@ -5,7 +5,8 @@ namespace DogAI.Core.Models;
 /// <summary>A model DOG.ai recommends for one use case.</summary>
 /// <param name="Params">Parameter count in billions, for estimating sizes before the file list is fetched.</param>
 /// <param name="Experts">Mixture-of-experts model: much faster than its size suggests.</param>
-public sealed record CuratedPick(string UseCase, string Repo, string Title, double Params, string Blurb, bool Experts = false)
+/// <param name="Uncensored">A community version with its refusals removed, listed only when the Uncensored switch is on.</param>
+public sealed record CuratedPick(string UseCase, string Repo, string Title, double Params, string Blurb, bool Experts = false, bool Uncensored = false)
 {
     /// <summary>
     /// Rough downloadable versions from the parameter count alone, so the list can show a fit
@@ -41,6 +42,13 @@ public static class CuratedPicks
     };
 
     public static string Updated { get; private set; } = "";
+
+    /// <summary>
+    /// The picks to list: the uncensored versions when asked for, else the regular ones. Document search
+    /// models have nothing to refuse, so they are listed either way.
+    /// </summary>
+    public static IEnumerable<CuratedPick> Shown(bool uncensored) =>
+        All.Where(p => p.UseCase == "embedding" || p.Uncensored == uncensored);
 
     public static IReadOnlyList<CuratedPick> All { get; } = Load();
 

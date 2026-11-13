@@ -13,6 +13,14 @@
 </div>
 
 @* Every pick is listed with its fit badge; the short curated list has no "too large" switch. *@
+<div class="filter-bar">
+    <label class="check"><input type="checkbox" checked="@Uncensored" @onchange="e => Ctx.SetFilterAsync(e.Value is true ? ModelFilters.Uncensored : ModelFilters.Usable)" /> Uncensored versions</label>
+    @if (Uncensored)
+    {
+        <span class="small">Community edits with refusals removed. They may be a little less accurate than the originals.</span>
+    }
+</div>
+
 @foreach (var useCase in CuratedPicks.UseCases.Where(u => _filter == "all" || u == _filter))
 {
     var picks = Rows.Where(r => r.Pick.UseCase == useCase).ToList();
@@ -57,7 +65,10 @@
 
     private sealed record Row(CuratedPick Pick, ModelVariant? Variant, FitResult? Fit, bool Real);
 
-    private IEnumerable<Row> Rows => CuratedPicks.All.Select(pick =>
+    /// <summary>Shares the Browse tab's choice, so asking for uncensored models carries over between tabs.</summary>
+    private bool Uncensored => Ctx.Filter == ModelFilters.Uncensored;
+
+    private IEnumerable<Row> Rows => CuratedPicks.Shown(Uncensored).Select(pick =>
     {
         var variants = _real.GetValueOrDefault(pick.Repo);
         var real = variants is not null;

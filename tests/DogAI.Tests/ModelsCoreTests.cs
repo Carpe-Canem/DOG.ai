@@ -252,6 +252,20 @@ public class CuratedPicksTests
     }
 
     [Fact]
+    public void The_uncensored_switch_swaps_in_uncensored_versions_for_every_chat_use()
+    {
+        var uncensored = CuratedPicks.Shown(true).ToList();
+        var regular = CuratedPicks.Shown(false).ToList();
+        foreach (var useCase in CuratedPicks.UseCases)
+        {
+            Assert.Contains(uncensored, p => p.UseCase == useCase);
+            Assert.Contains(regular, p => p.UseCase == useCase);
+        }
+        Assert.All(uncensored.Where(p => p.UseCase != "embedding"), p => Assert.True(ModelFilters.IsUncensored(p.Repo, null), p.Repo));
+        Assert.DoesNotContain(regular, p => p.Uncensored);
+    }
+
+    [Fact]
     public void Offline_estimates_pick_a_sensible_quant_for_a_24_GB_card()
     {
         var pick = CuratedPicks.All.First(p => p.Repo == "unsloth/Qwen3.8-27B-GGUF");
