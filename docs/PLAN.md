@@ -3,7 +3,7 @@
 ## Status (updated 2026-11-13)
 
 - **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 (characters, lore, memory, group chat), M4 (Story), M5 (Documents), M6 (Voice), M7 (Polish).
-- **Next:** nothing is planned. The roadmap's "Possible later additions" (app lock, local API, image understanding) and the "still owed" lists below are the candidates; the owner picks.
+- **Next:** M8 (locked data: password-encrypted database with Windows Hello and a recovery key) is written up under "M8: Locked data" below and waits for the owner's go-ahead (its open questions are answered). Other candidates: the roadmap's "Possible later additions" (local API, image understanding) and the "still owed" lists below.
 - **Character cards in stories (2026-11-12):** a story can now have cards from Characters in it. The story setup page has a **Character cards** list (add, remove, and one tick box per card); a character's page has **Start a story**, which opens a new story with that card already in it, the card's scenario as the premise and, for an adventure, the card's first message as the opening passage (a tick box, on by default).
   - *Linked, not copied.* The story keeps only which cards are in it. Each passage is written from the cards as they are at that moment, so editing a card changes the story from the next passage on. The card's lore fires in the story as it does in a chat, and shows under **Prompt** like any other lore. Deleting a character takes it out of its stories; the stories stay.
   - *Who plays a card.* By default the narrator plays it. Tick **I play this character** (adventures) and it becomes the main character: the model is told it must never decide what that character says or does. In a written story the tick means **Main character**. Only one card can be ticked.
@@ -364,8 +364,64 @@ Each ends with a runnable app, passing tests, and a git commit.
 | M5 ✅ | Documents | Embedding server, ingestion, collections, citations; vector recall added to character and story memory |
 | M6 ✅ | Voice | Speech-to-text, text-to-speech, per-character voices |
 | M7 ✅ | Polish | Assistants, prompt library, search, backup/restore, self-contained publish profile; also tray and global key, link prompt, code colours and maths, pinned chats, markdown export |
+| M8 | Locked data | Database encrypted with a key from the owner's password; Windows Hello to unlock day to day; printed recovery key; lock on idle; backups stay encrypted (details below) |
 
-Possible later additions, not planned: app lock / encrypted database, local OpenAI-compatible API for other tools, image understanding, image generation.
+Possible later additions, not planned: local OpenAI-compatible API for other tools, image understanding, image generation.
+
+## M8: Locked data (planned, not started)
+
+**Goal.** Without the password, nobody can read anything DOG.ai keeps: not on this PC, not from a copied data folder, not from a backup zip, not from a lost USB stick holding a portable copy. It is off by default and turned on in Settings.
+
+**What it does not protect against, said plainly.** Malware running as the owner while DOG.ai is unlocked; someone at the PC while it is unlocked; Windows' own traces (listed under Portable mode above). Model files are not encrypted: they are public downloads and say nothing about the owner.
+
+### How it works for the owner
+
+- **Turning it on** (Settings → Privacy → Lock DOG.ai with a password): choose a password, then DOG.ai shows a **recovery key** (24 letters and digits in groups) to print or write down, and asks for part of it back before going on. The database is then encrypted in place; this takes seconds to a minute.
+- **Starting DOG.ai** shows only a lock screen: the password box, **Use Windows Hello** if it is set up on this PC, and **I forgot my password** (asks for the recovery key, then a new password). Nothing else loads until it is unlocked: no chats, no tray menu, no Ctrl+Alt+Space, no default model.
+- **Windows Hello** (face, fingerprint or Windows PIN) is offered after the first unlock on each PC. It is per PC: a portable copy on another PC asks for the password once, then offers Hello there too.
+- **Locking:** **Lock now** (Settings, the tray menu, Ctrl+L), and after an idle time chosen in Settings (off, 5, 15, 30, 60 minutes; default 15). Locking restarts DOG.ai into the lock screen (`IDesktopShell.Restart`), which is the only sure way to clear the key and every decrypted chat from memory. A loaded model is unloaded by that restart; the default model loads again after unlocking.
+- **Wrong passwords:** after five wrong tries in a row, each further try waits longer (30 s, then 1 min, then 5 min). Nothing is ever wiped.
+- **Changing the password** is instant (only the key wrapping changes, not the database). **A new recovery key** can be made at any time; the old one stops working.
+- **Turning it off** asks for the password and decrypts the database back to a plain file.
+- **Forgotten password and lost recovery key:** the data is gone for good. The setup screen says this in one plain sentence, and so does the "forgot" screen.
+
+### How it works inside
+
+- **Library:** SQLite3 Multiple Ciphers (MIT licence) through its SQLitePCLRaw bundle, in place of the plain `e_sqlite3` bundle EF Core uses now; the key is passed through the connection string's `Password`. The default cipher (ChaCha20-Poly1305) is used. To be checked first, before any other work: that its bundle matches the SQLitePCLRaw version EF Core 9 uses, that FTS5 (`MessageSearch`) works, and that every existing test passes on it unchanged. If any of these fails, stop and report rather than switch libraries silently.
+- **Keys:** a random 256-bit database key. It is never stored as it is; it is stored wrapped (AES-GCM) three ways in a small plain file beside the database, `lock.json` (it must be outside the database, because it is read before the database can be opened):
+  - by a key derived from the password (PBKDF2-SHA256, 600,000 rounds, random salt; built into .NET, no new package),
+  - by a key derived from the recovery key, the same way,
+  - by Windows Hello, one entry per PC: a Hello key (`KeyCredentialManager`) signs a fixed challenge, and the signature is turned into a wrapping key. Hello keys are RSA with PKCS#1 v1.5 signatures, which are the same every time for the same challenge, so this works without storing any secret; Windows asks for the face, fingerprint or PIN each time. To be confirmed on this PC at the start of M8; if the signatures differ, Hello falls back to a DPAPI-wrapped key released after a Hello check (weaker: anything running as the owner could unwrap it), and the plan is brought back to the owner before going on.
+  - `lock.json` holds salts, round counts and wrapped keys only; nothing in it opens the database without the password, the recovery key or the owner's Hello.
+- **Core** (`DogAI.Core/Privacy`): `LockFile` (read, write, wrap, unwrap, change password, new recovery key), `RecoveryKey` (make, format, read back with spaces and dashes forgiven), `UnlockThrottle` (wait times). All testable without Windows Hello; Hello sits behind an interface implemented in App.
+- **Start-up order** in `App.OnStartup`: pending restore → portable move → **unlock** → anything that opens the database. Settings live in the database, so the lock screen's look (skin, dark or light) is copied into `lock.json` when it changes, so the lock screen matches the app.
+- **Turning it on and off:** the database is copied into a new encrypted (or plain) file (the library's own copy-with-a-new-key, or `PRAGMA rekey`; which one is settled in the first check), checked by opening it and counting rows in every table, then swapped in; the old file and its `-wal`/`-shm` are deleted. On an SSD, deleted data cannot be guaranteed gone; the help text says so and suggests turning lock on early.
+- **Backups:** an encrypted database gives an encrypted copy, and the backup zip gets `lock.json` too, so a backup opens with the same password or recovery key on any PC (Hello entries are dropped from the zip; they only work on their own PC). The backup label `"DOG AI"` and the `dogai.db` entry name stay as they are. **Restore** must accept all four cases (plain backup into plain or locked DOG.ai; locked backup into plain or locked DOG.ai): a locked backup asks for its own password before staging. Restoring a plain backup into a locked DOG.ai encrypts it while applying, so no plain copy is left behind. `lock.json` is not a machine setting (it travels with the data), but the Hello entries are.
+- **Portable mode:** `lock.json` sits in `data\`, so a moved or copied portable folder still opens with the password. `PortableMove` runs after unlock, since it rewrites paths stored in the database.
+
+### Other places text could be written, to check and close
+
+The database holds everything the owner makes (chats, cards, stories, documents' text and vectors, settings), so encrypting it covers almost everything. These are the rest, each to be checked during M8 and listed in Status afterwards as closed or as left:
+
+- **Logs** (`data\logs`): must never hold message, card, document or story text. A quick search finds no logging of message text today; a test will check by running a chat with a marker word and searching the log file.
+- **WebView2 folder** (`data\webview`): Blazor Hybrid serves pages from inside the app, so chat text should not reach its cache, but this must be checked by searching the folder for a marker word after a session. If text is found there, the folder is cleared on every lock and exit.
+- **Temp** (`data\temp` and the system temp): Whisper, sherpa-onnx and llama-server scratch files; checked the same way, with dictation and reading aloud used during the session.
+- **llama-server:** must not be started with any option that saves prompts or slots to disk (checked in `EngineManager`).
+- **Exports** (markdown, card files, story exports) are files the owner chooses to write and are left as plain files; the save dialog for a locked DOG.ai says so once.
+- **Clipboard:** copied text is the owner's choice; not handled.
+
+### Tests and checks
+
+- Unit tests: wrap and unwrap with password, recovery key and a fake Hello; wrong password refused; password change keeps the same database key; old recovery key refused after a new one; `lock.json` round-trip and refusal of a damaged file; throttle times.
+- Data tests: a plain database encrypted and decrypted back with all rows intact (using an M7 database and a current one); the encrypted file holds no marker word in its bytes; search (FTS5) works on an encrypted database; all four restore cases; a backup of a locked database holds no plain copy.
+- In the app, on a throwaway data folder: turn lock on, restart, unlock with password, with recovery key, with Windows Hello (needs the owner at the PC for face or fingerprint; the Windows PIN works too); lock now; idle lock; tray and Ctrl+Alt+Space dead while locked; turn lock off. Lock screen, setup and recovery screens looked at in all three looks, dark and light. A portable copy moved to another folder still unlocks.
+- The marker-word search of the whole data folder after a session with chat, a document, dictation and reading aloud.
+
+### Decided by the owner (2026-11-13)
+
+1. Idle lock defaults to 15 minutes.
+2. **Lock now** works only inside DOG.ai (Settings, tray menu, Ctrl+L); no global key.
+3. Every lock unloads the model; it reloads after unlocking.
 
 ## Verification
 
