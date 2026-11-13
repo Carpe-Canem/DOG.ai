@@ -59,7 +59,7 @@ else if (Backup.SafetyCopy is { } safety)
 
     private async Task BackUpAsync()
     {
-        var name = $"DOG-AI backup {DateTime.Now:yyyy-MM-dd}.zip";
+        var name = $"DOG.ai backup {DateTime.Now:yyyy-MM-dd}.zip";
         var path = await Desktop.PickSavePathAsync(name, "DOG.ai backup (*.zip)|*.zip");
         if (path is null) return;
         _busy = true;

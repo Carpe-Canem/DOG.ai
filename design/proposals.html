@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DOG AI design proposals</title>
+<title>DOG.ai design proposals</title>
 <style>
 /* ───────── Proposal switcher (not part of any design) ───────── */
 html,body{margin:0;height:100%;background:#111}
@@ -287,7 +287,7 @@ html,body{margin:0;height:100%;background:#111}
 <template id="shell-b">
   <div class="mock dir-b">
     <header class="top">
-      <div class="brand"><span class="logo" data-slot="logo"></span><span class="word">DOG AI</span></div>
+      <div class="brand"><span class="logo" data-slot="logo"></span><span class="word">DOG.ai</span></div>
       <div class="nav" data-slot="nav"></div>
       <div data-slot="offline"></div>
     </header>
@@ -322,7 +322,7 @@ html,body{margin:0;height:100%;background:#111}
 <template id="shell-d">
   <div class="mock dir-d">
     <header class="top">
-      <button class="brand" data-go="home" aria-label="Home"><span class="logo" data-slot="logo"></span><span class="word">DOG AI</span></button>
+      <button class="brand" data-go="home" aria-label="Home"><span class="logo" data-slot="logo"></span><span class="word">DOG.ai</span></button>
       <div class="nav" data-slot="nav"></div>
       <div data-slot="offline"></div>
     </header>
@@ -357,7 +357,7 @@ const ICON = {
 };
 const LABEL = { home: 'Home', general: 'General', characters: 'Characters', story: 'Story', models: 'Models' };
 const icon = k => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON[k]}</svg>`;
-const LOGO = '<svg viewBox="0 0 32 32" role="img" aria-label="DOG AI"><path d="M5 5l6 4h10l6-4v10c0 7-4.500 12-11 12S5 22 5 15z" fill="currentColor"/><circle cx="12.500" cy="15" r="1.700" fill="var(--bg)"/><circle cx="19.500" cy="15" r="1.700" fill="var(--bg)"/><path d="M13.500 20h5L16 22.800z" fill="var(--bg)"/></svg>';
+const LOGO = '<svg viewBox="0 0 32 32" role="img" aria-label="DOG.ai"><path d="M5 5l6 4h10l6-4v10c0 7-4.500 12-11 12S5 22 5 15z" fill="currentColor"/><circle cx="12.500" cy="15" r="1.700" fill="var(--bg)"/><circle cx="19.500" cy="15" r="1.700" fill="var(--bg)"/><path d="M13.500 20h5L16 22.800z" fill="var(--bg)"/></svg>';
 
 const li = (title, sub, active, avatar) =>
   `<button class="li${active ? ' active' : ''}">${avatar ? `<span class="avatar" aria-hidden="true">${avatar}</span>` : ''}<span class="li-text"><div class="li-title">${title}</div><div class="li-sub">${sub}</div></span></button>`;

@@ -2,7 +2,7 @@ namespace DogAI.Core;
 
 /// <summary>
 /// Where DOG.ai keeps its files. Everything the app writes lives under <see cref="Root"/>, except models.
-/// In portable mode (a <see cref="PortableMarker"/> file next to DogAI.exe) both live inside the program's folder:
+/// In portable mode (a <see cref="PortableMarker"/> file next to DOG.ai.exe) both live inside the program's folder:
 /// <c>data\</c> and <c>models\</c>, and nothing is written anywhere else.
 /// </summary>
 public sealed class AppPaths
@@ -13,17 +13,28 @@ public sealed class AppPaths
     /// <summary>Set this to choose the models folder a fresh data folder starts with (test runs).</summary>
     public const string ModelsOverrideVariable = "DOGAI_MODELS_DIR";
 
-    /// <summary>A file with this name next to DogAI.exe turns on portable mode.</summary>
+    /// <summary>A file with this name next to DOG.ai.exe turns on portable mode.</summary>
     public const string PortableMarker = "portable.txt";
 
     /// <summary>A program folder with this name may keep the marker, data and models in its parent folder instead.</summary>
     public const string AppSubfolder = "app";
 
+    /// <summary>The database file's name. Before the rename to DOG.ai it was <see cref="LegacyDatabaseName"/>.</summary>
+    public const string DatabaseName = "DOG.ai.db";
+
+    /// <summary>The database file's earlier name, still found and renamed at start (see <see cref="RenameLegacyDatabase"/>).</summary>
+    public const string LegacyDatabaseName = "dogai.db";
+
+    private static string DefaultRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DOG.ai");
+
+    private static string LegacyDefaultRoot => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DOG-AI");
+
     public AppPaths(string? root = null)
     {
         Root = root
             ?? Environment.GetEnvironmentVariable(RootOverrideVariable)
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DOG-AI");
+            ?? DefaultRoot;
+        IsDefaultRoot = root is null && Environment.GetEnvironmentVariable(RootOverrideVariable) is null;
     }
 
     private AppPaths(string root, string portableHome)
@@ -36,8 +47,31 @@ public sealed class AppPaths
     /// The paths for this run of the program. In order: <see cref="RootOverrideVariable"/> (test runs), portable mode
     /// when <see cref="PortableMarker"/> sits in <paramref name="programFolder"/>, else the usual per-user folder.
     /// </summary>
-    public static AppPaths ForProgram() =>
-        Resolve(AppContext.BaseDirectory, Environment.GetEnvironmentVariable(RootOverrideVariable));
+    public static AppPaths ForProgram()
+    {
+        var paths = Resolve(AppContext.BaseDirectory, Environment.GetEnvironmentVariable(RootOverrideVariable));
+        // Only the real per-user folder is ever moved; test runs and portable installs name their own.
+        return paths.IsDefaultRoot ? new AppPaths(AdoptLegacyFolder(DefaultRoot, LegacyDefaultRoot)) { IsDefaultRoot = true } : paths;
+    }
+
+    /// <summary>
+    /// The folder to use for per-user data after the rename from DOG-AI to DOG.ai: the new folder when it exists or nothing older
+    /// is there; otherwise the old folder is moved to the new name. If the move fails (something still has a file open), the old
+    /// folder is used as it is for this run, so nothing looks lost, and the move is tried again next start.
+    /// </summary>
+    public static string AdoptLegacyFolder(string newRoot, string legacyRoot)
+    {
+        if (Directory.Exists(newRoot) || !Directory.Exists(legacyRoot)) return newRoot;
+        try
+        {
+            Directory.Move(legacyRoot, newRoot);
+            return newRoot;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return legacyRoot;
+        }
+    }
 
     /// <summary><see cref="ForProgram"/> with its inputs given (tests).</summary>
     public static AppPaths Resolve(string programFolder, string? overrideRoot)
@@ -57,12 +91,51 @@ public sealed class AppPaths
 
     public string Root { get; }
 
+    /// <summary>True when <see cref="Root"/> is the usual per-user folder rather than a portable or overridden one.</summary>
+    public bool IsDefaultRoot { get; private init; }
+
     /// <summary>The program's own folder when running portable; null otherwise.</summary>
     public string? PortableHome { get; }
 
     public bool IsPortable => PortableHome is not null;
 
-    public string DatabaseFile => Path.Combine(Root, "dogai.db");
+    /// <summary>
+    /// The database. A folder that still holds only the earlier-named file keeps using it until <see cref="RenameLegacyDatabase"/>
+    /// succeeds, so a failed rename can never make the app start on an empty database.
+    /// </summary>
+    public string DatabaseFile
+    {
+        get
+        {
+            var current = Path.Combine(Root, DatabaseName);
+            return !File.Exists(current) && File.Exists(Path.Combine(Root, LegacyDatabaseName)) ? Path.Combine(Root, LegacyDatabaseName) : current;
+        }
+    }
+
+    /// <summary>
+    /// Renames dogai.db (and its -wal and -shm files) to DOG.ai.db when only the old name exists. Call at start, before anything
+    /// opens the database. Returns true when it renamed; a failure leaves the old file in use.
+    /// </summary>
+    public bool RenameLegacyDatabase()
+    {
+        var oldFile = Path.Combine(Root, LegacyDatabaseName);
+        var newFile = Path.Combine(Root, DatabaseName);
+        if (!File.Exists(oldFile) || File.Exists(newFile)) return false;
+        try
+        {
+            // Sidecars first: if the main file then fails to move, the pair is never left split under two names.
+            foreach (var suffix in new[] { "-wal", "-shm" })
+                if (File.Exists(oldFile + suffix)) File.Move(oldFile + suffix, newFile + suffix);
+            File.Move(oldFile, newFile);
+            return true;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            foreach (var suffix in new[] { "-wal", "-shm" })
+                if (!File.Exists(oldFile + suffix) && File.Exists(newFile + suffix)) File.Move(newFile + suffix, oldFile + suffix);
+            return false;
+        }
+    }
     public string LogsDirectory => Path.Combine(Root, "logs");
     public string WebViewDataDirectory => Path.Combine(Root, "webview");
 
@@ -103,7 +176,7 @@ public sealed class AppPaths
                 .OrderByDescending(d => d.AvailableFreeSpace)
                 .FirstOrDefault();
             if (best is not null)
-                return Path.Combine(best.RootDirectory.FullName, "DOG-AI", "Models");
+                return Path.Combine(best.RootDirectory.FullName, "DOG.ai", "Models");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {

@@ -1,12 +1,12 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-// Starts app\DogAI.exe from the folder this launcher sits in. Nothing else.
-var app = Path.Combine(AppContext.BaseDirectory, "app", "DogAI.exe");
+// Starts app\DOG.ai.exe from the folder this launcher sits in. Nothing else.
+var app = Path.Combine(AppContext.BaseDirectory, "app", "DOG.ai.exe");
 
 if (!File.Exists(app))
 {
-    Launcher.Say("DOG.ai could not find its program files.\n\nExpected: " + app + "\n\nKeep DogAI.exe together with its app folder.");
+    Launcher.Say("DOG.ai could not find its program files.\n\nExpected: " + app + "\n\nKeep DOG.ai.exe together with its app folder.");
     return 1;
 }
 

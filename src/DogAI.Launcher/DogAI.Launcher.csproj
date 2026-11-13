@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    The little DogAI.exe in the install folder's root. It only starts app\DogAI.exe (passing along any arguments) so the
+    The little DOG.ai.exe in the install folder's root. It only starts app\DOG.ai.exe (passing along any arguments) so the
     root holds just this file, app\, data\ and models\. Published by the App project's publish, self-contained and trimmed
     (about 1-2 MB compressed), so it needs nothing installed.
   -->
@@ -10,11 +10,11 @@
     <TargetFramework>net9.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <AssemblyName>DogAI</AssemblyName>
+    <AssemblyName>DOG.ai</AssemblyName>
     <RootNamespace>DogAI.Launcher</RootNamespace>
     <Product>DOG.ai</Product>
     <Version>0.1.0</Version>
-    <ApplicationIcon>..\DogAI.App\Assets\dogai.ico</ApplicationIcon>
+    <ApplicationIcon>..\DogAI.App\Assets\DOG.ai.ico</ApplicationIcon>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <InvariantGlobalization>true</InvariantGlobalization>
     <UseSystemResourceKeys>true</UseSystemResourceKeys>

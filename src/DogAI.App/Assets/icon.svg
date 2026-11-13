@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- DOG.ai app icon: the D-Dog mark in Workbench amber on a dark tile. Regenerate dogai.ico with tools/make-icon.ps1 after editing. -->
+  <!-- DOG.ai app icon: the D-Dog mark in Workbench amber on a dark tile. Regenerate DOG.ai.ico with tools/make-icon.ps1 after editing. -->
   <rect width="64" height="64" rx="14" fill="#16181c"/>
   <g transform="translate(32 32) scale(.8) translate(-34 -32)">
     <path fill="#f2a93b" d="M13 9h19c14 0 23 10 23 23s-9 23-23 23H13Z"/>

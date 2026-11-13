@@ -1,4 +1,4 @@
-# Launches the built DOG AI app against a throwaway data folder and drives it through the
+# Launches the built DOG.ai app against a throwaway data folder and drives it through the
 # WebView2 debugging port, so a change can be checked in the real app.
 #
 #   -Steps    list of @{ eval = '<javascript>' } and @{ shot = '<name>' } hashtables, run in order;
@@ -6,7 +6,7 @@
 #             that the previous step opened (it types the path and presses Enter)
 #   -DataDir  data folder for the run (default: a fresh temp folder, deleted afterwards)
 #   -OutDir   where screenshots are written (default: a temp folder, printed at the end)
-#   -Exe      run this DogAI.exe instead of the Debug build (for example publish\win-x64\app\DogAI.exe; point at the one
+#   -Exe      run this DOG.ai.exe instead of the Debug build (for example publish\win-x64\app\DOG.ai.exe; point at the one
 #             in app\, not the launcher in the root, which exits as soon as it has started the app)
 #   -Keep     keep the data folder, e.g. to restart and check that something persisted
 #   -Portable run the exe in portable mode (with -Exe pointing at a folder that has portable.txt): no data folder is
@@ -25,7 +25,7 @@ param(
     [switch]$Portable
 )
 $ErrorActionPreference = 'Stop'
-$exe = if ($Exe) { $Exe } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'src\DogAI.App\bin\Debug\net9.0-windows\DogAI.exe' }
+$exe = if ($Exe) { $Exe } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'src\DogAI.App\bin\Debug\net9.0-windows\DOG.ai.exe' }
 if (-not (Test-Path $exe)) { throw "Build the solution first; $exe does not exist." }
 if ($Portable) {
     # The home is the exe's folder, or its parent when the exe is in an "app" folder (the tidy publish layout).

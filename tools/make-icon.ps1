@@ -1,9 +1,9 @@
-# Rebuilds src/DogAI.App/Assets/dogai.ico from icon.svg.
+# Rebuilds src/DogAI.App/Assets/DOG.ai.ico from icon.svg.
 # Renders the SVG once at 512 px with headless Edge, then scales it down to each icon size.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 $svg = Join-Path $root 'src\DogAI.App\Assets\icon.svg'
-$ico = Join-Path $root 'src\DogAI.App\Assets\dogai.ico'
+$ico = Join-Path $root 'src\DogAI.App\Assets\DOG.ai.ico'
 $work = Join-Path ([IO.Path]::GetTempPath()) ("dogai-icon-" + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $work | Out-Null
 

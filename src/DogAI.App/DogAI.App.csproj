@@ -9,10 +9,10 @@
     <!-- Only for the notification-area icon; the window is WPF. -->
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>DogAI.App</RootNamespace>
-    <AssemblyName>DogAI</AssemblyName>
+    <AssemblyName>DOG.ai</AssemblyName>
     <Product>DOG.ai</Product>
     <Version>0.1.0</Version>
-    <ApplicationIcon>Assets\dogai.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\DOG.ai.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -37,7 +37,7 @@
 
   <!--
     A published copy is portable and tidy: the program files go in <install>\app\ (this project's PublishDir), and the install
-    folder's root gets only the small DogAI.exe launcher and portable.txt, with data\ and models\ created beside them at run time.
+    folder's root gets only the small DOG.ai.exe launcher and portable.txt, with data\ and models\ created beside them at run time.
     The marker must NOT be inside app\ (the app looks one level up for it). Debug and test builds are not affected.
   -->
   <ItemGroup>
@@ -63,6 +63,8 @@
     </PropertyGroup>
     <Exec Command="dotnet publish &quot;$(LauncherProject)&quot; -c Release -r $(RuntimeIdentifier) --self-contained -p:PublishSingleFile=true -p:PublishTrimmed=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o &quot;$(InstallRoot)&quot;" />
     <Copy SourceFiles="$(MSBuildThisFileDirectory)portable.txt" DestinationFolder="$(InstallRoot)" />
+    <!-- The launcher used to be called DogAI.exe. An install published before the rename would keep it, and it would look for app\DogAI.exe. -->
+    <Delete Files="$(InstallRoot)\DogAI.exe" Condition="Exists('$(InstallRoot)\DOG.ai.exe')" />
   </Target>
 
   <!--

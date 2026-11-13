@@ -147,6 +147,99 @@ public sealed class PortableTests : IDisposable
         Assert.Equal(_home, File.ReadAllText(paths.HomeRecordFile));
     }
 
+    [Fact]
+    public void Earlier_named_user_folder_is_moved_to_the_new_name()
+    {
+        var oldRoot = Path.Combine(_home, "DOG-AI");
+        var newRoot = Path.Combine(_home, "DOG.ai");
+        Directory.CreateDirectory(oldRoot);
+        File.WriteAllText(Path.Combine(oldRoot, "marker.txt"), "mine");
+
+        Assert.Equal(newRoot, AppPaths.AdoptLegacyFolder(newRoot, oldRoot));
+        Assert.False(Directory.Exists(oldRoot));
+        Assert.Equal("mine", File.ReadAllText(Path.Combine(newRoot, "marker.txt")));
+    }
+
+    [Fact]
+    public void An_existing_new_folder_is_never_merged_or_overwritten()
+    {
+        var oldRoot = Path.Combine(_home, "DOG-AI");
+        var newRoot = Path.Combine(_home, "DOG.ai");
+        Directory.CreateDirectory(oldRoot);
+        Directory.CreateDirectory(newRoot);
+        File.WriteAllText(Path.Combine(oldRoot, "old.txt"), "old");
+
+        Assert.Equal(newRoot, AppPaths.AdoptLegacyFolder(newRoot, oldRoot));
+        Assert.True(File.Exists(Path.Combine(oldRoot, "old.txt")));
+        Assert.False(File.Exists(Path.Combine(newRoot, "old.txt")));
+    }
+
+    [Fact]
+    public void A_fresh_machine_uses_the_new_folder_name()
+    {
+        var oldRoot = Path.Combine(_home, "DOG-AI");
+        var newRoot = Path.Combine(_home, "DOG.ai");
+        Assert.Equal(newRoot, AppPaths.AdoptLegacyFolder(newRoot, oldRoot));
+        Assert.False(Directory.Exists(oldRoot));
+    }
+
+    [Fact]
+    public void A_folder_that_cannot_be_moved_keeps_being_used_as_it_is()
+    {
+        var oldRoot = Path.Combine(_home, "DOG-AI");
+        var newRoot = Path.Combine(_home, "DOG.ai");
+        Directory.CreateDirectory(oldRoot);
+        // An open file inside the folder makes Windows refuse the move.
+        using var held = File.Open(Path.Combine(oldRoot, "held.db"), FileMode.Create, FileAccess.ReadWrite, FileShare.None);
+        var chosen = AppPaths.AdoptLegacyFolder(newRoot, oldRoot);
+        Assert.True(chosen == oldRoot || chosen == newRoot);
+        Assert.True(Directory.Exists(chosen));
+    }
+
+    [Fact]
+    public void Earlier_named_database_is_renamed_with_its_sidecars()
+    {
+        var paths = new AppPaths(_home);
+        File.WriteAllText(Path.Combine(_home, AppPaths.LegacyDatabaseName), "db");
+        File.WriteAllText(Path.Combine(_home, AppPaths.LegacyDatabaseName + "-wal"), "wal");
+        Assert.Equal(Path.Combine(_home, AppPaths.LegacyDatabaseName), paths.DatabaseFile);
+
+        Assert.True(paths.RenameLegacyDatabase());
+        Assert.Equal(Path.Combine(_home, "DOG.ai.db"), paths.DatabaseFile);
+        Assert.Equal("db", File.ReadAllText(paths.DatabaseFile));
+        Assert.Equal("wal", File.ReadAllText(paths.DatabaseFile + "-wal"));
+        Assert.False(File.Exists(Path.Combine(_home, AppPaths.LegacyDatabaseName)));
+        Assert.False(paths.RenameLegacyDatabase());
+    }
+
+    [Fact]
+    public void Both_databases_present_leaves_the_new_one_alone()
+    {
+        var paths = new AppPaths(_home);
+        File.WriteAllText(Path.Combine(_home, AppPaths.LegacyDatabaseName), "old");
+        File.WriteAllText(Path.Combine(_home, AppPaths.DatabaseName), "new");
+        Assert.False(paths.RenameLegacyDatabase());
+        Assert.Equal("new", File.ReadAllText(paths.DatabaseFile));
+        Assert.Equal("old", File.ReadAllText(Path.Combine(_home, AppPaths.LegacyDatabaseName)));
+    }
+
+    [Fact]
+    public void A_database_that_cannot_be_renamed_stays_in_use_under_its_old_name()
+    {
+        var paths = new AppPaths(_home);
+        var oldFile = Path.Combine(_home, AppPaths.LegacyDatabaseName);
+        File.WriteAllText(oldFile, "db");
+        using var held = File.Open(oldFile, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Assert.False(paths.RenameLegacyDatabase());
+        Assert.Equal(oldFile, paths.DatabaseFile);
+    }
+
+    [Fact]
+    public void A_fresh_folder_uses_the_new_database_name()
+    {
+        Assert.Equal(Path.Combine(_home, "DOG.ai.db"), new AppPaths(_home).DatabaseFile);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

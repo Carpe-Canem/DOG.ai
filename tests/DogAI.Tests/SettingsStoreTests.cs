@@ -46,7 +46,7 @@ public sealed class SettingsStoreTests : IDisposable
         var paths = new AppPaths(_root);
         Assert.StartsWith(_root, paths.DatabaseFile);
         Assert.StartsWith(_root, paths.LogsDirectory);
-        Assert.EndsWith(Path.Combine("DOG-AI", "Models"), paths.SuggestModelsDirectory());
+        Assert.EndsWith(Path.Combine("DOG.ai", "Models"), paths.SuggestModelsDirectory());
     }
 
     public void Dispose()

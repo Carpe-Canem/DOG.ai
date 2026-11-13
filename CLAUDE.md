@@ -1,4 +1,4 @@
-# DOG AI
+# DOG.ai
 
 Private, almost fully offline Windows desktop app for running local LLMs. WPF host + Blazor Hybrid UI, .NET 9, maintained in VS 2022. The owner is not reading diffs line by line; explain outcomes in plain language.
 
@@ -11,7 +11,7 @@ dotnet build DogAI.sln
 dotnet test DogAI.sln
 dotnet ef migrations add <Name> --project src/DogAI.Data --startup-project src/DogAI.Data --output-dir Migrations
 pwsh tools/walkthrough.ps1      # launch the app on a throwaway data folder and drive it (see below)
-pwsh tools/make-icon.ps1        # rebuild dogai.ico after editing Assets/icon.svg
+pwsh tools/make-icon.ps1        # rebuild DOG.ai.ico after editing Assets/icon.svg
 ```
 
 Target is `net9.0-windows` because VS 2022 cannot target .NET 10. Pin Microsoft packages to 9.0.x.
@@ -27,6 +27,10 @@ Target is `net9.0-windows` because VS 2022 cannot target .NET 10. Pin Microsoft 
 | `src/DogAI.Data` | EF Core + SQLite |
 | `src/DogAI.Hub` | The only code allowed to go online |
 | `tests/DogAI.Tests` | xUnit. Cannot reference App or UI, so keep testable logic in Core |
+
+## Names
+
+The brand is **DOG.ai** (never "DOG AI"). Code names stay `DogAI.*` (namespaces, project folders); the programs are `DOG.ai.exe` (app and launcher). On disk: data folder `%LOCALAPPDATA%\DOG.ai`, database `DOG.ai.db`, logs `DOG.ai-<date>.log`. Old names are migrated at start (`AppPaths.AdoptLegacyFolder`, `RenameLegacyDatabase`). Do not rename: `DOGAI_*` environment variables, the backup label `"DOG AI"` and the `dogai.db` entry inside backup zips (old backups must restore), the Hugging Face token key `"DOG-AI/hf-token"`, `dogai-engine.txt`.
 
 ## Rules that must hold
 
@@ -73,7 +77,7 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - A prompt is a `PromptLayout`: system-message parts (each with a drop order for when space runs out) plus text placed inside user turns. Never add a `system` message after the first one; many chat templates reject it. Notes go into user turns via `PromptLayout.Arrange`.
 - Lore lives in the card's `character_book` inside `Character.ExtraJson`; edit it through `Lorebook` (`For`, `SaveTo`) so unknown fields survive export. Keys from cards are untrusted: matching uses a regex timeout.
 - Group chats are `Mode = "group"` conversations with members in `ChatMembers` (`IChatStore.GetMembersAsync`/`SetMembersAsync`) and each reply's writer in `ChatMessage.SpeakerId`. Who speaks is `GroupTurns` (Core); the speaker's prompt is `CharacterPrompt.GroupLayout`. In `BuildPromptAsync` group history is name-prefixed and same-role turns are merged, and the layout's `Directive` ends every group prompt with a user turn: keep roles alternating. The page is `Pages/GroupChat.razor`; side-panel settings shared with one-to-one chats are `Components/Chat/RoleplayPanels.razor`.
-- DOG AI's own model jobs (summaries, card builder) set `MaxTokens` / `JsonSchema` on a copy of a preset; both are `[JsonIgnore]` so they never end up in a user's saved style. Check their output before keeping it (see `CharacterPrompt.IsUsableSummary`).
+- DOG.ai's own model jobs (summaries, card builder) set `MaxTokens` / `JsonSchema` on a copy of a preset; both are `[JsonIgnore]` so they never end up in a user's saved style. Check their output before keeping it (see `CharacterPrompt.IsUsableSummary`).
 
 ## How stories work
 
@@ -111,12 +115,12 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - **Code colours and maths:** `DogAI.UI/wwwroot/vendor` (highlight.js, KaTeX, with licences and checksums in `vendor/README.txt`) and `js/enhance.js`, loaded from `index.html`. `MarkdownView` writes each code block as one HTML-encoded markup piece with `data-lang`; `MarkdownRenderer` has `UseMathematics`, which marks formulas `.math`. Do not make Blazor render the inside of a block that JS colours.
 - **Links:** `LinkGuard` (in `MainLayout`, inside the `.shell` div so it gets the theme) listens through `chat.js` `watchLinks` and asks before `IDesktopShell.OpenUrl`. Any new modal must also sit inside `.shell`.
 - **Windows extras:** `DogAI.App/WindowsIntegration` (tray icon via WinForms `NotifyIcon`, close-to-tray, the Ctrl+Alt+Space low-level hook on its own thread; text arrives through `Dictation.HeardForOtherPrograms`). Settings: `TrayIcon`, `CloseToTray`, `DictateAnywhere`, all off by default.
-- **Publish:** `dotnet publish src/DogAI.App -p:PublishProfile=win-x64` writes `publish\win-x64`: a small launcher `DogAI.exe` (project `DogAI.Launcher`, only starts `app\DogAI.exe`), `portable.txt`, and `app\` with every program file. Targets in `DogAI.App.csproj` drop other platforms' native files, empty `app\` before publishing (only a folder named `app`, never the root, so `data\` and `models\` are safe), and publish the launcher and marker into the root. Check a publish by running the exe in `app\` (not the launcher, which exits at once): `tools/walkthrough.ps1 -Exe <path to app\DogAI.exe> -Portable`. `tools/tidy-install.ps1` converts an old flat install (program files loose beside `data` and `Models`) to this layout.
-- **Portable mode:** a `portable.txt` next to DogAI.exe, or one level above it when the exe sits in a folder named `app` (the publish layout; never in Debug builds), makes `AppPaths.ForProgram` put data in `<home>\data` and models in `<home>\models`, forced on every start. `DOGAI_DATA_DIR` still wins (test runs). Portable runs point the process's TEMP/TMP at `data\temp` (inherited by llama-server and native libraries), and `LlamaServerLocator` uses only `data\engine` (no winget/PATH fallback; `DOGAI_LLAMA_SERVER` still wins). `PortableMove` (Data) rewrites saved paths in the Settings JSON and `ModelRecords` when the folder moved (`data\home.txt` records the last home). Any new setting or table that stores a full path must be added to `PortableMove`. Walkthrough: `tools/walkthrough.ps1 -Exe <copy>\DogAI.exe -Portable`.
+- **Publish:** `dotnet publish src/DogAI.App -p:PublishProfile=win-x64` writes `publish\win-x64`: a small launcher `DOG.ai.exe` (project `DogAI.Launcher`, only starts `app\DOG.ai.exe`), `portable.txt`, and `app\` with every program file. Targets in `DogAI.App.csproj` drop other platforms' native files, empty `app\` before publishing (only a folder named `app`, never the root, so `data\` and `models\` are safe), and publish the launcher and marker into the root. Check a publish by running the exe in `app\` (not the launcher, which exits at once): `tools/walkthrough.ps1 -Exe <path to app\DOG.ai.exe> -Portable`. `tools/tidy-install.ps1` converts an old flat install (program files loose beside `data` and `Models`) to this layout.
+- **Portable mode:** a `portable.txt` next to DOG.ai.exe, or one level above it when the exe sits in a folder named `app` (the publish layout; never in Debug builds), makes `AppPaths.ForProgram` put data in `<home>\data` and models in `<home>\models`, forced on every start. `DOGAI_DATA_DIR` still wins (test runs). Portable runs point the process's TEMP/TMP at `data\temp` (inherited by llama-server and native libraries), and `LlamaServerLocator` uses only `data\engine` (no winget/PATH fallback; `DOGAI_LLAMA_SERVER` still wins). `PortableMove` (Data) rewrites saved paths in the Settings JSON and `ModelRecords` when the folder moved (`data\home.txt` records the last home). Any new setting or table that stores a full path must be added to `PortableMove`. Walkthrough: `tools/walkthrough.ps1 -Exe <copy>\app\DOG.ai.exe -Portable`.
 - **Tool quirk when writing code through the shell:** doubled backslashes can be collapsed and `\n` in Python strings can turn into real newlines; use the Edit/Write tools for C# or JS that contains escapes.
 
-Check every new screen in all three skins, dark and light. Say plainly what was and was not looked at. Never point a test run at the real data folder (`%LOCALAPPDATA%\DOG-AI`), and never run a portable walkthrough from the owner's real portable folder; copy `publish\win-x64` somewhere temporary first.
+Check every new screen in all three skins, dark and light. Say plainly what was and was not looked at. Never point a test run at the real data folder (`%LOCALAPPDATA%\DOG.ai`), and never run a portable walkthrough from the owner's real portable folder; copy `publish\win-x64` somewhere temporary first.
 
 ## Machine
 
-RTX 4090 (24 GB VRAM), Core Ultra 9 285K, 32 GB RAM. Models go in `D:\DOG-AI\Models`. `llama-server` (winget) and Ollama are already installed.
+RTX 4090 (24 GB VRAM), Core Ultra 9 285K, 32 GB RAM. Models go in `D:\DOG.ai\Models`. `llama-server` (winget) and Ollama are already installed.

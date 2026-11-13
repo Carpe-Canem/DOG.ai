@@ -26,9 +26,12 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        // A restarted DOG.ai waits for the old process first, so renames below never meet files it still holds.
+        WaitForPreviousInstance(e.Args);
+        // May move the earlier-named per-user folder (DOG-AI) to DOG.ai; see AppPaths.AdoptLegacyFolder.
         var paths = AppPaths.ForProgram();
         paths.EnsureCreated();
-        WaitForPreviousInstance(e.Args);
+        var renamedDatabase = paths.RenameLegacyDatabase();
         // Portable: the engines and libraries inherit this, so their scratch files stay in the folder too.
         paths.UseOwnTempFolder();
 
@@ -36,7 +39,7 @@ public partial class App : Application
             .MinimumLevel.Information()
             .MinimumLevel.Override("Microsoft.EntityFrameworkCore", Serilog.Events.LogEventLevel.Warning)
             .WriteTo.File(
-                Path.Combine(paths.LogsDirectory, "dogai-.log"),
+                Path.Combine(paths.LogsDirectory, "DOG.ai-.log"),
                 rollingInterval: RollingInterval.Day,
                 retainedFileCountLimit: 14)
             .CreateLogger();
@@ -50,6 +53,7 @@ public partial class App : Application
 
         try
         {
+            if (renamedDatabase) Log.Information("Renamed the database from {Old} to {New}.", AppPaths.LegacyDatabaseName, AppPaths.DatabaseName);
             // A restore waiting from last time is swapped in now, before anything opens the database.
             if (DatabaseBackup.ApplyPending(paths) is { } restored) Log.Information(restored);
             // A portable folder that was moved or copied: saved model paths follow it.

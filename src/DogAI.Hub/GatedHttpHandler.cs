@@ -69,7 +69,7 @@ public sealed class HubHttp : IDisposable
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
         };
         Client = new HttpClient(new GatedHttpHandler(gate, audit, sockets)) { Timeout = Timeout.InfiniteTimeSpan };
-        Client.DefaultRequestHeaders.UserAgent.ParseAdd("DOG-AI/0.1");
+        Client.DefaultRequestHeaders.UserAgent.ParseAdd("DOG.ai/0.1");
     }
 
     public HttpClient Client { get; }

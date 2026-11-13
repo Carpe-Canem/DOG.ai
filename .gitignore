@@ -482,6 +482,6 @@ $RECYCLE.BIN/
 # Vim temporary swap files
 *.swp
 
-# The template hides folders named Backup* and *.pubxml files; DOG AI has a Backup folder in Core and a checked-in publish profile.
+# The template hides folders named Backup* and *.pubxml files; DOG.ai has a Backup folder in Core and a checked-in publish profile.
 !src/DogAI.Core/Backup/
 !src/DogAI.App/Properties/PublishProfiles/*.pubxml
