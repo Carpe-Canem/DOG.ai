@@ -12,11 +12,10 @@
     }
 </div>
 
-<FilterBar Hidden="Hidden" />
-
+@* Every pick is listed with its fit badge; the short curated list has no "too large" switch. *@
 @foreach (var useCase in CuratedPicks.UseCases.Where(u => _filter == "all" || u == _filter))
 {
-    var picks = Rows.Where(r => r.Pick.UseCase == useCase && IsShown(r)).ToList();
+    var picks = Rows.Where(r => r.Pick.UseCase == useCase).ToList();
     if (picks.Count == 0) continue;
     var bestIndex = picks.FindIndex(r => r.Fit?.Kind == FitKind.Full);
     <section class="group">
@@ -69,11 +68,6 @@
             : Ctx.Fit(pick.EstimatedShape(best.Size));
         return new Row(pick, best, fit, real);
     });
-
-    /// <summary>Usable means a version fits entirely on the graphics card. Nothing is hidden before the hardware is measured.</summary>
-    private bool IsShown(Row row) => Ctx.ShowAll || !Ctx.Measured || row.Fit?.Kind == FitKind.Full;
-
-    private int Hidden => Ctx.Measured ? Rows.Where(r => !IsShown(r)).Select(r => r.Pick.Repo).Distinct().Count() : 0;
 
     private readonly Dictionary<string, IReadOnlyList<ModelVariant>> _real = new(StringComparer.OrdinalIgnoreCase);
 
