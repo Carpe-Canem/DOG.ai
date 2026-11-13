@@ -6,6 +6,7 @@
 @inject AppearanceState Appearance
 @inject ISettingsStore SettingsStore
 @inject IDesktopShell Desktop
+@inject IJSRuntime JS
 
 <div class="voice-settings privacy">
     @switch (_status)
@@ -54,7 +55,7 @@
                         <option value="@minutes" selected="@(minutes == _idleMinutes)">@(minutes == 0 ? "Never" : minutes == 60 ? "1 hour" : $"{minutes} minutes")</option>
                     }
                 </select>
-                <span class="small">Counted from the last key press or mouse move anywhere on the PC. It waits while a reply is being written or read aloud. Locking unloads the model; it loads again after you unlock.</span>
+                <span class="small">Counted from the last key press or mouse move anywhere on the PC. While a reply is being written or read aloud, or a model is downloading, it waits up to the same time again. A download cut by the lock is paused and carries on with Resume in Models. Locking unloads the model; it loads again after you unlock.</span>
             </label>
             @if (_helloAvailable)
             {
@@ -122,13 +123,19 @@
                     break;
 
                 case Step.ShowKey:
-                    <p>This is your <b>recovery key</b>. If you forget your password, it is the only way back in. Write it down or print this window, and keep it somewhere safe, away from this PC.</p>
-                    <div class="recovery-key" aria-label="Recovery key">@RecoveryKey.Format(_recovery!)</div>
+                    <p>This is your <b>recovery key</b>. If you forget your password, it is the only way back in. Write it down or print it, and keep it somewhere safe, away from this PC.</p>
+                    <div class="recovery-key print-this" aria-label="Recovery key">
+                        <span class="print-only">DOG.ai recovery key, @DateTime.Now.ToString("d MMM yyyy"). Keep it somewhere safe, away from the PC.</span>
+                        @RecoveryKey.Format(_recovery!)
+                    </div>
                     <p class="small">@LostSentence DOG.ai does not keep a readable copy of this key and cannot show it again.</p>
                     <label class="check">
                         <input type="checkbox" name="wrote-it-down" @bind="_wroteDown" />
                         <span>I have written down or printed my recovery key</span>
                     </label>
+                    <div class="row">
+                        <button class="btn" @onclick="PrintAsync">Print…</button>
+                    </div>
                     <div class="row">
                         <button class="btn primary" disabled="@(!_wroteDown)" @onclick="ToCheck">Next</button>
                         <button class="btn" @onclick="CloseFlow">Cancel</button>
@@ -296,6 +303,20 @@
         finally
         {
             _busy = false;
+        }
+    }
+
+    /// <summary>Prints only the key (the page's print style hides everything else). Which printer is the owner's choice.</summary>
+    private async Task PrintAsync()
+    {
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
+            await module.InvokeVoidAsync("printOnly", ".print-this");
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            _problem = "Printing could not be started. Write the key down instead.";
         }
     }
 

@@ -18,6 +18,14 @@
 #               @{ close = 1 }                   close the main window (it hides in the tray when that is chosen in Settings)
 #               @{ wait = 1500 }                 wait this many milliseconds
 #               @{ log = 'text' }                print the app log lines containing this text
+#               @{ realkey = 'ctrl+l' }          bring DOG.ai's window to the front and press real keys (ctrl/alt/shift + one
+#                                                letter, or 'esc'), through Windows rather than the page
+#               @{ winshot = 'name' }            save a picture of DOG.ai's window as Windows draws it (shows dialogs the page
+#                                                cannot capture, such as the print preview)
+#               @{ trayclick = 1 }               left-click the tray icon
+#               @{ uiclick = 'Cancel' }          press the first button with this name in any of DOG.ai's windows (for example
+#                                                in the print preview), through UI Automation
+#               @{ procs = 'llama-server' }      print how many processes of that name are running (also in lock steps)
 #   -DataDir  data folder for the run (default: a fresh temp folder, deleted afterwards)
 #   -OutDir   where screenshots are written (default: a temp folder, printed at the end)
 #   -Exe      run this DOG.ai.exe instead of the Debug build (for example publish\win-x64\app\DOG.ai.exe; point at the one
@@ -82,6 +90,7 @@ if (-not ('DogWalk.Win' -as [type])) {
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, string lParam);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 public delegate bool EnumProc(IntPtr hwnd, IntPtr lParam);
 [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc proc, IntPtr lParam);
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int pid);
@@ -175,6 +184,68 @@ function Hold-GlobalKey($ms) {
     "held Ctrl+Alt+Space for $ms ms"
 }
 
+function Front-Window {
+    $w = $A::RootElement.FindAll('Children', (ByPid)) | Select-Object -First 1
+    if (-not $w) { return [IntPtr]::Zero }
+    $h = [IntPtr]$w.Current.NativeWindowHandle
+    # Windows lets a program bring another to the front only just after a key press; a lone Alt counts.
+    [DogWalk.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [DogWalk.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+    [DogWalk.Win]::SetForegroundWindow($h) | Out-Null
+    Start-Sleep -Milliseconds 500
+    return $h
+}
+
+function Real-Key($combo) {
+    $h = Front-Window
+    # Never type into someone else's window: only go on when DOG.ai really is in front.
+    if ($h -eq [IntPtr]::Zero -or [DogWalk.Win]::GetForegroundWindow() -ne $h) { "REAL KEYS NOT SENT: DOG.ai is not the window in front"; return }
+    $parts = $combo.ToLower() -split '\+'
+    $mods = @(); if ($parts -contains 'ctrl') { $mods += 0x11 }; if ($parts -contains 'alt') { $mods += 0x12 }; if ($parts -contains 'shift') { $mods += 0x10 }
+    $key = $parts[-1]
+    $vk = if ($key -eq 'esc') { 0x1B } else { [int][char]$key.ToUpper() }
+    foreach ($m in $mods) { [DogWalk.Win]::keybd_event([byte]$m, 0, 0, [UIntPtr]::Zero) }
+    [DogWalk.Win]::keybd_event([byte]$vk, 0, 0, [UIntPtr]::Zero); [DogWalk.Win]::keybd_event([byte]$vk, 0, 2, [UIntPtr]::Zero)
+    foreach ($m in $mods) { [DogWalk.Win]::keybd_event([byte]$m, 0, 2, [UIntPtr]::Zero) }
+    Start-Sleep -Milliseconds 800
+    "pressed $combo (real keys)"
+}
+
+function Win-Shot($name) {
+    $w = $A::RootElement.FindAll('Children', (ByPid)) | Select-Object -First 1
+    if (-not $w) { "NO WINDOW for winshot $name"; return }
+    $handle = [IntPtr]$w.Current.NativeWindowHandle
+    $rect = New-Object DogWalk.Win+RECT
+    [DogWalk.Win]::GetWindowRect($handle, [ref]$rect) | Out-Null
+    $bitmap = [Drawing.Bitmap]::new([Math]::Max(1, $rect.Right - $rect.Left), [Math]::Max(1, $rect.Bottom - $rect.Top))
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    $hdc = $graphics.GetHdc()
+    [DogWalk.Win]::PrintWindow($handle, $hdc, 2) | Out-Null   # DOG.ai's window only, even if another window covers it
+    $graphics.ReleaseHdc($hdc); $graphics.Dispose()
+    $file = Join-Path $OutDir "$name.png"
+    $bitmap.Save($file, [Drawing.Imaging.ImageFormat]::Png); $bitmap.Dispose()
+    "shot: $file"
+}
+
+function Tray-Click {
+    $windows = [DogWalk.Win]::WindowsOf($script:app.Id, 'WindowsForms10.Window')
+    if ($windows.Count -eq 0) { "TRAY: no tray icon"; return }
+    foreach ($w in $windows) {
+        [DogWalk.Win]::PostMessage($w, 0x0800, [IntPtr]::Zero, [IntPtr]0x0201) | Out-Null
+        [DogWalk.Win]::PostMessage($w, 0x0800, [IntPtr]::Zero, [IntPtr]0x0202) | Out-Null
+    }
+    Start-Sleep -Milliseconds 1200
+    "tray: left-clicked"
+}
+
+function Ui-Click($name) {
+    $cond = [Windows.Automation.AndCondition]::new((ByPid), [Windows.Automation.PropertyCondition]::new($A::NameProperty, $name))
+    $button = $A::RootElement.FindAll('Descendants', $cond) | Where-Object { $_.Current.ControlType -eq [Windows.Automation.ControlType]::Button } | Select-Object -First 1
+    if (-not $button) { "UI BUTTON NOT FOUND: $name"; return }
+    $button.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 1000
+    "pressed button: $name"
+}
+
 function Adopt($seconds) {
     # A restart starts DOG.ai.exe with "--after <old pid>"; follow the new process.
     $old = $script:app.Id
@@ -224,6 +295,11 @@ function Run-LockSteps($steps) {
         if ($null -ne $step.tray) { Open-Tray $step.tray }
         if ($step.globalkey) { Hold-GlobalKey $step.globalkey }
         if ($step.log) { Show-Log $step.log }
+        if ($step.realkey) { Real-Key $step.realkey }
+        if ($step.winshot) { Win-Shot $step.winshot }
+        if ($step.trayclick) { Tray-Click }
+        if ($step.uiclick) { Ui-Click $step.uiclick }
+        if ($step.procs) { "$($step.procs) processes: $(@(Get-Process $step.procs -ErrorAction SilentlyContinue).Count)" }
         if ($step.wait) { Start-Sleep -Milliseconds $step.wait }
         if ($step.gone) {
             $closed = $false
@@ -313,9 +389,14 @@ try {
             Run-LockSteps $step.lock
             if (-not ($step.lock | Where-Object { $_.stay })) { Connect-Page }
         }
+        if ($step.realkey) { Real-Key $step.realkey }
+        if ($step.winshot) { Win-Shot $step.winshot }
+        if ($step.trayclick) { Tray-Click }
+        if ($step.uiclick) { Ui-Click $step.uiclick }
         if ($null -ne $step.tray) { Open-Tray $step.tray }
         if ($step.globalkey) { Hold-GlobalKey $step.globalkey }
         if ($step.log) { Show-Log $step.log }
+        if ($step.procs) { "$($step.procs) processes: $(@(Get-Process $step.procs -ErrorAction SilentlyContinue).Count)" }
         if ($step.close) {
             # Only the visible window (UI Automation lists no hidden ones); WM_CLOSE is what the title bar's X sends.
             foreach ($w in $A::RootElement.FindAll('Children', (ByPid))) { [DogWalk.Win]::PostMessage([IntPtr]$w.Current.NativeWindowHandle, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null }

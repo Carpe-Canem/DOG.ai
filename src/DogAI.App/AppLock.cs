@@ -25,6 +25,7 @@ public sealed class AppLock : IAppLock, IDisposable
     private readonly ReadAloud _reader;
     private readonly Dictation _dictation;
     private readonly EngineManager _engine;
+    private readonly DogAI.Hub.DownloadManager _downloads;
     private readonly ILogger<AppLock> _log;
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private TimeSpan? _limit;
@@ -33,7 +34,7 @@ public sealed class AppLock : IAppLock, IDisposable
     private long _startedMs = Environment.TickCount64;
 
     public AppLock(PrivacyLock privacyLock, ISettingsStore settings, AppearanceState appearance, ChatService chat, ReadAloud reader,
-        Dictation dictation, EngineManager engine, ILogger<AppLock> log)
+        Dictation dictation, EngineManager engine, DogAI.Hub.DownloadManager downloads, ILogger<AppLock> log)
     {
         _lock = privacyLock;
         _settings = settings;
@@ -42,6 +43,7 @@ public sealed class AppLock : IAppLock, IDisposable
         _reader = reader;
         _dictation = dictation;
         _engine = engine;
+        _downloads = downloads;
         _log = log;
         _timer.Tick += (_, _) => CheckIdle();
         _appearance.Changed += SaveLook;
@@ -83,7 +85,8 @@ public sealed class AppLock : IAppLock, IDisposable
         var sinceUnlock = TimeSpan.FromMilliseconds(Environment.TickCount64 - _startedMs);
         var pc = IdleTime();
         var idle = pc < sinceUnlock ? pc : sinceUnlock;
-        var busy = _chat.IsBusy || _engine.IsBusy || _reader.IsSpeaking || _dictation.IsOn;
+        // A download cut by the lock is kept and paused; Resume in Models carries on from where it stopped.
+        var busy = _chat.IsBusy || _engine.IsBusy || _reader.IsSpeaking || _dictation.IsOn || _downloads.HasPending;
         if (IdleLock.Due(_limit, idle, busy) && CanLock) Lock($"nobody used the PC for {(int)idle.TotalSeconds} seconds");
     }
 

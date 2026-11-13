@@ -216,8 +216,12 @@ public sealed class WindowsIntegration : IWindowsIntegration, IDisposable
                     if (Held(VkControl) && Held(VkMenu) && !OwnWindowHasFocus())
                     {
                         _combo = true;
-                        _log.LogInformation("Ctrl+Alt+Space: listening for another program.");
-                        Enqueue(() => _dictation.StartForOtherProgramsAsync());
+                        // Logged off the hook's thread: Windows drops a low-level hook that is slow to answer.
+                        Enqueue(() =>
+                        {
+                            _log.LogInformation("Ctrl+Alt+Space: listening for another program.");
+                            return _dictation.StartForOtherProgramsAsync();
+                        });
                         return 1;
                     }
                 }

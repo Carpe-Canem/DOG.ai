@@ -135,3 +135,21 @@ export function watchLockKey(dotnet) {
 export function unwatchLockKey(dotnet) {
   if (lockTarget === dotnet) lockTarget = null;
 }
+
+// Prints one element only (the recovery key): everything else is hidden while the print dialog is open.
+export function printOnly(selector) {
+  const target = document.querySelector(selector);
+  if (!target) return;
+  const path = [];
+  for (let e = target.parentElement; e && e !== document.body; e = e.parentElement) { e.classList.add('print-path'); path.push(e); }
+  target.classList.add('printing');
+  document.documentElement.classList.add('print-one');
+  const done = () => {
+    target.classList.remove('printing');
+    path.forEach(e => e.classList.remove('print-path'));
+    document.documentElement.classList.remove('print-one');
+    window.removeEventListener('afterprint', done);
+  };
+  window.addEventListener('afterprint', done);
+  window.print();
+}

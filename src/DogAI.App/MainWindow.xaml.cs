@@ -49,6 +49,17 @@ public partial class MainWindow : Window
             _audit.Record("webview", e.Url.GetLeftPart(UriPartial.Path), allowed: false, "external link");
         };
 
+        // Ctrl+L locks DOG.ai (when the lock is on). The page listens for it too (LockKey); whichever sees it first wins,
+        // and a second call does nothing.
+        var appLock = services.GetRequiredService<DogAI.Core.Privacy.IAppLock>();
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != System.Windows.Input.Key.L || System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.Control) return;
+            if (!appLock.CanLock) return;
+            e.Handled = true;
+            appLock.LockNow();
+        };
+
         var appearance = services.GetRequiredService<AppearanceState>();
         SourceInitialized += (_, _) => ApplyTitleBar(appearance);
         appearance.Changed += () => Dispatcher.Invoke(() => ApplyTitleBar(appearance));

@@ -479,6 +479,17 @@ button.cite:hover { border-color: var(--accent); }
 .privacy p { margin: 0; }
 .privacy-modal p { margin: 0; }
 .recovery-key { padding: 14px 16px; border: 1px dashed var(--accent); border-radius: min(var(--r), 12px); background: var(--bg); font: 600 1.35em/1.3 var(--mono); letter-spacing: .08em; text-align: center; overflow-wrap: anywhere; user-select: all; }
+.print-only { display: none; }
+@media print {
+  html.print-one, html.print-one body { height: auto !important; overflow: visible !important; background: #fff !important; }
+  html.print-one body *:not(.print-path):not(.printing):not(.printing *) { display: none !important; }
+  html.print-one .print-path { display: block !important; position: static !important; overflow: visible !important; height: auto !important; width: auto !important;
+    max-width: none !important; max-height: none !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important;
+    background: none !important; transform: none !important; }
+  html.print-one .printing { display: block !important; margin: 0 !important; padding: 12pt !important; border: 1px solid #000 !important; color: #000 !important;
+    background: #fff !important; font: 600 20pt/1.5 Consolas, monospace !important; text-align: left !important; }
+  html.print-one .printing .print-only { display: block; font: 11pt/1.5 "Segoe UI", sans-serif; margin-bottom: 8pt; letter-spacing: 0; }
+}
 .field.mono { font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .voice-settings .two { gap: 16px; }
 .voice-settings input[type=range] { width: 100%; max-width: 360px; accent-color: var(--accent); }
