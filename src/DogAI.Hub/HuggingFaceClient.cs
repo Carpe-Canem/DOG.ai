@@ -15,8 +15,13 @@ public enum HfSort
 }
 
 /// <summary>One model repository in search results.</summary>
-public sealed record HfModelSummary(string Id, long Downloads, int Likes, DateTime? LastModified, bool Gated, string? PipelineTag)
+/// <param name="Parameters">Parameter count from the GGUF metadata, when Hugging Face has it.</param>
+/// <param name="Tags">Tags the repository's author gave it.</param>
+public sealed record HfModelSummary(string Id, long Downloads, int Likes, DateTime? LastModified, bool Gated, string? PipelineTag,
+    long? Parameters = null, IReadOnlyList<string>? Tags = null)
 {
+    public bool Uncensored => ModelFilters.IsUncensored(Id, Tags);
+
     public string Author => Id.Split('/')[0];
     public string Name => Id.Contains('/') ? Id[(Id.IndexOf('/') + 1)..] : Id;
 }
@@ -47,11 +52,28 @@ public sealed class HuggingFaceClient(HttpClient http, HfToken token)
             _ => "trendingScore",
         };
         var url = $"{Site}/api/models?filter=gguf&sort={sortKey}&direction=-1&limit={limit}" +
-                  "&expand[]=downloads&expand[]=likes&expand[]=lastModified&expand[]=gated&expand[]=pipeline_tag";
+                  "&expand[]=downloads&expand[]=likes&expand[]=lastModified&expand[]=gated&expand[]=pipeline_tag&expand[]=gguf&expand[]=tags";
         if (!string.IsNullOrWhiteSpace(query)) url += "&search=" + Uri.EscapeDataString(query.Trim());
 
         var items = await GetJsonAsync<List<ApiModel>>(url, ct).ConfigureAwait(false) ?? [];
-        return items.Select(m => new HfModelSummary(m.Id, m.Downloads, m.Likes, m.LastModified, IsGated(m.Gated), m.PipelineTag)).ToList();
+        return items.Select(m => new HfModelSummary(m.Id, m.Downloads, m.Likes, m.LastModified, IsGated(m.Gated), m.PipelineTag,
+            m.Gguf is { ValueKind: JsonValueKind.Object } g && g.TryGetProperty("total", out var total) && total.ValueKind == JsonValueKind.Number
+                ? total.GetInt64() : null,
+            m.Tags)).ToList();
+    }
+
+    /// <summary>
+    /// The best-liked models that call themselves uncensored. Hugging Face searches one word at a time,
+    /// so the common labels are searched separately and merged; only results that really carry a label are kept.
+    /// </summary>
+    public async Task<IReadOnlyList<HfModelSummary>> SearchUncensoredAsync(string? query, int limit = 100, CancellationToken ct = default)
+    {
+        var searches = new[] { "uncensored", "abliterated" }
+            .Select(word => SearchAsync($"{query} {word}".Trim(), HfSort.Likes, limit, ct));
+        var merged = (await Task.WhenAll(searches).ConfigureAwait(false)).SelectMany(r => r);
+        return merged.Where(m => m.Uncensored)
+            .GroupBy(m => m.Id, StringComparer.OrdinalIgnoreCase).Select(g => g.First())
+            .OrderByDescending(m => m.Likes).ToList();
     }
 
     /// <summary>Every file in the repository with its size and published SHA-256.</summary>
@@ -144,7 +166,9 @@ public sealed class HuggingFaceClient(HttpClient http, HfToken token)
         int Likes,
         DateTime? LastModified,
         JsonElement Gated,
-        [property: JsonPropertyName("pipeline_tag")] string? PipelineTag);
+        [property: JsonPropertyName("pipeline_tag")] string? PipelineTag,
+        JsonElement? Gguf = null,
+        List<string>? Tags = null);
 
     private sealed record ApiTreeItem(string Type, string Path, long Size, ApiLfs? Lfs);
 

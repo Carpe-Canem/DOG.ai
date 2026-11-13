@@ -41,11 +41,14 @@ else
     {
         <div class="notice bad"><span>None of these files can run on this PC at a @Ctx.Context.ToString("N0")-token context.</span></div>
     }
+    var hidden = _variants.Count(v => Ctx.Measured && Ctx.Fit(Shape(v.Size)).Kind != FitKind.Full);
     <h4 class="group-title">Files</h4>
+    <FilterBar Hidden="hidden" />
     <div class="models">
         @foreach (var v in _variants)
         {
             var fit = Ctx.Fit(Shape(v.Size));
+            if (!Ctx.ShowAll && Ctx.Measured && fit.Kind != FitKind.Full) continue;
             var best = ReferenceEquals(v, _best);
             <div class="model has-fit @(best ? "picked" : "")">
                 <div class="li-text">

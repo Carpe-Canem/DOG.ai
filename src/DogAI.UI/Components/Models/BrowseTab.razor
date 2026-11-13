@@ -1,6 +1,7 @@
 @implements IDisposable
 @inject HuggingFaceClient Hf
 @inject OnlineGate Gate
+@inject ModelsContext Ctx
 @inject NavigationManager Nav
 
 @if (!Gate.IsOnline)
@@ -13,14 +14,18 @@ else
 {
     <form class="search-row" @onsubmit="SearchAsync">
         <input class="field" type="search" placeholder="Search GGUF models, e.g. gemma or qwen 27b" @bind="_query" aria-label="Search" />
-        <select class="field" @bind="_sort" @bind:after="SearchAsync" aria-label="Sort by">
-            <option value="@HfSort.Trending">Trending</option>
-            <option value="@HfSort.Downloads">Most downloaded</option>
-            <option value="@HfSort.Recent">Recently updated</option>
-            <option value="@HfSort.Likes">Most liked</option>
-        </select>
+        @if (Ctx.Filter == ModelFilters.Usable)
+        {
+            <select class="field" @bind="_sort" @bind:after="SearchAsync" aria-label="Sort by">
+                <option value="@HfSort.Trending">Trending</option>
+                <option value="@HfSort.Downloads">Most downloaded</option>
+                <option value="@HfSort.Recent">Recently updated</option>
+                <option value="@HfSort.Likes">Most liked</option>
+            </select>
+        }
         <button class="btn primary" type="submit">Search</button>
     </form>
+    <FilterBar Rating="true" Hidden="Hidden" />
 
     @if (_error is not null)
     {
@@ -30,18 +35,18 @@ else
     {
         <p class="note">Searching…</p>
     }
-    else if (_searched && _results.Count == 0)
+    else if (_searched && Shown.Count == 0)
     {
-        <p class="note">Nothing matched. Try fewer words.</p>
+        <p class="note">@(Hidden > 0 ? "Everything that matched is too large for this PC. Turn on “Show models too large for this PC” to see it." : "Nothing matched. Try fewer words.")</p>
     }
 
     <div class="models">
-        @foreach (var repo in _results)
+        @foreach (var repo in Shown)
         {
             <a class="model link" href="@($"models/browse?repo={Uri.EscapeDataString(repo.Id)}")">
                 <div class="li-text">
-                    <div class="model-name">@repo.Name @if (repo.Gated) {<span class="chip">Gated</span>}</div>
-                    <div class="model-meta">@repo.Author · @Count(repo.Downloads) downloads · @repo.Likes likes@(repo.LastModified is { } d ? $" · updated {d:d MMM yyyy}" : "")</div>
+                    <div class="model-name">@repo.Name @if (repo.Gated) {<span class="chip">Gated</span>} @if (repo.Uncensored) {<span class="chip">Uncensored</span>} @if (!Ctx.CanRun(repo.Parameters)) {<span class="chip">Too large</span>}</div>
+                    <div class="model-meta">@repo.Author · @(repo.Parameters is > 0 ? $"{repo.Parameters / 1e9:0.#}B · " : "")@Count(repo.Downloads) downloads · @repo.Likes likes@(repo.LastModified is { } d ? $" · updated {d:d MMM yyyy}" : "")</div>
                 </div>
                 <span class="chevron" aria-hidden="true">›</span>
             </a>
@@ -55,12 +60,28 @@ else
     private IReadOnlyList<HfModelSummary> _results = [];
     private bool _busy, _searched;
     private string? _error;
+    private string _searchedFilter = "";
+
+    /// <summary>Results this PC can run, unless "show too large" is on. Before the hardware is measured nothing is hidden.</summary>
+    private IReadOnlyList<HfModelSummary> Shown =>
+        Ctx.ShowAll || !Ctx.Measured ? _results : _results.Where(r => Ctx.CanRun(r.Parameters)).ToList();
+
+    private int Hidden => Ctx.Measured ? _results.Count(r => !Ctx.CanRun(r.Parameters)) : 0;
 
     protected override async Task OnInitializedAsync()
     {
         Gate.Changed += OnGate;
+        Ctx.Changed += OnContext;
+        if (!Ctx.Measured) await Ctx.RefreshAsync();
         if (Gate.IsOnline) await SearchAsync();
     }
+
+    /// <summary>Changing which models to list searches again; other changes (context size, toggles) only redraw.</summary>
+    private void OnContext() => InvokeAsync(async () =>
+    {
+        if (Gate.IsOnline && _searched && _searchedFilter != Ctx.Filter) await SearchAsync();
+        StateHasChanged();
+    });
 
     private void OnGate() => InvokeAsync(async () =>
     {
@@ -75,7 +96,14 @@ else
         _error = null;
         try
         {
-            _results = await Hf.SearchAsync(_query, _sort);
+            _searchedFilter = Ctx.Filter;
+            // Hidden models take up room in the results, so ask for plenty.
+            _results = Ctx.Filter switch
+            {
+                ModelFilters.Uncensored => await Hf.SearchUncensoredAsync(_query),
+                ModelFilters.Top => await Hf.SearchAsync(_query, HfSort.Likes, 100),
+                _ => await Hf.SearchAsync(_query, _sort, 100),
+            };
         }
         catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException)
         {
@@ -95,5 +123,9 @@ else
         _ => n.ToString(),
     };
 
-    public void Dispose() => Gate.Changed -= OnGate;
+    public void Dispose()
+    {
+        Gate.Changed -= OnGate;
+        Ctx.Changed -= OnContext;
+    }
 }

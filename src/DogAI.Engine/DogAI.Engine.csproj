@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <!-- Voice (M6). sherpa-onnx stays on 1.13: version 2 dropped espeak-ng, so Piper voices cannot speak and Kokoro skips numbers. -->
+    <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="9.0.11" />
     <PackageReference Include="Whisper.net" Version="1.9.1" />
     <PackageReference Include="Whisper.net.Runtime" Version="1.9.1" />
     <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.1" />

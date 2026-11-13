@@ -435,9 +435,9 @@ public class HuggingFaceClientTests
     public async Task Reads_search_results_and_file_lists()
     {
         var server = new FileServer();
-        server.Files["https://huggingface.co/api/models?filter=gguf&sort=downloads&direction=-1&limit=40&expand[]=downloads&expand[]=likes&expand[]=lastModified&expand[]=gated&expand[]=pipeline_tag&search=gemma"] =
+        server.Files["https://huggingface.co/api/models?filter=gguf&sort=downloads&direction=-1&limit=40&expand[]=downloads&expand[]=likes&expand[]=lastModified&expand[]=gated&expand[]=pipeline_tag&expand[]=gguf&expand[]=tags&search=gemma"] =
             System.Text.Encoding.UTF8.GetBytes("""
-                [{"_id":"x","id":"unsloth/gemma-4-12b-it-GGUF","gated":false,"lastModified":"2026-11-07T06:28:34.000Z","likes":12,"downloads":2534530,"pipeline_tag":"image-text-to-text"},
+                [{"_id":"x","id":"unsloth/gemma-4-12b-it-GGUF","gated":false,"lastModified":"2026-11-07T06:28:34.000Z","likes":12,"downloads":2534530,"pipeline_tag":"image-text-to-text","gguf":{"total":11900000000},"tags":["gguf","abliterated"]},
                  {"_id":"y","id":"acme/locked-GGUF","gated":"manual","likes":1,"downloads":5}]
                 """);
         server.Files["https://huggingface.co/api/models/unsloth/gemma-4-12b-it-GGUF/tree/main?recursive=true"] =
@@ -453,6 +453,10 @@ public class HuggingFaceClientTests
         Assert.Equal("gemma-4-12b-it-GGUF", results[0].Name);
         Assert.False(results[0].Gated);
         Assert.True(results[1].Gated);
+        Assert.Equal(11_900_000_000, results[0].Parameters);
+        Assert.True(results[0].Uncensored);
+        Assert.Null(results[1].Parameters);
+        Assert.False(results[1].Uncensored);
 
         var files = await client.FilesAsync("unsloth/gemma-4-12b-it-GGUF");
         Assert.Equal(2, files.Count);

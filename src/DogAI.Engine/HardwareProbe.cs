@@ -31,11 +31,34 @@ public sealed class HardwareProbe
         };
     }
 
-    /// <summary>Graphics memory one process holds, e.g. the model engine. 0 when unknown.</summary>
+    /// <summary>
+    /// Graphics memory one process holds, e.g. the model engine. 0 when unknown.
+    /// On Windows nvidia-smi usually prints "[N/A]" per program (the driver runs in WDDM mode),
+    /// so Windows' own "GPU Process Memory" counters are read instead.
+    /// </summary>
     public async Task<long> VramOfProcessAsync(int processId, CancellationToken ct = default)
     {
         var output = await RunSmiAsync(NvidiaSmi.AppsQuery, ct).ConfigureAwait(false);
-        return output is null ? 0 : NvidiaSmi.ParseApps(output).GetValueOrDefault(processId);
+        var bytes = output is null ? 0 : NvidiaSmi.ParseApps(output).GetValueOrDefault(processId);
+        return bytes > 0 ? bytes : await Task.Run(() => DedicatedVramOf(processId), ct).ConfigureAwait(false);
+    }
+
+    private static long DedicatedVramOf(int processId)
+    {
+        if (!OperatingSystem.IsWindows()) return 0;
+        try
+        {
+            var data = new PerformanceCounterCategory("GPU Process Memory").ReadCategory()["Dedicated Usage"];
+            if (data is null) return 0;
+            long total = 0;
+            foreach (InstanceData sample in data.Values)
+                if (NvidiaSmi.CounterPid(sample.InstanceName) == processId) total += sample.RawValue;
+            return total;
+        }
+        catch (Exception e) when (e is InvalidOperationException or UnauthorizedAccessException or System.ComponentModel.Win32Exception or PlatformNotSupportedException)
+        {
+            return 0;
+        }
     }
 
     /// <summary>Total and free memory on the main graphics card, for the status bar.</summary>

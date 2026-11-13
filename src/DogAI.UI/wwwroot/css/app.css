@@ -222,6 +222,8 @@ textarea.field { resize: vertical; line-height: 1.45; display: block; }
 .bad-text { color: var(--bad); }
 .search-row { display: flex; gap: 8px; max-width: 980px; margin-bottom: 14px; }
 .search-row select.field { width: auto; }
+.filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; max-width: 980px; margin-bottom: 14px; }
+.filter-bar .seg { margin-bottom: 0; }
 .repo-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; max-width: 980px; }
 .repo-title { font-size: 1.1em; overflow-wrap: anywhere; }
 .card-text { max-width: 980px; margin-top: 18px; padding: 10px 14px; border: 1px solid var(--line); border-radius: min(var(--r), 12px); background: var(--surface); }

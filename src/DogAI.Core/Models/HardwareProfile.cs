@@ -63,6 +63,16 @@ public static partial class NvidiaSmi
         return apps;
     }
 
+    /// <summary>
+    /// The process id in a Windows "GPU Process Memory" counter instance name, such as
+    /// <c>pid_1234_luid_0x00000000_0x01093ec1_phys_0</c>. Null when the name has another shape.
+    /// </summary>
+    public static int? CounterPid(string instance) =>
+        CounterInstance().Match(instance) is { Success: true } m && int.TryParse(m.Groups[1].Value, out var pid) ? pid : null;
+
+    [GeneratedRegex(@"^pid_(\d+)_")]
+    private static partial Regex CounterInstance();
+
     [GeneratedRegex(@"CUDA(?: UMD)? Version:\s*(\d+\.\d+)")]
     private static partial Regex CudaVersion();
 

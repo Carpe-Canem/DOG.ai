@@ -22,6 +22,12 @@ public sealed class ModelsContext(HardwareProbe probe, EngineManager engine, ISe
     public int Context { get; private set; } = 8192;
     public bool Measured { get; private set; }
 
+    /// <summary>Lists also show models too large for this PC.</summary>
+    public bool ShowAll { get; private set; }
+
+    /// <summary>Which models to list: see <see cref="ModelFilters"/>.</summary>
+    public string Filter { get; private set; } = ModelFilters.Usable;
+
     public event Action? Changed;
 
     public async Task RefreshAsync()
@@ -29,10 +35,35 @@ public sealed class ModelsContext(HardwareProbe probe, EngineManager engine, ISe
         Hardware = await probe.ProbeAsync();
         EngineVram = engine.ProcessId is int pid ? await probe.VramOfProcessAsync(pid) : 0;
         Budget = FitBudget.From(Hardware, EngineVram);
-        Context = (await settings.LoadAsync()).ContextLength;
+        var saved = await settings.LoadAsync();
+        Context = saved.ContextLength;
+        ShowAll = saved.ModelsShowAll;
+        Filter = ModelFilters.Normalize(saved.ModelsFilter);
         Measured = true;
         Changed?.Invoke();
     }
+
+    public async Task SetShowAllAsync(bool showAll)
+    {
+        await settings.SaveAsync(await settings.LoadAsync() with { ModelsShowAll = showAll });
+        ShowAll = showAll;
+        Changed?.Invoke();
+    }
+
+    public async Task SetFilterAsync(string filter)
+    {
+        filter = ModelFilters.Normalize(filter);
+        await settings.SaveAsync(await settings.LoadAsync() with { ModelsFilter = filter });
+        Filter = filter;
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Whether this PC can run the smallest version of a model with this many parameters entirely on the
+    /// graphics card. Models whose size is unknown are given the benefit of the doubt.
+    /// </summary>
+    public bool CanRun(long? parameters) =>
+        parameters is not > 0 || Fit(new ModelShape { WeightBytes = ModelFilters.SmallestBytes(parameters.Value) }).Kind == FitKind.Full;
 
     public async Task SetContextAsync(int context)
     {

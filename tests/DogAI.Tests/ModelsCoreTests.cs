@@ -28,7 +28,15 @@ public class NvidiaSmiTests
     }
 
     [Theory]
-    [InlineData("| NVIDIA-SMI 621.14     KMD Version: 621.14     CUDA UMD Version: 13.5     |", "13.5")]
+    [InlineData("pid_2320_luid_0x00000000_0x01093ec1_phys_0", 2320)]
+    [InlineData("pid_7_luid_0x00000000_0x0000d1a2_phys_1", 7)]
+    [InlineData("_Total", null)]
+    [InlineData("luid_0x00000000_0x01093ec1_phys_0", null)]
+    public void Reads_the_process_id_from_a_gpu_counter_name(string instance, int? expected) =>
+        Assert.Equal(expected, NvidiaSmi.CounterPid(instance));
+
+    [Theory]
+    [InlineData("| NVIDIA-SMI 621.14    KMD Version: 621.14     CUDA UMD Version: 13.5     |", "13.5")]
     [InlineData("| NVIDIA-SMI 560.94     Driver Version: 560.94     CUDA Version: 12.6     |", "12.6")]
     public void Finds_the_driver_cuda_version(string banner, string expected) =>
         Assert.Equal(Version.Parse(expected), NvidiaSmi.ParseCudaVersion(banner));
@@ -289,4 +297,31 @@ public class LoadDecisionTests
         Assert.Equal(new LoadDecision(50, null), LoadDecision.Decide("m", 8192, tooLarge, Budget, record));
         Assert.NotNull(LoadDecision.Decide("m", 32768, tooLarge, Budget, record).Refusal);
     }
+}
+
+public class ModelFilterTests
+{
+    [Theory]
+    [InlineData("Orenguteng/Llama-3-8B-Lexi-Uncensored-GGUF", true)]
+    [InlineData("mlabonne/gemma-3-12b-it-abliterated-GGUF", true)]
+    [InlineData("unsloth/gemma-4-12b-it-GGUF", false)]
+    public void Uncensored_is_recognised_from_the_name(string id, bool expected) =>
+        Assert.Equal(expected, ModelFilters.IsUncensored(id, null));
+
+    [Fact]
+    public void Uncensored_is_recognised_from_tags() =>
+        Assert.True(ModelFilters.IsUncensored("someone/plain-name", ["gguf", "Uncensored"]));
+
+    [Theory]
+    [InlineData("top", "top")]
+    [InlineData("uncensored", "uncensored")]
+    [InlineData("usable", "usable")]
+    [InlineData("junk", "usable")]
+    [InlineData(null, "usable")]
+    public void Unknown_filters_fall_back_to_usable(string? saved, string expected) =>
+        Assert.Equal(expected, ModelFilters.Normalize(saved));
+
+    [Fact]
+    public void Smallest_download_is_a_three_bit_version() =>
+        Assert.InRange(ModelFilters.SmallestBytes(10_000_000_000), 4_800_000_000, 4_900_000_000);
 }
