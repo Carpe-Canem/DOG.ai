@@ -22,6 +22,9 @@ public sealed record HfModelSummary(string Id, long Downloads, int Likes, DateTi
 {
     public bool Uncensored => ModelFilters.IsUncensored(Id, Tags);
 
+    /// <summary>The one model this was made from, by its tags. Null for originals and merges.</summary>
+    public string? BaseModel => ModelCard.BaseModelFromTags(Tags);
+
     public string Author => Id.Split('/')[0];
     public string Name => Id.Contains('/') ? Id[(Id.IndexOf('/') + 1)..] : Id;
 }
@@ -87,12 +90,16 @@ public sealed class HuggingFaceClient(HttpClient http, HfToken token)
     }
 
     /// <summary>The model card text, without its metadata block. Empty when the repository has none.</summary>
-    public async Task<string> ReadmeAsync(string repo, CancellationToken ct = default)
+    public async Task<string> ReadmeAsync(string repo, CancellationToken ct = default) =>
+        ModelCard.Split(await CardAsync(repo, ct).ConfigureAwait(false)).Body;
+
+    /// <summary>The whole model card, metadata block included. Empty when the repository has none.</summary>
+    public async Task<string> CardAsync(string repo, CancellationToken ct = default)
     {
         using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Get, ResolveUrl(repo, "README.md")), ct).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.NotFound) return "";
         await EnsureOkAsync(response, ct).ConfigureAwait(false);
-        return StripFrontMatter(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+        return await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
     }
 
     /// <summary>Fetches the start of a model file and hands it to <paramref name="parse"/> (the GGUF header reader).</summary>
@@ -112,15 +119,7 @@ public sealed class HuggingFaceClient(HttpClient http, HfToken token)
 
     public static string RepoPage(string repo) => $"{Site}/{EscapeRepo(repo)}";
 
-    internal static string StripFrontMatter(string text)
-    {
-        var trimmed = text.TrimStart('﻿');
-        if (!trimmed.StartsWith("---", StringComparison.Ordinal)) return text;
-        var end = trimmed.IndexOf("\n---", 3, StringComparison.Ordinal);
-        if (end < 0) return text;
-        var after = trimmed.IndexOf('\n', end + 4);
-        return after < 0 ? "" : trimmed[(after + 1)..].TrimStart();
-    }
+    internal static string StripFrontMatter(string text) => ModelCard.Split(text).Body;
 
     private static string EscapeRepo(string repo) => string.Join('/', repo.Split('/').Select(Uri.EscapeDataString));
 

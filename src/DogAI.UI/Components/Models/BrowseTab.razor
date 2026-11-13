@@ -46,7 +46,11 @@ else
             <a class="model link" href="@($"models/browse?repo={Uri.EscapeDataString(repo.Id)}")">
                 <div class="li-text">
                     <div class="model-name">@repo.Name @if (repo.Gated) {<span class="chip">Gated</span>} @if (repo.Uncensored) {<span class="chip">Uncensored</span>} @if (!Ctx.CanRun(repo.Parameters)) {<span class="chip">Too large</span>}</div>
-                    <div class="model-meta">@repo.Author · @(repo.Parameters is > 0 ? $"{repo.Parameters / 1e9:0.#}B · " : "")@Count(repo.Downloads) downloads · @repo.Likes likes@(repo.LastModified is { } d ? $" · updated {d:d MMM yyyy}" : "")</div>
+                    @if (Describe(repo.Id) is { } about)
+                    {
+                        <div class="model-about">@about</div>
+                    }
+                    <div class="model-meta">@repo.Author@(repo.BaseModel is { } b ? $" · based on {b}" : "") · @(repo.Parameters is > 0 ? $"{repo.Parameters / 1e9:0.#}B · " : "")@Count(repo.Downloads) downloads · @repo.Likes likes@(repo.LastModified is { } d ? $" · updated {d:d MMM yyyy}" : "")</div>
                 </div>
                 <span class="chevron" aria-hidden="true">›</span>
             </a>
@@ -61,6 +65,10 @@ else
     private bool _busy, _searched;
     private string? _error;
     private string _searchedFilter = "";
+    private CancellationTokenSource? _aboutCts;
+
+    /// <summary>How many rows get a description; each costs one to four small requests.</summary>
+    private const int Described = 24;
 
     /// <summary>Results this PC can run, unless "show too large" is on. Before the hardware is measured nothing is hidden.</summary>
     private IReadOnlyList<HfModelSummary> Shown =>
@@ -80,6 +88,7 @@ else
     private void OnContext() => InvokeAsync(async () =>
     {
         if (Gate.IsOnline && _searched && _searchedFilter != Ctx.Filter) await SearchAsync();
+        else LoadDescriptions();
         StateHasChanged();
     });
 
@@ -114,6 +123,48 @@ else
             _busy = false;
             _searched = true;
         }
+        LoadDescriptions();
+    }
+
+    /// <summary>The first paragraph a model card gives (its own, or its original model's), once fetched.</summary>
+    private string? Describe(string repo) => Ctx.KnownAbout(repo) is { Count: > 0 } about
+        ? about.Select(a => a.Intro?.Split("\n\n")[0] ?? a.Highlights.FirstOrDefault()).FirstOrDefault(t => t is not null)
+        : null;
+
+    /// <summary>
+    /// Fetches descriptions for the first rows shown, four at a time, in the background. A new search
+    /// cancels what the last one started. A card that cannot be read leaves its row without a description.
+    /// </summary>
+    private void LoadDescriptions()
+    {
+        _aboutCts?.Cancel();
+        if (!Gate.IsOnline) return;
+        var cts = _aboutCts = new CancellationTokenSource();
+        var repos = Shown.Take(Described).Select(r => r.Id).Where(id => Ctx.KnownAbout(id) is null).ToList();
+        if (repos.Count == 0) return;
+        var slots = new SemaphoreSlim(4);
+        foreach (var id in repos)
+        {
+            _ = InvokeAsync(async () =>
+            {
+                try
+                {
+                    await slots.WaitAsync(cts.Token);
+                    try
+                    {
+                        await Ctx.AboutAsync(id, cts.Token);
+                    }
+                    finally
+                    {
+                        slots.Release();
+                    }
+                    if (!cts.IsCancellationRequested) StateHasChanged();
+                }
+                catch (Exception e) when (e is OperationCanceledException or HubException or HttpRequestException or OfflineException or HostNotAllowedException)
+                {
+                }
+            });
+        }
     }
 
     public static string Count(long n) => n switch
@@ -125,6 +176,7 @@ else
 
     public void Dispose()
     {
+        _aboutCts?.Cancel();
         Gate.Changed -= OnGate;
         Ctx.Changed -= OnContext;
     }

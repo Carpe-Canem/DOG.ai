@@ -99,6 +99,26 @@ public sealed class ModelsContext(HardwareProbe probe, EngineManager engine, ISe
         lock (_variants) return _variants.TryGetValue(repo, out var t) && t.IsCompletedSuccessfully;
     }
 
+    private readonly Dictionary<string, IReadOnlyList<ModelAbout>> _about = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A description already fetched this session (possibly empty: nothing found), or null when not fetched yet.</summary>
+    public IReadOnlyList<ModelAbout>? KnownAbout(string repo)
+    {
+        lock (_about) return _about.GetValueOrDefault(repo);
+    }
+
+    /// <summary>
+    /// What the model cards say about a repository, following its base model when its own card only
+    /// lists files. Kept for the session, including "nothing found"; a failed fetch is retried next time.
+    /// </summary>
+    public async Task<IReadOnlyList<ModelAbout>> AboutAsync(string repo, CancellationToken ct = default)
+    {
+        if (KnownAbout(repo) is { } known) return known;
+        var about = await ModelCard.DescribeAsync(repo, hf.CardAsync, ct);
+        lock (_about) _about[repo] = about;
+        return about;
+    }
+
     private async Task<IReadOnlyList<ModelVariant>> FetchAsync(string repo) =>
         Quantization.Group(await hf.FilesAsync(repo));
 

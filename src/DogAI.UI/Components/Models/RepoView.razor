@@ -11,6 +11,34 @@
     </div>
 </div>
 
+@* Third-party text, shown as plain text only. *@
+@foreach (var about in _about)
+{
+    <section class="about">
+        <h4>@(about == _about[0] ? "About this model" : $"The original model, {about.Repo}")</h4>
+        @if (about.Intro is { } intro)
+        {
+            foreach (var para in intro.Split("\n\n"))
+            {
+                <p>@para</p>
+            }
+        }
+        @if (about.Highlights.Count > 0)
+        {
+            <ul>
+                @foreach (var item in about.Highlights)
+                {
+                    <li>@item</li>
+                }
+            </ul>
+        }
+        @if (about == _about[0] && !string.Equals(about.Repo, Repo, StringComparison.OrdinalIgnoreCase))
+        {
+            <p class="about-source">From the model card of @about.Repo, the model these files were made from.</p>
+        }
+    </section>
+}
+
 @if (!Gate.IsOnline)
 {
     <div class="notice"><span>Go online to see this model’s files.</span></div>
@@ -81,6 +109,7 @@ else
     private ModelVariant? _best;
     private GgufInfo? _info;
     private string? _readme;
+    private IReadOnlyList<ModelAbout> _about = [];
     private string? _error;
     private string? _loaded;
 
@@ -113,6 +142,7 @@ else
         _variants = null;
         _info = null;
         _readme = null;
+        _about = Ctx.KnownAbout(Repo) ?? [];
         _best = null;
         await LoadAsync();
     }
@@ -137,6 +167,7 @@ else
         try
         {
             var readme = Hf.ReadmeAsync(repo);
+            _ = LoadAboutAsync(repo);
             _variants = await Ctx.VariantsAsync(repo);
             PickBest();
             StateHasChanged();
@@ -154,6 +185,21 @@ else
         catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException)
         {
             if (repo == Repo) _error = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
+        }
+    }
+
+    /// <summary>The description is extra: if it cannot be read, the page simply goes without it.</summary>
+    private async Task LoadAboutAsync(string repo)
+    {
+        try
+        {
+            var about = await Ctx.AboutAsync(repo);
+            if (repo != Repo) return;
+            _about = about;
+            StateHasChanged();
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or TaskCanceledException)
+        {
         }
     }
 
