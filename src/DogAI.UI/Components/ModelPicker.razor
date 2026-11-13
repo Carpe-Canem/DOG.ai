@@ -31,6 +31,11 @@
             </div>
         }
 
+        @if (_defaultRefused is not null && Engine.State == EngineState.Idle)
+        {
+            <div class="notice bad"><span>@_defaultRefused</span></div>
+        }
+
         @if (_refused is not null)
         {
             <div class="notice bad"><span>@_refused</span></div>
@@ -123,7 +128,27 @@
         _ => "",
     };
 
-    protected override void OnInitialized() => Engine.Changed += Refresh;
+    /// <summary>Why the mode's default model could not be loaded on its own, shown in the window.</summary>
+    private string? _defaultRefused;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Engine.Changed += Refresh;
+        // Nothing loaded: bring in this mode's default model, so the user does not have to pick it every time.
+        if (Engine.State != EngineState.Idle) return;
+        try
+        {
+            var settings = await SettingsStore.LoadAsync();
+            if (await Launcher.LoadDefaultIfIdleAsync(settings, Mode) is { } loaded)
+                await SettingsStore.SaveAsync(await SettingsStore.LoadAsync() with { LastModelPath = loaded });
+        }
+        catch (ModelRefusedException e)
+        {
+            _defaultRefused = $"Your default model for {ModeName} was not loaded. {e.Message}";
+        }
+    }
+
+
     private void Refresh() => InvokeAsync(StateHasChanged);
     public void Dispose() => Engine.Changed -= Refresh;
 

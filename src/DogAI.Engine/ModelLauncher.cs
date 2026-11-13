@@ -1,4 +1,5 @@
 using DogAI.Core.Models;
+using DogAI.Core.Settings;
 
 namespace DogAI.Engine;
 
@@ -52,6 +53,32 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
         info?.IsEmbedding(path) == true
             ? $"{info.DisplayName(path)} is a document search model. It finds passages in documents but cannot write replies. Pick a chat model instead."
             : null;
+
+    private int _loadingDefault;
+
+    /// <summary>
+    /// Loads the default model for a mode ("general", "characters", "story") when no model is loaded, loading or failed.
+    /// Returns the path that was loaded, or null when there was nothing to do (a model is already in, no default is set,
+    /// the file is gone, the engine is missing, or another page is already loading a default).
+    /// </summary>
+    /// <exception cref="ModelRefusedException">The default cannot fit or cannot chat.</exception>
+    public async Task<string?> LoadDefaultIfIdleAsync(AppSettings settings, string mode)
+    {
+        if (engine.State != EngineState.Idle) return null;
+        if (!settings.DefaultModels.TryGetValue(mode, out var path) || !File.Exists(path)) return null;
+        if (engine.FindExecutable() is null) return null;
+        if (Interlocked.Exchange(ref _loadingDefault, 1) == 1) return null;
+        try
+        {
+            if (engine.State != EngineState.Idle) return null;
+            await LoadAsync(path, settings.ContextLength).ConfigureAwait(false);
+            return engine.State == EngineState.Ready ? path : null;
+        }
+        finally
+        {
+            Volatile.Write(ref _loadingDefault, 0);
+        }
+    }
 
     /// <exception cref="ModelRefusedException">The model cannot fit or cannot chat; nothing was unloaded.</exception>
     public async Task LoadAsync(string path, int context)
