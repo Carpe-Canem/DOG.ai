@@ -31,7 +31,9 @@ public static partial class MarkdownRenderer
 
     /// <param name="citations">How many numbered sources the text may cite. "[2]" for 1..citations becomes a small button
     /// (class "cite", data-cite="2") that the chat screen opens; other bracketed numbers stay as text.</param>
-    public static IReadOnlyList<MarkdownSegment> Render(string? markdown, int citations = 0)
+    /// <param name="speech">Roleplay and story text: quoted lines are wrapped in span.say and emphasis outside a quotation
+    /// (an action written between asterisks) becomes em.act, so the UI can colour them.</param>
+    public static IReadOnlyList<MarkdownSegment> Render(string? markdown, int citations = 0, bool speech = false)
     {
         var segments = new List<MarkdownSegment>();
         if (string.IsNullOrEmpty(markdown)) return segments;
@@ -57,6 +59,7 @@ public static partial class MarkdownRenderer
             renderer.Writer.Flush();
             var html = writer.ToString();
             writer.GetStringBuilder().Clear();
+            if (speech) html = MarkSpeech(html);
             if (citations > 0) html = MarkCitations(html, citations);
             if (!string.IsNullOrWhiteSpace(html)) segments.Add(new MarkdownSegment(html, null, null));
         }
@@ -96,6 +99,124 @@ public static partial class MarkdownRenderer
             });
         }
         return string.Concat(parts);
+    }
+
+    private const string SayOpen = "<span class=\"say\">";
+    private const string SayClose = "</span>";
+    private const string StraightQuote = "&quot;";
+
+    private static readonly HashSet<string> BlockTags =
+        ["p", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "tr", "table", "blockquote", "div", "hr"];
+
+    /// <summary>
+    /// Marks spoken lines and actions in rendered text. Each run of text inside a quotation gets its own span.say, closed
+    /// before any tag and reopened after it, so the markup added is always well formed whatever the model wrote. A
+    /// quotation left open ends with its paragraph. Code and formulas are left alone.
+    /// </summary>
+    internal static string MarkSpeech(string html)
+    {
+        var output = new System.Text.StringBuilder(html.Length + 128);
+        string? closer = null;
+        var inMath = false;
+        foreach (var part in TagOrCode().Split(html))
+        {
+            if (part.Length == 0) continue;
+            if (part[0] != '<')
+            {
+                if (inMath) output.Append(part);
+                else AppendSpeech(output, part, ref closer);
+                continue;
+            }
+            if (part.StartsWith("<code>", StringComparison.Ordinal))
+            {
+                output.Append(part);
+                continue;
+            }
+            if (inMath)
+            {
+                if (part is "</span>" or "</div>") inMath = false;
+            }
+            else if (part.Contains("class=\"math", StringComparison.Ordinal))
+            {
+                inMath = true;
+            }
+            if (BlockTags.Contains(TagName(part))) closer = null;
+            output.Append(part == "<em>" && closer is null ? "<em class=\"act\">" : part);
+        }
+        return output.ToString();
+    }
+
+    private static void AppendSpeech(System.Text.StringBuilder output, string text, ref string? closer)
+    {
+        var open = closer is not null;
+        if (open) output.Append(SayOpen);
+        var i = 0;
+        while (i < text.Length)
+        {
+            var token = QuoteAt(text, i);
+            if (token is null)
+            {
+                output.Append(text[i++]);
+                continue;
+            }
+            if (closer is null)
+            {
+                var end = token switch
+                {
+                    "“" => "”",
+                    "«" => "»",
+                    StraightQuote when OpensQuote(text, i) => StraightQuote,
+                    _ => null,
+                };
+                if (end is not null)
+                {
+                    output.Append(SayOpen);
+                    closer = end;
+                    open = true;
+                }
+                output.Append(token);
+            }
+            else
+            {
+                output.Append(token);
+                // Models mix curly and straight marks, so either one ends a quotation opened with the other.
+                var ends = closer == "»" ? token == "»" : token is "”" or StraightQuote;
+                if (ends)
+                {
+                    output.Append(SayClose);
+                    closer = null;
+                    open = false;
+                }
+            }
+            i += token.Length;
+        }
+        if (open) output.Append(SayClose);
+    }
+
+    private static string? QuoteAt(string text, int i) => text[i] switch
+    {
+        '“' => "“",
+        '”' => "”",
+        '«' => "«",
+        '»' => "»",
+        '&' when string.CompareOrdinal(text, i, StraightQuote, 0, StraightQuote.Length) == 0 => StraightQuote,
+        _ => null,
+    };
+
+    /// <summary>A straight mark starts speech only at the start of a word, so 5" tall and stray closing marks stay plain.</summary>
+    private static bool OpensQuote(string text, int i)
+    {
+        var after = i + StraightQuote.Length;
+        if (after < text.Length && char.IsWhiteSpace(text[after])) return false;
+        return i == 0 || char.IsWhiteSpace(text[i - 1]) || "([{—–-".Contains(text[i - 1]);
+    }
+
+    private static string TagName(string tag)
+    {
+        var start = tag.Length > 1 && tag[1] == '/' ? 2 : 1;
+        var end = start;
+        while (end < tag.Length && char.IsAsciiLetterOrDigit(tag[end])) end++;
+        return tag[start..end].ToLowerInvariant();
     }
 
     [System.Text.RegularExpressions.GeneratedRegex(@"(<code>.*?</code>|<[^>]*>)", System.Text.RegularExpressions.RegexOptions.Singleline)]

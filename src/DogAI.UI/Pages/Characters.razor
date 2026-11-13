@@ -132,7 +132,7 @@ else
     }
     else
     {
-        <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" Swipes="true" @bind-Notice="_notice"
+        <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" Swipes="true" Speech="true" @bind-Notice="_notice"
                     AssistantName="@_character.Name" AssistantAvatar="@Format.PictureUrl("character", _character.Id, _character.UpdatedAt, _character.Avatar)"
                     UserName="@(_persona?.Name ?? "You")" UserAvatar="@(_persona is { } p ? Format.PictureUrl("persona", p.Id, p.CreatedAt, p.Avatar) : null)" />
     }

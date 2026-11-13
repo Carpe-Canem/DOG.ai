@@ -1,5 +1,5 @@
 @* One turn in a thread. The page supplies the buttons (Actions) and, while editing, the edit box (Editor). *@
-<div class="msg @(IsUser ? "user" : "ai")" data-mid="@MessageId">
+<div class="msg @(IsUser ? "user" : "ai") @(Tone is { } tone ? $"tone-{tone}" : "")" data-mid="@MessageId">
     @if (AvatarUrl is not null)
     {
         <img class="avatar" src="@AvatarUrl" alt="" />
@@ -28,7 +28,7 @@
         else
         {
             <div class="msg-body" data-msg="@MessageId">
-                <MarkdownView Text="@Content" Citations="@Citations" />
+                <MarkdownView Text="@Content" Citations="@Citations" Speech="@Speech" />
                 @if (Streaming)
                 {
                     <span class="caret" aria-label="Writing"></span>
@@ -57,6 +57,12 @@
 
     /// <summary>How many sources the reply may cite as [n].</summary>
     [Parameter] public int Citations { get; set; }
+
+    /// <summary>Colour spoken lines and actions in the reply (roleplay chats).</summary>
+    [Parameter] public bool Speech { get; set; }
+
+    /// <summary>Group chats: which speaker colour (1 to 6) this writer's name and spoken lines take.</summary>
+    [Parameter] public int? Tone { get; set; }
 
     /// <summary>A picture for the speaker (a data: URL). Without one, a letter is shown.</summary>
     [Parameter] public string? AvatarUrl { get; set; }

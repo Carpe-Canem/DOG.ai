@@ -42,6 +42,15 @@
     </section>
 
     <section>
+        <h3>Reading</h3>
+        <label class="check">
+            <input type="checkbox" name="speech-colours" checked="@Appearance.SpeechColours" @onchange="e => Appearance.SetSpeechColoursAsync(e.Value is true)" />
+            Colour spoken lines and actions
+        </label>
+        <p class="small">In character chats, group chats and stories, "quoted speech" takes a colour and *actions* are toned down. In a group chat each member speaks in their own colour.</p>
+    </section>
+
+    <section>
         <h3>Voice</h3>
         <VoiceSettings />
     </section>

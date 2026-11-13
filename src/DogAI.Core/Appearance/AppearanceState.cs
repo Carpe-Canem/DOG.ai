@@ -62,11 +62,23 @@ public sealed class AppearanceState
     /// <summary>What is actually shown: dark or light.</summary>
     public string EffectiveTheme => Theme == Themes.System ? (_system.IsDark ? Themes.Dark : Themes.Light) : Theme;
 
+    /// <summary>Whether spoken lines and actions are coloured in character chats, group chats and stories.</summary>
+    public bool SpeechColours { get; private set; } = true;
+
     public event Action? Changed;
+
+    public async Task SetSpeechColoursAsync(bool on, CancellationToken ct = default)
+    {
+        if (on == SpeechColours) return;
+        SpeechColours = on;
+        Changed?.Invoke();
+        await _store.SaveAsync(await _store.LoadAsync(ct) with { SpeechColours = on }, ct);
+    }
 
     public async Task LoadAsync(CancellationToken ct = default)
     {
         var settings = await _store.LoadAsync(ct);
+        SpeechColours = settings.SpeechColours;
         Skin = Skins.Normalize(settings.Skin);
         Theme = Themes.Normalize(settings.Theme);
         Changed?.Invoke();

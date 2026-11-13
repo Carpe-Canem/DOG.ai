@@ -3,6 +3,7 @@
    and directions, and lets a selection be rewritten. The page loads the story and passes it in. *@
 @implements IAsyncDisposable
 @inject ChatService Chat
+@inject AppearanceState Appearance
 @inject EngineManager Engine
 @inject IChatStore Store
 @inject IDesktopShell Desktop
@@ -63,7 +64,7 @@
                 }
                 else
                 {
-                    <div class="msg-body"><MarkdownView Text="@m.Content" /></div>
+                    <div class="msg-body"><MarkdownView Text="@m.Content" Speech="@Appearance.SpeechColours" /></div>
                     <div class="msg-actions">
                         @Versions(siblings, position, "Other versions of this passage")
                         <button @onclick="() => Desktop.CopyText(m.Content)">Copy</button>
@@ -101,7 +102,7 @@
         {
             <div class="passage">
                 @Thinking(active.Reasoning, active.Content.Length == 0)
-                <div class="msg-body"><MarkdownView Text="@active.Content" /><span class="caret" aria-label="Writing"></span></div>
+                <div class="msg-body"><MarkdownView Text="@active.Content" Speech="@Appearance.SpeechColours" /><span class="caret" aria-label="Writing"></span></div>
             </div>
         }
         @if (active.Status is { } status)

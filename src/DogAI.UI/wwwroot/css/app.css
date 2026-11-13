@@ -46,6 +46,14 @@ html, body { margin: 0; height: 100%; background: #16181c; }
 .shell { height: 100vh; background: var(--bg); color: var(--text); font: var(--fs)/1.5 var(--ui); overflow: hidden; }
 .shell[data-theme=dark] { color-scheme: dark; }
 .shell[data-theme=light] { color-scheme: light; }
+/* Speech and action colours, the same in every skin: speech follows the accent, group members get one of six. */
+.shell {
+  --say: var(--accent); --act: var(--muted);
+  --say-1: #6cb2ff; --say-2: #ff86a5; --say-3: #5fe0a8; --say-4: #f2c14e; --say-5: #bb95ff; --say-6: #ff9d5c;
+}
+.shell[data-theme=light] {
+  --say-1: #1c69c9; --say-2: #c8325e; --say-3: #11794f; --say-4: #855600; --say-5: #7140cf; --say-6: #b0471a;
+}
 .shell *, .shell *::before, .shell *::after { box-sizing: border-box; }
 :where(.shell) button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 :where(.shell) a { color: inherit; text-decoration: none; }
@@ -161,6 +169,12 @@ textarea.field { resize: vertical; line-height: 1.45; display: block; }
 .msg-body code, .code code { font-family: var(--mono); font-size: .9em; }
 .msg-body :not(pre) > code { background: var(--surface2); padding: 1px 5px; border-radius: 4px; }
 .msg-body img { max-width: 100%; }
+/* Roleplay text: spoken lines and actions (marked by MarkdownRenderer). In group chats tone-N gives each member a colour. */
+.say { color: var(--say); }
+em.act { color: var(--act); }
+.tone-1 { --say: var(--say-1); } .tone-2 { --say: var(--say-2); } .tone-3 { --say: var(--say-3); }
+.tone-4 { --say: var(--say-4); } .tone-5 { --say: var(--say-5); } .tone-6 { --say: var(--say-6); }
+.msg[class*="tone-"] .msg-name, .member[class*="tone-"] .li-title { color: var(--say); }
 .code { margin: .6em 0; border: 1px solid var(--line); border-radius: min(var(--r), 12px); overflow: hidden; background: var(--surface2); font: var(--fs)/1.5 var(--ui); }
 .code-head { display: flex; justify-content: space-between; align-items: center; padding: 3px 10px; font-size: .8em; color: var(--muted); border-bottom: 1px solid var(--line); }
 .code-head button:hover { color: var(--accent); }

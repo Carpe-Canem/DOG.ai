@@ -2,6 +2,7 @@
    the reply being written, problems, and the prompt inspector. The page loads the chat and passes it in. *@
 @implements IAsyncDisposable
 @inject ChatService Chat
+@inject AppearanceState Appearance
 @inject EngineManager Engine
 @inject IChatStore Store
 @inject IDesktopShell Desktop
@@ -22,6 +23,7 @@
         <MessageView IsUser="@isUser" Name="@(isUser ? UserName : who?.Name ?? AssistantName ?? m.ModelName ?? "Model")"
                      Content="@m.Content" Reasoning="@m.Reasoning" AvatarUrl="@(isUser ? UserAvatar : who is not null ? who.Avatar : AssistantAvatar)"
                      Letter="@(who is not null ? who.Letter : Letter)" MessageId="@m.Id" Citations="@(sources?.Passages.Count ?? 0)"
+                     Speech="@ColourSpeech" Tone="@who?.Tone"
                      Below="@(sources is null || _editingId == m.Id ? null : SourcesRow(sources))"
                      Editor="@(_editingId == m.Id ? EditBox(m) : null)">
             <Actions>
@@ -87,7 +89,8 @@
         {
             var writer = SpeakerOf?.Invoke(reply.SpeakerId);
             <MessageView Name="@(writer?.Name ?? AssistantName ?? Engine.ModelName ?? "Model")" AvatarUrl="@(writer is not null ? writer.Avatar : AssistantAvatar)"
-                         Letter="@(writer is not null ? writer.Letter : Letter)" Content="@reply.Content" Reasoning="@reply.Reasoning" Streaming="true" />
+                         Letter="@(writer is not null ? writer.Letter : Letter)" Content="@reply.Content" Reasoning="@reply.Reasoning" Streaming="true"
+                         Speech="@ColourSpeech" Tone="@writer?.Tone" />
         }
         @if (reply.Status is { } status)
         {
@@ -128,6 +131,11 @@
 
     /// <summary>Character-chat behaviour: arrows on the last reply, and the right arrow past the newest writes another.</summary>
     [Parameter] public bool Swipes { get; set; }
+
+    /// <summary>Roleplay chats: spoken lines and actions in replies may be coloured (when the setting is on).</summary>
+    [Parameter] public bool Speech { get; set; }
+
+    private bool ColourSpeech => Speech && Appearance.SpeechColours;
 
     /// <summary>A problem the page wants shown under the thread (for example a refused send).</summary>
     [Parameter] public string? Notice { get; set; }

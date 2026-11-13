@@ -4,6 +4,7 @@
 @inject ICharacterStore CharacterStore
 @inject IChatStore Store
 @inject ChatService Chat
+@inject AppearanceState Appearance
 @inject EngineManager Engine
 @inject NavigationManager Nav
 
@@ -96,7 +97,7 @@ else
     }
     else
     {
-        <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" Swipes="true" @bind-Notice="_notice" SpeakerOf="SpeakerOf"
+        <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" Swipes="true" Speech="true" @bind-Notice="_notice" SpeakerOf="SpeakerOf"
                     UserName="@(_persona?.Name ?? "You")" UserAvatar="@(_persona is { } p ? Format.PictureUrl("persona", p.Id, p.CreatedAt, p.Avatar) : null)" />
     }
 }
@@ -131,7 +132,7 @@ else
                 var member = _members[index];
                 var character = _byId.GetValueOrDefault(member.CharacterId);
                 if (character is null) continue;
-                <div class="member @(member.Muted ? "muted" : "")">
+                <div class="member @(member.Muted ? "muted" : "") @(ToneOf(character.Id) is { } tone ? $"tone-{tone}" : "")">
                     <CharacterAvatar Character="character" />
                     <span class="li-text">
                         <a class="li-title" href="characters/@character.Id" title="@($"About {character.Name}")">@character.Name</a>
@@ -236,8 +237,14 @@ else
     private bool Streaming => Chat.Active is { } a && a.ConversationId == _conversation.Id && _conversation.Id != 0;
 
     private SpeakerInfo SpeakerOf(long? id) => id is { } known && _byId.TryGetValue(known, out var c)
-        ? new SpeakerInfo(c.Name, Format.PictureUrl("character", c.Id, c.UpdatedAt, c.Avatar))
+        ? new SpeakerInfo(c.Name, Format.PictureUrl("character", c.Id, c.UpdatedAt, c.Avatar), ToneOf(known))
         : new SpeakerInfo("Removed character", null);
+
+    /// <summary>A member's speaker colour. It follows the order the characters were made, not the speaking order,
+    /// so moving members up and down never changes anyone's colour.</summary>
+    private int? ToneOf(long characterId) => !Appearance.SpeechColours || _members.All(m => m.CharacterId != characterId)
+        ? null
+        : _members.Count(m => m.CharacterId < characterId) % SpeakerInfo.Tones + 1;
 
     protected override void OnInitialized()
     {

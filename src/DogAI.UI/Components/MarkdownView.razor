@@ -29,17 +29,22 @@
     /// <summary>How many numbered sources the text may cite; "[n]" for those becomes a button (see MarkdownRenderer).</summary>
     [Parameter] public int Citations { get; set; }
 
+    /// <summary>Mark spoken lines and actions so the stylesheet can colour them (roleplay and stories).</summary>
+    [Parameter] public bool Speech { get; set; }
+
     private string? _rendered;
     private int _renderedCitations;
+    private bool _renderedSpeech;
     private IReadOnlyList<MarkdownSegment> _segments = [];
     private int _copied = -1;
 
     protected override void OnParametersSet()
     {
-        if (Text == _rendered && Citations == _renderedCitations) return;
+        if (Text == _rendered && Citations == _renderedCitations && Speech == _renderedSpeech) return;
         _rendered = Text;
         _renderedCitations = Citations;
-        _segments = MarkdownRenderer.Render(Text, Citations);
+        _renderedSpeech = Speech;
+        _segments = MarkdownRenderer.Render(Text, Citations, Speech);
     }
 
     private static string CodeHtml(MarkdownSegment segment)

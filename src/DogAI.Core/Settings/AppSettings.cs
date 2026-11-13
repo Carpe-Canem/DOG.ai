@@ -12,6 +12,9 @@ public sealed record AppSettings
     /// <summary>"workbench", "fireside" or "playhouse".</summary>
     public string Skin { get; init; } = "workbench";
 
+    /// <summary>Colour spoken lines and actions in character chats, group chats and stories.</summary>
+    public bool SpeechColours { get; init; } = true;
+
     /// <summary>Context window to give a model when loading it, in tokens.</summary>
     public int ContextLength { get; init; } = 8192;
 
