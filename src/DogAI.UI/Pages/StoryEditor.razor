@@ -4,6 +4,7 @@
 @implements IDisposable
 @inject IChatStore Store
 @inject IStoryStore Stories
+@inject ICharacterStore CharacterStore
 @inject ChatService Chat
 @inject StoryBuilder Builder
 @inject EngineManager Engine
@@ -27,7 +28,13 @@
 @if (_loaded)
 {
     <div class="editor">
-        @if (StoryId is null)
+        @if (_fromChat is not null)
+        {
+            <div class="notice">
+                <span>An interactive adventure that carries on from the chat <b>@_fromChat.Title</b>. Its @_fromChatCount message@(_fromChatCount == 1 ? "" : "s") so far become the first passages and your actions@(_fromChatSummary ? ", and its memory comes too" : ""). The chat itself stays as it is.</span>
+            </div>
+        }
+        else if (StoryId is null)
         {
             <div class="kind-grid" role="radiogroup" aria-label="Kind of story">
                 <label class="choice-card @(_s.Kind == StoryKind.Interactive ? "active" : "")">
@@ -44,7 +51,7 @@
 
             <div class="card-text builder">
                 <label class="field-block">
-                    <span class="field-label">Let the model draft it <span class="small">Describe the story in a sentence or two. The loaded model fills in the story bible below@(_s.Kind == StoryKind.Authored ? " and an outline" : "") for you to change before saving.</span></span>
+                    <span class="field-label">Let the model draft it <span class="small">Describe the story in a sentence or two. The loaded model fills in the story bible below@(_s.Kind == StoryKind.Authored ? " and an outline" : "") for you to change before saving.@(Cast.Count > 0 ? $" It builds the story around {CastNames}, so you can leave this empty." : "")</span></span>
                     <textarea class="field" rows="2" @bind="_idea" @bind:event="oninput" disabled="@(_draftCts is not null)"
                               placeholder="For example: a lighthouse keeper's daughter finds a door under the lamp room that was not there yesterday"></textarea>
                 </label>
@@ -56,7 +63,7 @@
                     }
                     else
                     {
-                        <button class="btn primary" disabled="@(!Engine.IsReady || Chat.IsBusy || string.IsNullOrWhiteSpace(_idea))" @onclick="DraftAsync">Draft the story bible</button>
+                        <button class="btn primary" disabled="@(!Engine.IsReady || Chat.IsBusy || (string.IsNullOrWhiteSpace(_idea) && Cast.Count == 0))" @onclick="DraftAsync">Draft the story bible</button>
                         @if (!Engine.IsReady)
                         {
                             <span class="small">Load a model first, with the model button at the top. Or fill in the fields yourself.</span>
@@ -100,7 +107,56 @@
                 </datalist>
             </label>
         </div>
-        @Area("Cast", _s.Kind == StoryKind.Interactive ? "The people in the story, one per line. Start with the main character, whom you play." : "The people in the story, one per line: who they are and what they want.", () => _s.Bible.Cast, v => _s.Bible.Cast = v, 5)
+        <div class="field-block">
+            <div class="field-label">Character cards <span class="small">People from your Characters list. The model is given each card with every passage, and the card's lore when it comes up. Editing a card later changes the story too.</span></div>
+            @foreach (var link in _s.Characters)
+            {
+                var character = Card(link.CharacterId);
+                if (character is null) continue;
+                <div class="member">
+                    <CharacterAvatar Character="character" />
+                    <span class="li-text">
+                        <span class="li-title">@character.Name</span>
+                        <span class="li-sub">@StoryPrompt.RoleLabel(_s.Kind, link.Main)</span>
+                    </span>
+                    <label class="check small" title="@(_s.Kind == StoryKind.Interactive ? "Tick to play this character yourself. Unticked, the narrator plays them." : "Tick if the story is told about this character.")">
+                        <input type="checkbox" checked="@link.Main" @onchange="e => SetMain(link, e.Value is true)" />
+                        @(_s.Kind == StoryKind.Interactive ? "I play this character" : "Main character")
+                    </label>
+                    <span class="member-tools">
+                        <button class="icon-btn" aria-label="@($"Remove {character.Name} from the story")" title="Remove from the story" @onclick="() => _s.Characters.Remove(link)">✕</button>
+                    </span>
+                </div>
+            }
+            @if (Addable.Count > 0)
+            {
+                <div class="row">
+                    <select class="field" aria-label="Character to add" @bind="_addId">
+                        <option value="0">@(_s.Characters.Count == 0 ? "Add a character…" : "Add another character…")</option>
+                        @foreach (var c in Addable)
+                        {
+                            <option value="@c.Id">@c.Name</option>
+                        }
+                    </select>
+                    <button class="btn" disabled="@(_addId == 0)" @onclick="AddCharacter">Add</button>
+                </div>
+            }
+            else if (_all.Count == 0)
+            {
+                <p class="small">You have no characters yet. Make or import one in Characters, then add it here.</p>
+            }
+            @if (Cast.Count > 1)
+            {
+                <p class="small">With several cards, each one's description is cut to about @(StoryPrompt.CastCardLength / 6) words so the story keeps its room. A single card is sent whole.</p>
+            }
+            @if (GreetingCard is { } greeter)
+            {
+                <label class="check"><input type="checkbox" @bind="_openWithGreeting" /> Open with @greeter.Name's first message <span class="small">The card's greeting becomes the opening passage, instead of one the model writes.</span></label>
+            }
+        </div>
+        @Area("Cast", Cast.Count > 0 ? "Anyone else in the story, one per line. The cards above need no line here."
+            : _s.Kind == StoryKind.Interactive ? "The people in the story, one per line. Start with the main character, whom you play."
+            : "The people in the story, one per line: who they are and what they want.", () => _s.Bible.Cast, v => _s.Bible.Cast = v, 5)
         @Area("World", "The setting, and the facts and rules that matter.", () => _s.Bible.World, v => _s.Bible.World = v, 4)
         @Area("Style guide", "Rules for the prose: sentence length, how much dialogue, what to avoid.", () => _s.Bible.StyleGuide, v => _s.Bible.StyleGuide = v, 3)
 
@@ -172,6 +228,16 @@
 @code {
     [Parameter] public long? StoryId { get; set; }
 
+    /// <summary>A new story started from a character's page: that card is already in the cast.</summary>
+    [SupplyParameterFromQuery(Name = "character")] public long? FromCharacter { get; set; }
+
+    /// <summary>A new story that carries on from a character chat (its Turn into a story button).</summary>
+    [SupplyParameterFromQuery(Name = "chat")] public long? FromChat { get; set; }
+
+    private Conversation? _fromChat;
+    private int _fromChatCount;
+    private bool _fromChatSummary;
+
     private static readonly (int Words, string Name)[] Lengths =
     [
         (120, "Short (about 120 words)"),
@@ -191,6 +257,45 @@
     private CancellationTokenSource? _draftCts;
     private int _draftLength;
     private DateTime _lastProgress;
+    private List<Character> _all = [];
+    private long _addId;
+    private bool _openWithGreeting = true;
+
+    private Character? Card(long id) => _all.FirstOrDefault(c => c.Id == id);
+
+    private List<Character> Addable => _all.Where(c => _s.Characters.All(l => l.CharacterId != c.Id)).ToList();
+
+    /// <summary>The linked cards with their characters, in list order.</summary>
+    private List<StoryCastMember> Cast => _s.Characters
+        .Select(l => Card(l.CharacterId) is { } c ? new StoryCastMember(c, l.Main) : null).OfType<StoryCastMember>().ToList();
+
+    private string CastNames => GroupTurns.JoinNames(Cast.Select(m => m.Character.Name).ToList());
+
+    /// <summary>New adventures only: the first narrator-played card that has a greeting to open with.</summary>
+    private Character? GreetingCard => StoryId is null && _fromChat is null && _s.Kind == StoryKind.Interactive
+        ? Cast.FirstOrDefault(m => !m.Main && m.Character.Greetings().Count > 0)?.Character
+        : null;
+
+    /// <summary>Adds a card to the story. Its scenario becomes the premise when none is written yet.</summary>
+    private void Link(Character character)
+    {
+        if (_s.Characters.Any(l => l.CharacterId == character.Id)) return;
+        _s.Characters.Add(new StoryCharacter { CharacterId = character.Id });
+        if (_s.Bible.Premise.Trim().Length == 0) _s.Bible.Premise = StoryPrompt.PremiseFrom(character);
+    }
+
+    private void AddCharacter()
+    {
+        if (Card(_addId) is { } character) Link(character);
+        _addId = 0;
+    }
+
+    /// <summary>Only one card can be the main character.</summary>
+    private void SetMain(StoryCharacter link, bool main)
+    {
+        foreach (var other in _s.Characters) other.Main = false;
+        link.Main = main;
+    }
 
     private static StoryInfo NewStory(StoryKind kind) => new()
     {
@@ -216,6 +321,8 @@
     {
         _error = null;
         _drafted = false;
+        _addId = 0;
+        _all = (await CharacterStore.ListAsync()).OrderBy(c => c.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         if (StoryId is { } id)
         {
             _conversation = await Store.GetAsync(id);
@@ -226,6 +333,7 @@
                 return;
             }
             _s = story;
+            _s.Characters.RemoveAll(l => Card(l.CharacterId) is null);
             _title = _conversation!.Title;
             // An older length that is not on the list snaps to the nearest one, so the box always shows a value.
             if (Lengths.All(l => l.Words != _s.PassageWords)) _s.PassageWords = Lengths.MinBy(l => Math.Abs(l.Words - _s.PassageWords)).Words;
@@ -236,6 +344,25 @@
             _s = NewStory(StoryKind.Interactive);
             _title = "";
             _idea = "";
+            _openWithGreeting = true;
+            _fromChat = null;
+            if (FromChat is { } chatId && await Store.GetAsync(chatId) is { Mode: ChatService.CharacterChatMode, CharacterId: { } cardId } chat && Card(cardId) is { } chatCharacter)
+            {
+                _fromChat = chat;
+                _fromChatCount = ChatService.MessagesForStory(new MessageTree(await Store.GetMessagesAsync(chat.Id)).PathTo(chat.ActiveLeafId)).Count;
+                _fromChatSummary = chat.MemoryEnabled && chat.Summary.Trim().Length > 0;
+                Link(chatCharacter);
+                _title = chat.Title.Trim().Length > 0 && chat.Title != ChatService.UntitledChat ? chat.Title.Trim() : $"A story with {chatCharacter.Name}";
+                // The person the user played in the chat is the story's main character.
+                var personas = await CharacterStore.ListPersonasAsync();
+                if (personas.FirstOrDefault(p => p.Id == chat.PersonaId) is { } persona)
+                    _s.Bible.Cast = StoryPrompt.PlayerFromPersona(persona.Name, persona.Description, chatCharacter.Name);
+            }
+            else if (FromCharacter is { } from && Card(from) is { } character)
+            {
+                Link(character);
+                _title = $"A story with {character.Name}";
+            }
         }
         _loaded = true;
     }
@@ -274,7 +401,7 @@
                 if (DateTime.UtcNow - _lastProgress < TimeSpan.FromMilliseconds(150)) return;
                 _lastProgress = DateTime.UtcNow;
                 Refresh();
-            }, cts.Token);
+            }, cts.Token, Cast);
             // The model is not asked for point of view or tense; keep the ones chosen here.
             draft.Bible.PointOfView = _s.Bible.PointOfView;
             draft.Bible.Tense = _s.Bible.Tense;
@@ -313,7 +440,12 @@
             if (StoryId is null)
             {
                 var title = _title.Trim().Length > 0 ? _title : "Untitled story";
-                var conversation = await Chat.StartStoryAsync(title, _s);
+                var opening = _openWithGreeting && GreetingCard is { } greeter
+                    ? StoryPrompt.OpeningFrom(greeter, Cast.FirstOrDefault(m => m.Main)?.Character.Name)
+                    : null;
+                var conversation = _fromChat is not null
+                    ? await Chat.StoryFromChatAsync(_fromChat.Id, title, _s)
+                    : await Chat.StartStoryAsync(title, _s, opening);
                 Nav.NavigateTo($"story/{conversation.Id}");
             }
             else

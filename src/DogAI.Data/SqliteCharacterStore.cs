@@ -68,6 +68,11 @@ public sealed class SqliteCharacterStore(IDbContextFactory<DogDbContext> factory
         await db.Conversations.Where(c => c.CharacterId == id).ExecuteDeleteAsync(ct);
         // Group chats stay; the character just leaves them. Their old replies keep a "SpeakerId" nobody has any more.
         await db.ChatMembers.Where(m => m.CharacterId == id).ExecuteDeleteAsync(ct);
+        // Stories stay too; the card just leaves their cast. The list is JSON, so it is filtered here rather than in SQL.
+        foreach (var story in await db.Stories.ToListAsync(ct))
+            if (story.Characters.Any(c => c.CharacterId == id))
+                story.Characters = story.Characters.Where(c => c.CharacterId != id).ToList();
+        await db.SaveChangesAsync(ct);
         await db.Characters.Where(c => c.Id == id).ExecuteDeleteAsync(ct);
     }
 

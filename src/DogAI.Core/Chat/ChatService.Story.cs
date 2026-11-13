@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using DogAI.Core.Characters;
 using DogAI.Core.Stories;
 
 namespace DogAI.Core.Chat;
@@ -8,7 +9,11 @@ namespace DogAI.Core.Chat;
 // In an authored story the user's turns are directions for the next passage.
 public sealed partial class ChatService
 {
-    private const int ChoicesMaxTokens = 800;
+    /// <summary>
+    /// Room for the choices and state. The JSON itself is a few hundred tokens; the rest is for models that think
+    /// first, which with a character card to weigh used all of an earlier 800 and gave no answer.
+    /// </summary>
+    private const int ChoicesMaxTokens = 2400;
     private readonly Random _dice = new();
 
     private async Task<Story?> StoryOfAsync(Conversation conversation, CancellationToken ct) =>
@@ -21,7 +26,11 @@ public sealed partial class ChatService
     }
 
     /// <summary>Creates a story with its settings. Nothing is written until the user starts it.</summary>
-    public async Task<Conversation> StartStoryAsync(string title, Story story, CancellationToken ct = default)
+    /// <param name="opening">
+    /// Interactive: a ready-made opening passage (a character card's first message). The story then starts with it
+    /// instead of one the model writes.
+    /// </param>
+    public async Task<Conversation> StartStoryAsync(string title, Story story, string? opening = null, CancellationToken ct = default)
     {
         if (stories is null) throw new InvalidOperationException("Stories are not available.");
         var conversation = await store.CreateAsync(new Conversation
@@ -33,7 +42,81 @@ public sealed partial class ChatService
         story.Id = 0;
         story.ConversationId = conversation.Id;
         await stories.SaveAsync(story, ct);
+        if (story.Kind == StoryKind.Interactive && opening?.Trim() is { Length: > 0 } text)
+        {
+            var passage = await store.AddMessageAsync(new ChatMessage { ConversationId = conversation.Id, Role = ChatRole.Assistant, Content = text }, ct);
+            await store.SetActiveLeafAsync(conversation.Id, passage.Id, ct);
+            conversation.ActiveLeafId = passage.Id;
+        }
         return conversation;
+    }
+
+    /// <summary>The mode of a one-to-one chat with a character card.</summary>
+    public const string CharacterChatMode = "characters";
+
+    /// <summary>
+    /// Starts an interactive story that carries on from a one-to-one character chat. The chat's shown branch is copied
+    /// in order: the character's messages become passages and the user's become the player's actions. The chat's
+    /// memory summary comes too. The chat itself is not changed. Other branches, the chat's author's note and its
+    /// attached documents stay with the chat.
+    /// </summary>
+    public async Task<Conversation> StoryFromChatAsync(long chatId, string title, Story story, CancellationToken ct = default)
+    {
+        var chat = await store.GetAsync(chatId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
+        if (chat.Mode != CharacterChatMode) throw new InvalidOperationException("Only a chat with one character can become a story.");
+        story.Kind = StoryKind.Interactive;
+        var path = MessagesForStory(new MessageTree(await store.GetMessagesAsync(chatId, ct)).PathTo(chat.ActiveLeafId));
+
+        var conversation = await StartStoryAsync(title, story, null, ct);
+        var copies = new Dictionary<long, long>();
+        long? parent = null;
+        foreach (var message in path)
+        {
+            var copy = await store.AddMessageAsync(new ChatMessage
+            {
+                ConversationId = conversation.Id,
+                ParentId = parent,
+                Role = message.Role,
+                Content = message.Content,
+            }, ct);
+            copies[message.Id] = copy.Id;
+            parent = copy.Id;
+        }
+        if (parent is null) return conversation;
+
+        await store.SetActiveLeafAsync(conversation.Id, parent, ct);
+        conversation.ActiveLeafId = parent;
+        conversation.MemoryEnabled = chat.MemoryEnabled;
+        await store.UpdateAsync(conversation, ct);
+        if (chat.Summary.Trim().Length > 0 && chat.SummaryThroughId is { } through && copies.TryGetValue(through, out var copied))
+        {
+            await store.SetSummaryAsync(conversation.Id, chat.Summary, copied, ct);
+            conversation.Summary = chat.Summary;
+            conversation.SummaryThroughId = copied;
+        }
+        return conversation;
+    }
+
+    /// <summary>
+    /// The messages of a chat's shown branch that <see cref="StoryFromChatAsync"/> copies: the user's and the
+    /// character's, not empty ones, and not a last user message the chat never answered (it would leave the story
+    /// waiting on a turn that is not the player's).
+    /// </summary>
+    public static IReadOnlyList<ChatMessage> MessagesForStory(IReadOnlyList<ChatMessage> path)
+    {
+        var kept = path.Where(m => m.Role is ChatRole.User or ChatRole.Assistant && m.Content.Trim().Length > 0).ToList();
+        if (kept.Count > 0 && kept[^1].Role == ChatRole.User) kept.RemoveAt(kept.Count - 1);
+        return kept;
+    }
+
+    /// <summary>The story's character cards that still exist, in list order.</summary>
+    public async Task<IReadOnlyList<StoryCastMember>> StoryCastAsync(Story story, CancellationToken ct = default)
+    {
+        var cast = new List<StoryCastMember>();
+        if (characters is null) return cast;
+        foreach (var link in story.Characters.DistinctBy(l => l.CharacterId))
+            if (await characters.GetAsync(link.CharacterId, ct) is { } character) cast.Add(new StoryCastMember(character, link.Main));
+        return cast;
     }
 
     /// <summary>Interactive: writes an opening passage. Called again, it writes another opening beside the first.</summary>
@@ -142,12 +225,12 @@ public sealed partial class ChatService
             // Editing wants a steadier hand than drafting: the story's style, but never hotter than 0.8, and a length limit
             // tied to the selection so a one-sentence change cannot turn into a page.
             var style = _presets.Get(conversation?.PresetId);
-            var preset = style with
+            var preset = _storyOptions.Apply(style with
             {
                 Temperature = Math.Min(style.Temperature, 0.8),
                 XtcProbability = 0,
                 MaxTokens = StoryPrompt.ReviseTokenLimit(kind, await engine.CountTokensAsync(selected, cts.Token)),
-            };
+            });
             await StreamAsync(engine.StreamChatAsync(prompt, preset, cts.Token), active, null, 0, cts.Token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -252,7 +335,7 @@ public sealed partial class ChatService
             Changed?.Invoke();
             var built = await BuildPromptAsync(layout, path, PromptEnd.Reply, names, ct);
             List<PromptMessage> prompt = [.. built.Prompt, new PromptMessage("user", StoryPrompt.ChoicesTask(story))];
-            var preset = SamplerPresets.Get(SamplerPresets.DefaultId) with { MaxTokens = ChoicesMaxTokens, JsonSchema = StoryPrompt.ChoicesSchema(story) };
+            var preset = _storyOptions.Apply(SamplerPresets.Get(SamplerPresets.DefaultId) with { MaxTokens = ChoicesMaxTokens, JsonSchema = StoryPrompt.ChoicesSchema(story) });
 
             var text = new StringBuilder();
             await foreach (var delta in engine.StreamChatAsync(prompt, preset, ct).WithCancellation(ct).ConfigureAwait(false))
@@ -285,6 +368,10 @@ public sealed partial class ChatService
             ? new Names("Narrator", "Player", "Narrator", SummaryTask: StoryPrompt.SummaryTask)
             : new Names("Story", "Direction", "Story", SummaryTask: StoryPrompt.SummaryTask);
         var state = StoryTurn.LatestState(path);
-        return await WithMemoryAsync(conversation, path, active, names, memory => StoryPrompt.Layout(story, memory, state, path.Count == 0), ct, extra);
+        // Linked cards are read afresh for every passage, so the story follows changes to them; their lore fires as in a chat.
+        var cast = await StoryCastAsync(story, ct);
+        var lore = await PickLoreAsync(cast.Select(m => Lorebook.For(m.Character)).ToList(), path, ct);
+        return await WithMemoryAsync(conversation, path, active, names,
+            memory => StoryPrompt.Layout(story, memory, state, path.Count == 0, cast, lore), ct, extra);
     }
 }

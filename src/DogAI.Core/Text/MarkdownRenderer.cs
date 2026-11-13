@@ -15,6 +15,12 @@ public sealed record MarkdownSegment(string? Html, string? Code, string? Languag
 }
 
 /// <summary>
+/// Someone whose spoken lines can be told apart: a character with speaker colour <paramref name="Tone"/> (1 to
+/// <see cref="SpeakerTones.Count"/>), or, with no tone, a name that only helps the guess (their lines stay plain).
+/// </summary>
+public sealed record Speaker(string Name, int? Tone, Pronoun Pronoun = Pronoun.Unknown);
+
+/// <summary>
 /// Turns markdown from a model (untrusted text) into safe HTML. Raw HTML in the source is shown
 /// as text, never passed through, and links can only point at http, https or mailto addresses.
 /// </summary>
@@ -33,7 +39,8 @@ public static partial class MarkdownRenderer
     /// (class "cite", data-cite="2") that the chat screen opens; other bracketed numbers stay as text.</param>
     /// <param name="speech">Roleplay and story text: quoted lines are wrapped in span.say and emphasis outside a quotation
     /// (an action written between asterisks) becomes em.act, so the UI can colour them.</param>
-    public static IReadOnlyList<MarkdownSegment> Render(string? markdown, int citations = 0, bool speech = false)
+    /// <param name="speakers">Stories: the characters whose lines get their own colour, when a line can be pinned to one.</param>
+    public static IReadOnlyList<MarkdownSegment> Render(string? markdown, int citations = 0, bool speech = false, IReadOnlyList<Speaker>? speakers = null)
     {
         var segments = new List<MarkdownSegment>();
         if (string.IsNullOrEmpty(markdown)) return segments;
@@ -59,7 +66,7 @@ public static partial class MarkdownRenderer
             renderer.Writer.Flush();
             var html = writer.ToString();
             writer.GetStringBuilder().Clear();
-            if (speech) html = MarkSpeech(html);
+            if (speech) html = MarkSpeech(html, speakers);
             if (citations > 0) html = MarkCitations(html, citations);
             if (!string.IsNullOrWhiteSpace(html)) segments.Add(new MarkdownSegment(html, null, null));
         }
@@ -101,35 +108,36 @@ public static partial class MarkdownRenderer
         return string.Concat(parts);
     }
 
-    private const string SayOpen = "<span class=\"say\">";
     private const string SayClose = "</span>";
-    private const string StraightQuote = "&quot;";
 
     private static readonly HashSet<string> BlockTags =
         ["p", "li", "ul", "ol", "h1", "h2", "h3", "h4", "h5", "h6", "td", "th", "tr", "table", "blockquote", "div", "hr"];
 
+    /// <summary>Stands in for a quotation's speaker class until the whole paragraph has been read.</summary>
+    private const char ToneMark = '\u0001';
+
     /// <summary>
     /// Marks spoken lines and actions in rendered text. Each run of text inside a quotation gets its own span.say, closed
     /// before any tag and reopened after it, so the markup added is always well formed whatever the model wrote. A
-    /// quotation left open ends with its paragraph. Code and formulas are left alone.
+    /// quotation left open ends with its paragraph. Code and formulas are left alone. With <paramref name="speakers"/>,
+    /// a line <see cref="SpeakerGuess"/> can pin to one of them also gets that speaker's tone-N class.
     /// </summary>
-    internal static string MarkSpeech(string html)
+    internal static string MarkSpeech(string html, IReadOnlyList<Speaker>? speakers = null)
     {
-        var output = new System.Text.StringBuilder(html.Length + 128);
-        string? closer = null;
+        var state = new SpeechState();
         var inMath = false;
         foreach (var part in TagOrCode().Split(html))
         {
             if (part.Length == 0) continue;
             if (part[0] != '<')
             {
-                if (inMath) output.Append(part);
-                else AppendSpeech(output, part, ref closer);
+                if (inMath) state.Output.Append(part);
+                else state.AppendText(part);
                 continue;
             }
             if (part.StartsWith("<code>", StringComparison.Ordinal))
             {
-                output.Append(part);
+                state.Output.Append(part);
                 continue;
             }
             if (inMath)
@@ -140,75 +148,100 @@ public static partial class MarkdownRenderer
             {
                 inMath = true;
             }
-            if (BlockTags.Contains(TagName(part))) closer = null;
-            output.Append(part == "<em>" && closer is null ? "<em class=\"act\">" : part);
+            if (BlockTags.Contains(TagName(part))) state.EndBlock();
+            state.Output.Append(part == "<em>" && state.Closer is null ? "<em class=\"act\">" : part);
         }
-        return output.ToString();
+        state.EndBlock();
+        return state.Finish(speakers);
     }
 
-    private static void AppendSpeech(System.Text.StringBuilder output, string text, ref string? closer)
+    /// <summary>The work of <see cref="MarkSpeech"/>: the marked HTML, and each paragraph's narration and quotations.</summary>
+    private sealed class SpeechState
     {
-        var open = closer is not null;
-        if (open) output.Append(SayOpen);
-        var i = 0;
-        while (i < text.Length)
+        public readonly System.Text.StringBuilder Output = new();
+        public char? Closer;
+        private readonly List<List<QuotePart>> _blocks = [];
+        private List<QuotePart> _block = [];
+        private readonly System.Text.StringBuilder _run = new();
+        private int _quotes;
+
+        private void OpenSay() => Output.Append("<span class=\"say").Append(ToneMark).Append(_quotes - 1).Append(ToneMark).Append("\">");
+
+        public void AppendText(string text)
         {
-            var token = QuoteAt(text, i);
-            if (token is null)
+            var open = Closer is not null;
+            if (open) OpenSay();
+            var i = 0;
+            while (i < text.Length)
             {
-                output.Append(text[i++]);
-                continue;
-            }
-            if (closer is null)
-            {
-                var end = token switch
+                if (Quotations.MarkAt(text, i, html: true) is not { } found)
                 {
-                    "“" => "”",
-                    "«" => "»",
-                    StraightQuote when OpensQuote(text, i) => StraightQuote,
-                    _ => null,
-                };
-                if (end is not null)
-                {
-                    output.Append(SayOpen);
-                    closer = end;
-                    open = true;
+                    Output.Append(text[i]);
+                    _run.Append(text[i++]);
+                    continue;
                 }
-                output.Append(token);
-            }
-            else
-            {
-                output.Append(token);
-                // Models mix curly and straight marks, so either one ends a quotation opened with the other.
-                var ends = closer == "»" ? token == "»" : token is "”" or StraightQuote;
-                if (ends)
+                var token = text.Substring(i, found.Length);
+                if (Closer is null)
                 {
-                    output.Append(SayClose);
-                    closer = null;
-                    open = false;
+                    if (Quotations.CloserFor(found.Mark, text, i, found.Length) is { } end)
+                    {
+                        FlushRun(quoted: false);
+                        _quotes++;
+                        OpenSay();
+                        Closer = end;
+                        open = true;
+                    }
+                    Output.Append(token);
+                    _run.Append(found.Mark);
                 }
+                else
+                {
+                    Output.Append(token);
+                    _run.Append(found.Mark);
+                    if (Quotations.Ends(Closer.Value, found.Mark))
+                    {
+                        Output.Append(SayClose);
+                        FlushRun(quoted: true);
+                        Closer = null;
+                        open = false;
+                    }
+                }
+                i += found.Length;
             }
-            i += token.Length;
+            if (open) Output.Append(SayClose);
         }
-        if (open) output.Append(SayClose);
-    }
 
-    private static string? QuoteAt(string text, int i) => text[i] switch
-    {
-        '“' => "“",
-        '”' => "”",
-        '«' => "«",
-        '»' => "»",
-        '&' when string.CompareOrdinal(text, i, StraightQuote, 0, StraightQuote.Length) == 0 => StraightQuote,
-        _ => null,
-    };
+        private void FlushRun(bool quoted)
+        {
+            if (_run.Length > 0 || quoted) _block.Add(new QuotePart(System.Net.WebUtility.HtmlDecode(_run.ToString()), quoted));
+            _run.Clear();
+        }
 
-    /// <summary>A straight mark starts speech only at the start of a word, so 5" tall and stray closing marks stay plain.</summary>
-    private static bool OpensQuote(string text, int i)
-    {
-        var after = i + StraightQuote.Length;
-        if (after < text.Length && char.IsWhiteSpace(text[after])) return false;
-        return i == 0 || char.IsWhiteSpace(text[i - 1]) || "([{—–-".Contains(text[i - 1]);
+        /// <summary>A paragraph (or list item, heading, cell) ends; so does any quotation left open in it.</summary>
+        public void EndBlock()
+        {
+            if (Closer is not null || _run.Length > 0) FlushRun(Closer is not null);
+            Closer = null;
+            if (_block.Count > 0) _blocks.Add(_block);
+            _block = [];
+        }
+
+        public string Finish(IReadOnlyList<Speaker>? speakers)
+        {
+            var tones = new List<int?>();
+            var guess = speakers is { Count: > 0 } ? new SpeakerGuess(speakers.Select(s => new Person(s.Name, s.Pronoun)).ToList()) : null;
+            foreach (var block in _blocks)
+            {
+                if (guess is null || guess.IsEmpty) tones.AddRange(block.Where(p => p.Quoted).Select(_ => (int?)null));
+                else tones.AddRange(guess.Assign(block).Select(s => s is { } n ? speakers![n].Tone : null));
+            }
+            var html = Output.ToString();
+            return ToneMarks().Replace(html, m =>
+            {
+                var q = int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                return q < tones.Count && tones[q] is { } tone ? $" tone-{tone}" : "";
+            });
+        }
     }
 
     private static string TagName(string tag)
@@ -221,6 +254,9 @@ public static partial class MarkdownRenderer
 
     [System.Text.RegularExpressions.GeneratedRegex(@"(<code>.*?</code>|<[^>]*>)", System.Text.RegularExpressions.RegexOptions.Singleline)]
     private static partial System.Text.RegularExpressions.Regex TagOrCode();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\u0001(\d+)\u0001")]
+    private static partial System.Text.RegularExpressions.Regex ToneMarks();
 
     [System.Text.RegularExpressions.GeneratedRegex(@"\[(\d{1,2}(?:\s*,\s*\d{1,2})*)\]")]
     private static partial System.Text.RegularExpressions.Regex Citation();

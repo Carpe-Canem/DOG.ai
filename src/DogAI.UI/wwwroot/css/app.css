@@ -54,6 +54,18 @@ html, body { margin: 0; height: 100%; background: #16181c; }
 .shell[data-theme=light] {
   --say-1: #1c69c9; --say-2: #c8325e; --say-3: #11794f; --say-4: #855600; --say-5: #7140cf; --say-6: #b0471a;
 }
+/* A speaker colour must never look like plain speech (the accent), or a story's unsure lines read as that character's.
+   Where one would, it is swapped for a spare: lime #b5e05a or cyan #4fd6e0 in dark, teal #1f6e7a or plum #8a2a72 in
+   light. Chosen by measured colour difference (CIEDE2000 at least 19 from the accent, 17 from each other) and at least
+   4.5:1 contrast. Playhouse's accent follows the screen, so only the screens that show speaker colours are covered. */
+.shell.skin-workbench { --say-4: #b5e05a; --say-6: #4fd6e0; }
+.shell.skin-workbench[data-theme=light] { --say-4: #1f6e7a; --say-6: #8a2a72; }
+.shell.skin-fireside { --say-6: #b5e05a; }
+.shell.skin-fireside[data-theme=light] { --say-4: #8a2a72; --say-6: #1f6e7a; }
+.shell.skin-playhouse[data-screen=story] { --say-5: #b5e05a; }
+.shell.skin-playhouse[data-screen=story][data-theme=light] { --say-5: #1f6e7a; }
+.shell.skin-playhouse[data-screen=characters] { --say-2: #b5e05a; }
+.shell.skin-playhouse[data-screen=characters][data-theme=light] { --say-2: #1f6e7a; }
 .shell *, .shell *::before, .shell *::after { box-sizing: border-box; }
 :where(.shell) button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 :where(.shell) a { color: inherit; text-decoration: none; }

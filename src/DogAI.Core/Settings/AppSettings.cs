@@ -66,6 +66,10 @@ public sealed record AppSettings
     /// <summary>Hold Ctrl+Alt+Space in any program to talk, and what you say is typed there when you let go.</summary>
     public bool DictateAnywhere { get; init; }
 
+    /// <summary>Let a model that "thinks" do so before story passages, choices, rewrites and story bible drafts. Off by
+    /// default: thinking made stories slow and could use up all the room before any story was written.</summary>
+    public bool StoryThinking { get; init; }
+
     /// <summary>Models lists also show models too large for this PC. Off by default.</summary>
     public bool ModelsShowAll { get; init; }
 
@@ -82,7 +86,7 @@ public sealed record AppSettings
         Speakers == other.Speakers && Voice == other.Voice && VoiceSpeed.Equals(other.VoiceSpeed) &&
         ReadRepliesAloud == other.ReadRepliesAloud && HandsFreeSensitivity == other.HandsFreeSensitivity &&
         TrayIcon == other.TrayIcon && CloseToTray == other.CloseToTray && DictateAnywhere == other.DictateAnywhere &&
-        ModelsShowAll == other.ModelsShowAll && ModelsFilter == other.ModelsFilter &&
+        ModelsShowAll == other.ModelsShowAll && ModelsFilter == other.ModelsFilter && StoryThinking == other.StoryThinking &&
         ExtraModelFolders.SequenceEqual(other.ExtraModelFolders) &&
         DefaultModels.Count == other.DefaultModels.Count &&
         DefaultModels.All(kv => other.DefaultModels.TryGetValue(kv.Key, out var v) && v == kv.Value);
@@ -90,7 +94,7 @@ public sealed record AppSettings
     public override int GetHashCode() => HashCode.Combine(
         HashCode.Combine(ModelsDirectory, Theme, Skin, ContextLength, LastModelPath, IdleUnloadMinutes),
         HashCode.Combine(SpeechModel, SpeechLanguage, Microphone, Speakers, Voice, VoiceSpeed, ReadRepliesAloud, HandsFreeSensitivity),
-        HashCode.Combine(TrayIcon, CloseToTray, DictateAnywhere, ModelsShowAll, ModelsFilter));
+        HashCode.Combine(TrayIcon, CloseToTray, DictateAnywhere, ModelsShowAll, ModelsFilter, StoryThinking));
 
     /// <summary>Where voice models are kept: a "voice" folder inside the models folder.</summary>
     public string? VoiceFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, "voice");

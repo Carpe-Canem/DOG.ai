@@ -53,6 +53,9 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
             e.HasOne<Conversation>().WithMany().HasForeignKey(s => s.ConversationId).OnDelete(DeleteBehavior.Cascade);
             e.Property(s => s.Bible).HasConversion(Json<StoryBible>(), JsonComparer<StoryBible>());
             e.Property(s => s.Outline).HasConversion(Json<List<StoryChapter>>(), JsonComparer<List<StoryChapter>>());
+            // Linked character cards are a short list kept with the story. No link table: a deleted card is taken out by
+            // SqliteCharacterStore, and one that slips through is skipped when the story is read.
+            e.Property(s => s.Characters).HasConversion(Json<List<StoryCharacter>>(), JsonComparer<List<StoryCharacter>>());
         });
         // Documents (M5). All new tables, so their links cost no rebuild: a chat's own collection, its documents and
         // their passages go with the chat; links and message vectors go with either end.

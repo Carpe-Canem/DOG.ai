@@ -85,6 +85,7 @@ public partial class App : Application
             await EnsureFirstRunDefaultsAsync(_services, paths);
             await StartModelServicesAsync(_services, log);
             await _services.GetRequiredService<AppearanceState>().LoadAsync();
+            await _services.GetRequiredService<DogAI.Core.Stories.StoryOptions>().LoadAsync();
             await _services.GetRequiredService<PresetCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Library.LibraryCatalog>().LoadAsync();
 
@@ -133,6 +134,7 @@ public partial class App : Application
         services.AddSingleton<ChatService>();
         services.AddSingleton<DogAI.Core.Characters.CardBuilder>();
         services.AddSingleton<DogAI.Core.Stories.StoryBuilder>();
+        services.AddSingleton<DogAI.Core.Stories.StoryOptions>();
         AddVoice(services);
         services.AddDogData();
         services.AddWpfBlazorWebView();

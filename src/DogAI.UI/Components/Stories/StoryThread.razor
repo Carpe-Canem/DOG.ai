@@ -64,7 +64,7 @@
                 }
                 else
                 {
-                    <div class="msg-body"><MarkdownView Text="@m.Content" Speech="@Appearance.SpeechColours" /></div>
+                    <div class="msg-body"><MarkdownView Text="@m.Content" Speech="@Appearance.SpeechColours" Speakers="@Speakers" /></div>
                     <div class="msg-actions">
                         @Versions(siblings, position, "Other versions of this passage")
                         <button @onclick="() => Desktop.CopyText(m.Content)">Copy</button>
@@ -102,7 +102,7 @@
         {
             <div class="passage">
                 @Thinking(active.Reasoning, active.Content.Length == 0)
-                <div class="msg-body"><MarkdownView Text="@active.Content" Speech="@Appearance.SpeechColours" /><span class="caret" aria-label="Writing"></span></div>
+                <div class="msg-body"><MarkdownView Text="@active.Content" Speech="@Appearance.SpeechColours" Speakers="@Speakers" /><span class="caret" aria-label="Writing"></span></div>
             </div>
         }
         @if (active.Status is { } status)
@@ -214,6 +214,9 @@
 
     /// <summary>A problem the page wants shown under the text (for example a refused action).</summary>
     [Parameter] public string? Notice { get; set; }
+
+    /// <summary>The story's characters, each with the colour their spoken lines take.</summary>
+    [Parameter] public IReadOnlyList<Speaker>? Speakers { get; set; }
     [Parameter] public EventCallback<string?> NoticeChanged { get; set; }
 
     private sealed class Revision

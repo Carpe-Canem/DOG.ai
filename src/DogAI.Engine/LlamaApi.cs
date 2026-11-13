@@ -126,8 +126,8 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
         return content is null && stats is null ? null : new ChatDelta(content, null, stats);
     }
 
-    public async IAsyncEnumerable<ChatDelta> StreamChatAsync(
-        IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, [EnumeratorCancellation] CancellationToken ct)
+    /// <summary>The body of a chat completions request: the messages, the sampler settings and the per-request switches.</summary>
+    internal static JsonObject ChatRequestBody(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler)
     {
         var body = SamplerBody(sampler);
         body["messages"] = ToJson(messages);
@@ -139,6 +139,17 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
                 ["json_schema"] = new JsonObject { ["name"] = "answer", ["schema"] = JsonNode.Parse(schema) },
             };
         body["stream_options"] = new JsonObject { ["include_usage"] = true };
+        // Chat templates of thinking models read a switch: Qwen and GLM call it enable_thinking, DeepSeek thinking.
+        // Templates that have neither ignore both, so a model that cannot be told simply thinks as before.
+        if (sampler.Thinking is false)
+            body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false, ["thinking"] = false };
+        return body;
+    }
+
+    public async IAsyncEnumerable<ChatDelta> StreamChatAsync(
+        IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var body = ChatRequestBody(messages, sampler);
 
         using var response = await http.SendAsync(
             Request(HttpMethod.Post, "v1/chat/completions", body), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);

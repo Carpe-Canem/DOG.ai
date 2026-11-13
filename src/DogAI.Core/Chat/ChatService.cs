@@ -72,8 +72,11 @@ public sealed class ActiveReply(long conversationId, long? parentId, long? conti
 /// a story its bible (the story-only parts are in ChatService.Story.cs).
 /// </summary>
 public sealed partial class ChatService(IChatStore store, IChatEngine engine, PresetCatalog? presets = null, ICharacterStore? characters = null,
-    IStoryStore? stories = null, DocumentLibrary? documents = null)
+    IStoryStore? stories = null, DocumentLibrary? documents = null, StoryOptions? storyOptions = null)
 {
+    /// <summary>Story-wide settings: whether a thinking model may think when it writes for a story.</summary>
+    private readonly StoryOptions _storyOptions = storyOptions ?? new StoryOptions();
+
     public const string UntitledChat = "New chat";
     private static readonly TimeSpan UiInterval = TimeSpan.FromMilliseconds(50);
 
@@ -292,7 +295,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         var persona = await characters.PersonaForAsync(personaId, ct);
         var conversation = await store.CreateAsync(new Conversation
         {
-            Mode = "characters",
+            Mode = CharacterChatMode,
             Title = UntitledChat,
             CharacterId = character.Id,
             PersonaId = persona?.Id,
@@ -472,6 +475,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             if (await StoryOfAsync(conversation, ct) is { } story) path = StoryPrompt.ForPrompt(story, path);
             var preset = _presets.Get(conversation.PresetId);
             reply.PresetId = preset.Id;
+            if (conversation.Mode == Story.Mode) preset = _storyOptions.Apply(preset);
             reply.ModelName = engine.ModelName;
 
             var sources = new ReplySources();
@@ -715,6 +719,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         var chunkBudget = Math.Max(256, engine.ContextLength / 2 - SummaryMaxTokens);
         // Low temperature for accuracy, with repetition penalties because small models easily loop when summarising.
         var preset = SamplerPresets.Get("precise") with { MaxTokens = SummaryMaxTokens, RepeatPenalty = 1.1, DryMultiplier = 0.8 };
+        if (conversation.Mode == Story.Mode) preset = _storyOptions.Apply(preset);
         while (through < to)
         {
             var lines = new StringBuilder();

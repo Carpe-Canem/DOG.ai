@@ -546,6 +546,10 @@ namespace DogAI.Data.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Characters")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("ConversationId")
                         .HasColumnType("INTEGER");
 

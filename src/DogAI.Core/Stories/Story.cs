@@ -37,6 +37,20 @@ public sealed class StoryChapter
 }
 
 /// <summary>
+/// A character card linked to a story. The card itself stays in Characters, so later changes to it reach the story.
+/// </summary>
+public sealed class StoryCharacter
+{
+    public long CharacterId { get; set; }
+
+    /// <summary>
+    /// True for the story's main character: in an interactive story the player plays them and the narrator never
+    /// decides what they do. False for a character the model writes. At most one card is the main character.
+    /// </summary>
+    public bool Main { get; set; }
+}
+
+/// <summary>
 /// The story settings that go with a "story" conversation. The text itself is the conversation's message tree:
 /// narrator passages are replies; the user's turns are actions (interactive) or directions (authored).
 /// </summary>
@@ -47,6 +61,9 @@ public sealed class Story
     public StoryKind Kind { get; set; }
     public StoryBible Bible { get; set; } = new();
     public List<StoryChapter> Outline { get; set; } = [];
+
+    /// <summary>Character cards in the story, in list order. Cards that have since been deleted are skipped.</summary>
+    public List<StoryCharacter> Characters { get; set; } = [];
 
     /// <summary>Interactive: the model keeps location, inventory, stats and facts up to date after each passage.</summary>
     public bool TrackState { get; set; }

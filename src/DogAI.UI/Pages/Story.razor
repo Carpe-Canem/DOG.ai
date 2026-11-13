@@ -4,10 +4,12 @@
 @implements IDisposable
 @inject IChatStore Store
 @inject IStoryStore Stories
+@inject ICharacterStore CharacterStore
 @inject ChatService Chat
 @inject EngineManager Engine
 @inject IDesktopShell Desktop
 @inject NavigationManager Nav
+@inject AppearanceState Appearance
 
 <SectionContent SectionName="title">
     <div class="head-row">
@@ -63,7 +65,7 @@ else if (_path.Count == 0 && !Streaming)
 }
 else
 {
-    <StoryThread Conversation="@_conversation" Info="@_story" Tree="@_tree" Path="@_path" @bind-Notice="_notice" />
+    <StoryThread Conversation="@_conversation" Info="@_story" Tree="@_tree" Path="@_path" @bind-Notice="_notice" Speakers="@_speakers" />
 }
 
 @if (_story is not null)
@@ -110,6 +112,16 @@ else
             @if (_story.Bible.Premise.Trim().Length > 0)
             {
                 <p class="small premise">@_story.Bible.Premise</p>
+            }
+            @foreach (var member in _cast)
+            {
+                <div class="member @(ToneOf(member.Character.Id) is { } tone ? $"tone-{tone}" : "")">
+                    <CharacterAvatar Character="member.Character" />
+                    <span class="li-text">
+                        <a class="li-title" href="characters/@member.Character.Id" title="@($"About {member.Character.Name}")">@member.Character.Name</a>
+                        <span class="li-sub">@StoryPrompt.RoleLabel(_story.Kind, member.Main)</span>
+                    </span>
+                </div>
             }
             <div class="row">
                 <a class="btn" href="story/@_conversation.Id/setup" title="The premise, cast, world and style the model follows, and this story's settings">Story bible</a>
@@ -183,6 +195,11 @@ else
 
     private Conversation _conversation = new();
     private StoryInfo? _story;
+    private IReadOnlyList<StoryCastMember> _cast = [];
+    private IReadOnlyList<Speaker> _speakers = [];
+
+    /// <summary>A card character's speaker colour in this story, as in group chats.</summary>
+    private int? ToneOf(long characterId) => Appearance.SpeechColours ? SpeakerTones.Of(_cast.Select(m => m.Character.Id), characterId) : null;
     private IReadOnlyList<ChatMessage> _messages = [];
     private MessageTree _tree = new([]);
     private IReadOnlyList<ChatMessage> _path = [];
@@ -237,6 +254,14 @@ else
             story = conversation is null ? null : await Stories.GetAsync(id);
             if (story is not null) messages = await Store.GetMessagesAsync(id);
         }
+        // The list call leaves the full pictures out, which is all the side panel needs.
+        IReadOnlyList<StoryCastMember> cast = [];
+        if (story is { Characters.Count: > 0 })
+        {
+            var all = await CharacterStore.ListAsync();
+            cast = story.Characters.Select(l => all.FirstOrDefault(c => c.Id == l.CharacterId) is { } c ? new StoryCastMember(c, l.Main) : null)
+                .OfType<StoryCastMember>().ToList();
+        }
         if (version != _loadVersion) return;
 
         if (StoryId is not null && story is null)
@@ -246,6 +271,11 @@ else
         }
         _conversation = conversation ?? new Conversation();
         _story = story;
+        _cast = cast;
+        // Cards first (speaker n is cast[n], with its colour), then names from the Cast box, which stay plain.
+        _speakers = story is null ? [] : StoryPrompt.People(story, cast)
+            .Select((p, i) => new Speaker(p.Name, i < cast.Count ? SpeakerTones.Of(cast.Select(c => c.Character.Id), cast[i].Character.Id) : null, p.Pronoun))
+            .ToList();
         _messages = messages;
         _tree = new MessageTree(messages);
         _path = _tree.PathTo(_tree.ResolveLeaf(_conversation.ActiveLeafId));

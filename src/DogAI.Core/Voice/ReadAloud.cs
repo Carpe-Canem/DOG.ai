@@ -33,15 +33,17 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
 
     /// <summary>Reads a whole text (markdown) aloud.</summary>
     /// <param name="voice">Null means the default voice.</param>
-    public void Speak(string key, string markdown, VoiceId? voice)
+    /// <param name="cast">Stories: characters whose spoken lines are read in their own voices.</param>
+    public void Speak(string key, string markdown, VoiceId? voice, VoiceCast? cast = null)
     {
-        var session = Start(key, Task.FromResult(voice), queue: false);
+        var session = Start(key, Task.FromResult(voice), queue: false, Task.FromResult(cast));
         session.End(markdown);
     }
 
     /// <summary>Starts reading text that is still being written. The voice may still be being looked up.</summary>
     /// <param name="queue">Wait for what is being read to finish instead of stopping it.</param>
-    public void Begin(string key, Task<VoiceId?> voice, bool queue = false) => Start(key, voice, queue);
+    /// <param name="cast">Stories: characters whose spoken lines are read in their own voices; may still be being looked up.</param>
+    public void Begin(string key, Task<VoiceId?> voice, bool queue = false, Task<VoiceCast?>? cast = null) => Start(key, voice, queue, cast);
 
     /// <summary>The whole text so far of what <paramref name="key"/> is reading.</summary>
     public void Feed(string key, string textSoFar) => Find(key)?.Feed(textSoFar);
@@ -83,7 +85,7 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
         lock (_lock) return _sessions.LastOrDefault(s => s.Key == key);
     }
 
-    private Session Start(string key, Task<VoiceId?> voice, bool queue)
+    private Session Start(string key, Task<VoiceId?> voice, bool queue, Task<VoiceCast?>? cast = null)
     {
         var session = new Session(key);
         List<Session> old = [];
@@ -98,7 +100,7 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
             _sessions.Add(session);
             // RunAsync yields before doing anything, so starting it under the lock is safe and Done is set before
             // anything else can queue behind this session.
-            session.Done = RunAsync(session, voice);
+            session.Done = RunAsync(session, voice, cast ?? Task.FromResult<VoiceCast?>(null));
         }
         foreach (var s in old) s.Cancel();
         Problem = null;
@@ -106,7 +108,7 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
         return session;
     }
 
-    private async Task RunAsync(Session session, Task<VoiceId?> wanted)
+    private async Task RunAsync(Session session, Task<VoiceId?> wanted, Task<VoiceCast?> wantedCast)
     {
         await Task.Yield(); // let the caller finish starting the session first
         var ct = session.Token;
@@ -115,8 +117,23 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
         {
             var current = await settings.LoadAsync(ct).ConfigureAwait(false);
             var speed = (float)Math.Clamp(current.VoiceSpeed, 0.5, 2);
-            var voice = await synthesizer.ResolveAsync(await wanted.ConfigureAwait(false), ct).ConfigureAwait(false)
-                        ?? throw new VoiceUnavailableException("No voice is available on this PC.");
+            var narrator = await synthesizer.ResolveAsync(await wanted.ConfigureAwait(false), ct).ConfigureAwait(false)
+                           ?? throw new VoiceUnavailableException("No voice is available on this PC.");
+            var cast = await wantedCast.ConfigureAwait(false);
+            ISpokenSplitter splitter = cast is { IsEmpty: false } ? new VoicedPieces(cast) : new SentencePieces();
+            var voices = new Dictionary<int, VoiceId>();
+
+            // A character's voice that is not on this PC any more reads in the narrator's voice, not the default one.
+            async Task<VoiceId> VoiceOf(int? speaker)
+            {
+                if (speaker is not { } s || cast is null || s >= cast.Voices.Count || cast.Voices[s] is not { } own) return narrator;
+                if (!voices.TryGetValue(s, out var found))
+                {
+                    var resolved = await synthesizer.ResolveAsync(own, ct).ConfigureAwait(false);
+                    voices[s] = found = resolved is not null && resolved.Equals(own) ? own : narrator;
+                }
+                return found;
+            }
 
             var play = Task.Run(async () =>
             {
@@ -126,15 +143,34 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
                     await output.PlayAsync(clip, ct).ConfigureAwait(false);
             }, ct);
 
+            async Task SayAsync(SpokenPiece piece)
+            {
+                var words = piece.Plain ? piece.Text : SpeechText.ForSpeech(piece.Text);
+                if (words.Length == 0) return;
+                var voice = await VoiceOf(piece.Speaker).ConfigureAwait(false);
+                AudioClip clip;
+                try
+                {
+                    clip = await synthesizer.SynthesizeAsync(words, voice, speed, ct).ConfigureAwait(false);
+                }
+                catch (VoiceUnavailableException) when (!voice.Equals(narrator))
+                {
+                    voices[piece.Speaker!.Value] = narrator;
+                    clip = await synthesizer.SynthesizeAsync(words, narrator, speed, ct).ConfigureAwait(false);
+                }
+                await clips.Writer.WriteAsync(clip, ct).ConfigureAwait(false);
+            }
+
             try
             {
-                await foreach (var piece in session.Pieces.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                var text = "";
+                while (await session.Texts.Reader.WaitToReadAsync(ct).ConfigureAwait(false))
                 {
-                    var words = SpeechText.ForSpeech(piece);
-                    if (words.Length == 0) continue;
-                    var clip = await synthesizer.SynthesizeAsync(words, voice, speed, ct).ConfigureAwait(false);
-                    await clips.Writer.WriteAsync(clip, ct).ConfigureAwait(false);
+                    // Only the newest text matters: it holds everything the older ones did.
+                    while (session.Texts.Reader.TryRead(out var newer)) text = newer;
+                    foreach (var piece in splitter.Feed(text)) await SayAsync(piece).ConfigureAwait(false);
                 }
+                foreach (var piece in splitter.Finish(text)) await SayAsync(piece).ConfigureAwait(false);
             }
             finally
             {
@@ -168,12 +204,13 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
     private sealed class Session(string key) : IDisposable
     {
         private readonly CancellationTokenSource _cts = new();
-        private readonly SentenceSplitter _splitter = new();
         private readonly object _lock = new();
         private bool _ended;
 
         public string Key { get; } = key;
-        public Channel<string> Pieces { get; } = Channel.CreateUnbounded<string>();
+
+        /// <summary>The whole text so far, each time it grows. How it is cut into pieces is decided once the voices are known.</summary>
+        public Channel<string> Texts { get; } = Channel.CreateUnbounded<string>();
         public Task Done { get; set; } = Task.CompletedTask;
         public Task After { get; set; } = Task.CompletedTask;
         public CancellationToken Token => _cts.Token;
@@ -183,7 +220,7 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
             lock (_lock)
             {
                 if (_ended) return;
-                foreach (var piece in _splitter.Feed(textSoFar)) Pieces.Writer.TryWrite(piece);
+                Texts.Writer.TryWrite(textSoFar);
             }
         }
 
@@ -193,8 +230,8 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
             {
                 if (_ended) return;
                 _ended = true;
-                foreach (var piece in _splitter.Finish(finalText)) Pieces.Writer.TryWrite(piece);
-                Pieces.Writer.TryComplete();
+                Texts.Writer.TryWrite(finalText);
+                Texts.Writer.TryComplete();
             }
         }
 
@@ -202,7 +239,7 @@ public sealed class ReadAloud(ISpeechSynthesizer synthesizer, IAudioOutput outpu
         {
             try { _cts.Cancel(); }
             catch (ObjectDisposedException) { }
-            Pieces.Writer.TryComplete();
+            Texts.Writer.TryComplete();
         }
 
         public void Dispose() => _cts.Dispose();

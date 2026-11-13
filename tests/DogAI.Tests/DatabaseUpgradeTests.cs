@@ -150,6 +150,35 @@ public sealed class DatabaseUpgradeTests : IDisposable
         Assert.Equal(250, story.PassageWords);
     }
 
+    [Fact]
+    public async Task A_story_from_m7_has_no_character_cards_and_can_be_given_one()
+    {
+        var factory = _services.GetRequiredService<IDbContextFactory<DogDbContext>>();
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            await db.GetService<IMigrator>().MigrateAsync("20261112205103_Polish");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Conversations (Mode, Title, SystemPrompt, PresetId, AuthorsNote, AuthorsNoteDepth, Summary, MemoryEnabled, TurnOrder, RecallEnabled, Pinned, CreatedAt, UpdatedAt) " +
+                "VALUES ('story', 'M7 story', '', 'creative', '', 4, '', 1, 0, 1, 0, '2026-11-12 10:00:00', '2026-11-12 10:00:00')");
+            await db.Database.ExecuteSqlRawAsync(
+                "INSERT INTO Stories (ConversationId, Kind, Bible, Outline, TrackState, Dice, PassageWords) VALUES (1, 1, '{{\"Premise\":\"A flood.\"}}', '[]', 1, 0, 250)");
+        }
+
+        await _services.MigrateDogDatabaseAsync();
+
+        var stories = _services.GetRequiredService<DogAI.Core.Stories.IStoryStore>();
+        var story = await stories.GetAsync(1);
+        Assert.NotNull(story);
+        Assert.Equal("A flood.", story.Bible.Premise);
+        Assert.Empty(story.Characters);
+
+        story.Characters.Add(new DogAI.Core.Stories.StoryCharacter { CharacterId = 7, Main = true });
+        await stories.SaveAsync(story);
+        var link = Assert.Single((await stories.GetAsync(1))!.Characters);
+        Assert.Equal(7, link.CharacterId);
+        Assert.True(link.Main);
+    }
+
     public void Dispose()
     {
         _services.Dispose();

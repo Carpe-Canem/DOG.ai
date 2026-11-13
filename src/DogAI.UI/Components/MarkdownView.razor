@@ -32,20 +32,28 @@
     /// <summary>Mark spoken lines and actions so the stylesheet can colour them (roleplay and stories).</summary>
     [Parameter] public bool Speech { get; set; }
 
+    /// <summary>Stories: characters whose spoken lines get their own colour when a line can be pinned to one.</summary>
+    [Parameter] public IReadOnlyList<Speaker>? Speakers { get; set; }
+
     private string? _rendered;
     private int _renderedCitations;
     private bool _renderedSpeech;
+    private IReadOnlyList<Speaker>? _renderedSpeakers;
     private IReadOnlyList<MarkdownSegment> _segments = [];
     private int _copied = -1;
 
     protected override void OnParametersSet()
     {
-        if (Text == _rendered && Citations == _renderedCitations && Speech == _renderedSpeech) return;
+        if (Text == _rendered && Citations == _renderedCitations && Speech == _renderedSpeech && SameSpeakers()) return;
         _rendered = Text;
         _renderedCitations = Citations;
         _renderedSpeech = Speech;
-        _segments = MarkdownRenderer.Render(Text, Citations, Speech);
+        _renderedSpeakers = Speakers;
+        _segments = MarkdownRenderer.Render(Text, Citations, Speech, Speech ? Speakers : null);
     }
+
+    private bool SameSpeakers() => ReferenceEquals(Speakers, _renderedSpeakers) ||
+                                   (Speakers is not null && _renderedSpeakers is not null && Speakers.SequenceEqual(_renderedSpeakers));
 
     private static string CodeHtml(MarkdownSegment segment)
     {

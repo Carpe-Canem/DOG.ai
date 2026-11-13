@@ -5,7 +5,7 @@ namespace DogAI.UI.Components.Chat;
 public sealed record SpeakerInfo(string Name, string? Avatar, int? Tone = null)
 {
     /// <summary>How many speaker colours app.css defines (--say-1 … --say-6).</summary>
-    public const int Tones = 6;
+    public const int Tones = DogAI.Core.Text.SpeakerTones.Count;
 
     /// <summary>The letter shown when there is no picture.</summary>
     public string? Letter => Name.Length > 0 && char.IsLetterOrDigit(Name[0]) ? Name[..1].ToUpperInvariant() : null;

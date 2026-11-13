@@ -134,18 +134,7 @@ public static partial class CharacterPrompt
         }
         layout.Add(PromptPartKind.Card, F(card.ToString()));
 
-        if (lore is { Count: > 0 })
-        {
-            // Placed in the card's insertion order; which ones made it in was decided by priority.
-            var ordered = lore.OrderBy(e => e.InsertionOrder).ToList();
-            foreach (var position in new[] { LorePosition.BeforeCard, LorePosition.AfterCard })
-            {
-                var text = string.Join("\n\n", ordered.Where(e => e.Position == position).Select(e => e.Content.Trim()));
-                if (text.Length > 0)
-                    layout.Add(position == LorePosition.BeforeCard ? PromptPartKind.LoreBefore : PromptPartKind.LoreAfter, F(Labelled("[World info]", text)));
-            }
-            layout.LoreNames.AddRange(ordered.Select(LoreLabel));
-        }
+        AddLore(layout, lore, F);
 
         layout.Add(PromptPartKind.Examples, F(Labelled("[Examples of how {{char}} talks]", character.ExampleMessages)));
         layout.Add(PromptPartKind.ChatInstructions, F(Labelled("[Instructions for this chat]", chatInstructions)));
@@ -185,13 +174,32 @@ public static partial class CharacterPrompt
     /// <summary>The longest a note on another group member gets, in characters. Cut at a sentence end where possible.</summary>
     public const int CastNoteLength = 700;
 
-    private static string Brief(string text)
+    /// <summary><paramref name="text"/> cut to at most <paramref name="max"/> characters, at a sentence end where possible.</summary>
+    public static string Brief(string text, int max = CastNoteLength)
     {
         text = text.Trim();
-        if (text.Length <= CastNoteLength) return text;
-        var cut = text[..CastNoteLength];
+        if (text.Length <= max) return text;
+        var cut = text[..max];
         var end = cut.LastIndexOfAny(['.', '!', '?', '\n']);
-        return (end > CastNoteLength / 2 ? cut[..(end + 1)] : cut.TrimEnd() + "…").Trim();
+        return (end > max / 2 ? cut[..(end + 1)] : cut.TrimEnd() + "…").Trim();
+    }
+
+    /// <summary>
+    /// Adds the lore that fired to <paramref name="layout"/>, before or after the card as each entry asks, and notes
+    /// the entries' names for the prompt inspector. Which entries made it in was decided by priority; here they are
+    /// placed in the card's insertion order.
+    /// </summary>
+    public static void AddLore(PromptLayout layout, IReadOnlyList<LoreEntry>? lore, Func<string, string> fill)
+    {
+        if (lore is not { Count: > 0 }) return;
+        var ordered = lore.OrderBy(e => e.InsertionOrder).ToList();
+        foreach (var position in new[] { LorePosition.BeforeCard, LorePosition.AfterCard })
+        {
+            var text = string.Join("\n\n", ordered.Where(e => e.Position == position).Select(e => e.Content.Trim()));
+            if (text.Length > 0)
+                layout.Add(position == LorePosition.BeforeCard ? PromptPartKind.LoreBefore : PromptPartKind.LoreAfter, fill("[World info]\n" + text));
+        }
+        layout.LoreNames.AddRange(ordered.Select(LoreLabel));
     }
 
     /// <summary>How a lore entry is named to people: its name, else its first keys.</summary>

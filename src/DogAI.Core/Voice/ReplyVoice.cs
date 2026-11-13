@@ -66,7 +66,8 @@ public sealed class ReplyVoice : IDisposable
             return;
         }
         var voice = await VoiceForAsync(message.ConversationId, message.SpeakerId, ct).ConfigureAwait(false);
-        _reader.Speak(KeyFor(message.Id), message.Content, voice);
+        var cast = await CastForAsync(message.ConversationId, ct).ConfigureAwait(false);
+        _reader.Speak(KeyFor(message.Id), message.Content, voice, cast);
     }
 
     /// <summary>The voice for a reply in this conversation. Null means the default voice.</summary>
@@ -80,6 +81,24 @@ public sealed class ReplyVoice : IDisposable
         var characterId = speakerId ?? conversation.CharacterId;
         if (characterId is null) return null;
         return VoiceId.Parse((await _characters.GetAsync(characterId.Value, ct).ConfigureAwait(false))?.Voice);
+    }
+
+    /// <summary>
+    /// Stories: the character cards in the story, so their spoken lines are read in their own voices. Null when the
+    /// conversation is not a story or no card in it has a voice of its own, so the narrator reads everything.
+    /// </summary>
+    public async Task<VoiceCast?> CastForAsync(long conversationId, CancellationToken ct = default)
+    {
+        var conversation = await _chats.GetAsync(conversationId, ct).ConfigureAwait(false);
+        if (conversation?.Mode != Story.Mode) return null;
+        var story = await _stories.GetAsync(conversationId, ct).ConfigureAwait(false);
+        if (story is null || story.Characters.Count == 0) return null;
+        var cast = new List<StoryCastMember>();
+        foreach (var link in story.Characters.DistinctBy(l => l.CharacterId))
+            if (await _characters.GetAsync(link.CharacterId, ct).ConfigureAwait(false) is { } character) cast.Add(new StoryCastMember(character, link.Main));
+        // The same people, in the same order, as the story page colours: cards with their voices, then Cast box names.
+        var voices = cast.Select(m => VoiceId.Parse(m.Character.Voice)).ToList();
+        return voices.Any(v => v is not null) ? new VoiceCast(StoryPrompt.People(story, cast), voices) : null;
     }
 
     private void OnChatChanged()
@@ -107,7 +126,7 @@ public sealed class ReplyVoice : IDisposable
             // Group members answering one after another wait their turn instead of talking over each other.
             var queue = active.SpeakerId is not null && _lastFinished is { } last && last.ConversationId == active.ConversationId;
             _followingKey = "live:" + Guid.NewGuid().ToString("N");
-            _reader.Begin(_followingKey, VoiceForAsync(active.ConversationId, active.SpeakerId), queue);
+            _reader.Begin(_followingKey, VoiceForAsync(active.ConversationId, active.SpeakerId), queue, CastForAsync(active.ConversationId));
         }
         if (_followingKey is not null) _reader.Feed(_followingKey, ReadableText(active));
     }

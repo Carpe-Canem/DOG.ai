@@ -5,6 +5,7 @@
 @inject OnlineGate Gate
 @inject NetworkAudit Audit
 @inject ISettingsStore SettingsStore
+@inject DogAI.Core.Stories.StoryOptions StoryOptions
 
 <SectionContent SectionName="title">
     <h2>Settings</h2>
@@ -48,6 +49,11 @@
             Colour spoken lines and actions
         </label>
         <p class="small">In character chats, group chats and stories, "quoted speech" takes a colour and *actions* are toned down. In a group chat each member speaks in their own colour.</p>
+        <label class="check">
+            <input type="checkbox" name="story-thinking" checked="@StoryOptions.Thinking" @onchange="e => StoryOptions.SetThinkingAsync(e.Value is true)" />
+            Let the model think in stories
+        </label>
+        <p class="small">Some models think silently before they write. Off, they start a story passage at once and cannot use up the room meant for the story; on, they may plan more carefully but are slower, and can run out of room. Models that do not think, or cannot be told, are not affected. Chats are not affected either.</p>
     </section>
 
     <section>

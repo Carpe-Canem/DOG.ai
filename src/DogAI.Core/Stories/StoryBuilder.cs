@@ -12,7 +12,7 @@ public sealed record StoryDraft(string Title, StoryBible Bible, List<StoryChapte
 /// Drafts a story bible (and, for an authored story, an outline) from a short idea. Like the card builder, the engine
 /// is asked for JSON matching a schema, so the answer can be read reliably.
 /// </summary>
-public sealed class StoryBuilder(IChatEngine engine)
+public sealed class StoryBuilder(IChatEngine engine, StoryOptions? options = null)
 {
     public const int MaxTokens = 3000;
 
@@ -60,15 +60,19 @@ public sealed class StoryBuilder(IChatEngine engine)
         "Reply with the JSON object only.";
 
     /// <summary>Drafts from <paramref name="idea"/>. <paramref name="progress"/> gets the text written so far, as it grows.</summary>
+    /// <param name="cast">Character cards the story already has. With some, the idea may be left empty.</param>
     /// <exception cref="InvalidOperationException">No model is loaded, or the model's answer was not usable.</exception>
-    public async Task<StoryDraft> DraftAsync(string idea, StoryKind kind, Action<string>? progress = null, CancellationToken ct = default)
+    public async Task<StoryDraft> DraftAsync(string idea, StoryKind kind, Action<string>? progress = null, CancellationToken ct = default,
+        IReadOnlyList<StoryCastMember>? cast = null)
     {
         if (!engine.IsReady) throw new InvalidOperationException("No model is loaded. Load one first.");
         idea = idea.Trim();
-        if (idea.Length == 0) throw new InvalidOperationException("Describe the story first.");
+        var characters = StoryPrompt.CastForDraft(kind, cast ?? []);
+        if (idea.Length == 0 && characters.Length == 0) throw new InvalidOperationException("Describe the story first.");
+        if (idea.Length == 0) idea = "a story that suits these characters";
 
-        var preset = SamplerPresets.Get(SamplerPresets.DefaultId) with { Temperature = 0.8, MaxTokens = MaxTokens, JsonSchema = Schema(kind) };
-        var prompt = new List<PromptMessage> { new("system", Instruction(kind)), new("user", "Idea: " + idea) };
+        var preset = (options ?? new StoryOptions()).Apply(SamplerPresets.Get(SamplerPresets.DefaultId) with { Temperature = 0.8, MaxTokens = MaxTokens, JsonSchema = Schema(kind) });
+        var prompt = new List<PromptMessage> { new("system", Instruction(kind)), new("user", "Idea: " + idea + (characters.Length > 0 ? "\n\n" + characters : "")) };
         var text = new StringBuilder();
         await foreach (var delta in engine.StreamChatAsync(prompt, preset, ct).WithCancellation(ct).ConfigureAwait(false))
         {

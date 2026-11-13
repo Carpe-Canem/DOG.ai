@@ -276,7 +276,8 @@ public sealed class VoiceFlowTests
             await Task.Yield();
             if (Fail is not null) throw Fail;
             lock (Said) Said.Add((text, voice));
-            return new AudioClip(new float[10], 1000);
+            // As many samples as letters, so a test can tell from what was played which text it was.
+            return new AudioClip(new float[text.Length], 1000);
         }
     }
 
@@ -346,8 +347,11 @@ public sealed class VoiceFlowTests
         reader.End("live:b", "Bo here.");
         await reader.IdleAsync();
 
-        Assert.Equal(["Hello from Ann.", "And more.", "Bo here."], voice.Said.Select(s => s.Text));
-        Assert.Equal(["A", "A", "B"], voice.Said.Select(s => s.Voice.Model));
+        // A queued reading may be turned into sound early, but it plays only after the one before has finished.
+        string[] expected = ["Hello from Ann.", "And more.", "Bo here."];
+        Assert.Equal(expected.Order(), voice.Said.Select(s => s.Text).Order());
+        Assert.Equal(expected.Select(t => t.Length), speakers.Played);
+        Assert.Equal(["A", "A", "B"], expected.Select(t => voice.Said.Single(s => s.Text == t).Voice.Model));
     }
 
     [Fact]

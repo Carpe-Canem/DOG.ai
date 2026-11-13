@@ -64,6 +64,7 @@ else if (_conversation.Id == 0)
                 }
                 <div class="row">
                     <button class="btn primary" disabled="@_busy" @onclick="StartChatAsync">New chat</button>
+                    <a class="btn" href="story/new?character=@c.Id" title="@($"A new story with {c.Name} in it. The card stays linked, so the story follows changes to it.")">Start a story</a>
                     <a class="btn" href="characters/@c.Id/edit">Edit</a>
                     <a class="btn" href="characters/@c.Id/lore" title="Facts about the world that are added to the prompt when their keywords come up">Lore@(_loreCount > 0 ? $" ({_loreCount})" : "")</a>
                     <button class="btn" @onclick="ExportPngAsync" title="A picture with the card inside, which other apps can import">Save as card</button>
@@ -153,6 +154,10 @@ else
             <div class="row">
                 <button class="btn" disabled="@_busy" @onclick="StartChatAsync">New chat</button>
                 <a class="btn" href="characters/@_character.Id">About @_character.Name</a>
+                @if (_path.Count > 0)
+                {
+                    <a class="btn" href="story/new?chat=@_conversation.Id" title="@($"An adventure that carries on from this chat, with {_character.Name} linked. This chat stays as it is.")">Turn into a story</a>
+                }
                 @if (_confirmDelete)
                 {
                     <button class="btn danger" @onclick="DeleteChatAsync">Yes, delete it</button>

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using DogAI.Core.Characters;
 using DogAI.Core.Chat;
 
 namespace DogAI.Core.Stories;
@@ -64,7 +65,10 @@ public static partial class StoryPrompt
     /// summary of earlier text, and the tracked state placed with the newest user turn.
     /// </summary>
     /// <param name="opening">True when nothing is written yet, so the prompt needs a user turn asking for the start.</param>
-    public static PromptLayout Layout(Story story, string memory = "", StoryState? state = null, bool opening = false)
+    /// <param name="cast">The story's character cards that still exist, in list order.</param>
+    /// <param name="lore">The entries of those cards' lore that fired.</param>
+    public static PromptLayout Layout(Story story, string memory = "", StoryState? state = null, bool opening = false,
+        IReadOnlyList<StoryCastMember>? cast = null, IReadOnlyList<LoreEntry>? lore = null)
     {
         var layout = new PromptLayout { OpeningTurn = OpeningTurn };
         var words = Math.Clamp(story.PassageWords, 50, 1500).ToString();
@@ -81,6 +85,14 @@ public static partial class StoryPrompt
             layout.Add(PromptPartKind.ChatInstructions, OutlineText(story));
         }
         layout.Add(PromptPartKind.Card, BibleText(story.Bible));
+        if (cast is { Count: > 0 })
+        {
+            layout.Add(PromptPartKind.Cast, CastText(story, cast));
+            layout.Add(PromptPartKind.Examples, ExamplesText(story, cast));
+            // Lore is written with {{char}} and {{user}} too; several books share one block, so the first card the model writes names them.
+            var first = cast.FirstOrDefault(m => !m.Main) ?? cast[0];
+            CharacterPrompt.AddLore(layout, lore, text => CharacterPrompt.Fill(text, first.Character.Name, UserNameFor(first, cast)));
+        }
         if (memory.Trim().Length > 0) layout.Add(PromptPartKind.Memory, "[The story so far]\n" + memory.Trim());
         if (story.Kind == StoryKind.Interactive)
         {

@@ -27,6 +27,13 @@ public sealed record SamplerPreset(string Id, string Name, string Description)
     [System.Text.Json.Serialization.JsonIgnore]
     public string? JsonSchema { get; init; }
 
+    /// <summary>
+    /// False asks a model that "thinks" before answering to answer straight away (stories, unless the owner turns
+    /// thinking back on). Null leaves it to the model. Set by DOG.ai per request, never saved with a style.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool? Thinking { get; init; }
+
     /// <summary>Text at which to stop writing. Set by DOG.ai for its own jobs, never saved with a style.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public IReadOnlyList<string>? Stop { get; init; }

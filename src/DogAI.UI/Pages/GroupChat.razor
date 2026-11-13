@@ -242,9 +242,7 @@ else
 
     /// <summary>A member's speaker colour. It follows the order the characters were made, not the speaking order,
     /// so moving members up and down never changes anyone's colour.</summary>
-    private int? ToneOf(long characterId) => !Appearance.SpeechColours || _members.All(m => m.CharacterId != characterId)
-        ? null
-        : _members.Count(m => m.CharacterId < characterId) % SpeakerInfo.Tones + 1;
+    private int? ToneOf(long characterId) => Appearance.SpeechColours ? SpeakerTones.Of(_members.Select(m => m.CharacterId), characterId) : null;
 
     protected override void OnInitialized()
     {

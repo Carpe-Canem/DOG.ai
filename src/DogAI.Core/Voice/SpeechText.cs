@@ -22,16 +22,22 @@ public static partial class SpeechText
     /// <summary>Short inline code (a name, a key) is read out; longer code is skipped.</summary>
     private const int SpokenCodeLength = 32;
 
-    public static string ForSpeech(string? markdown)
+    public static string ForSpeech(string? markdown) => Tidy(string.Join(" ", Lines(markdown)));
+
+    /// <summary>The words to say, one entry per paragraph, heading, list item or table row.</summary>
+    public static IReadOnlyList<string> Paragraphs(string? markdown) =>
+        Lines(markdown).Select(Tidy).Where(line => line.Length > 0).ToList();
+
+    private static List<string> Lines(string? markdown)
     {
-        if (string.IsNullOrWhiteSpace(markdown)) return "";
+        var lines = new List<string>();
+        if (string.IsNullOrWhiteSpace(markdown)) return lines;
         var document = Markdown.Parse(markdown, Pipeline);
-        var text = new StringBuilder();
-        foreach (var block in document) AppendBlock(block, text);
-        return Tidy(text.ToString());
+        foreach (var block in document) AppendBlock(block, lines);
+        return lines;
     }
 
-    private static void AppendBlock(Block block, StringBuilder text)
+    private static void AppendBlock(Block block, List<string> lines)
     {
         switch (block)
         {
@@ -43,33 +49,31 @@ public static partial class SpeechText
                 {
                     var cells = row.OfType<TableCell>().Select(c =>
                     {
-                        var cell = new StringBuilder();
+                        var cell = new List<string>();
                         foreach (var inner in c) AppendBlock(inner, cell);
-                        return Tidy(cell.ToString()).TrimEnd('.');
+                        return Tidy(string.Join(" ", cell)).TrimEnd('.');
                     }).Where(c => c.Length > 0);
-                    Sentence(text, string.Join(", ", cells));
+                    Sentence(lines, string.Join(", ", cells));
                 }
                 return;
             case LeafBlock leaf:
                 if (leaf.Inline is null) return;
                 var line = new StringBuilder();
                 AppendInlines(leaf.Inline, line);
-                Sentence(text, line.ToString());
+                Sentence(lines, line.ToString());
                 return;
             case ContainerBlock container:
-                foreach (var child in container) AppendBlock(child, text);
+                foreach (var child in container) AppendBlock(child, lines);
                 return;
         }
     }
 
     /// <summary>Ends each block like a sentence so the voice pauses between headings, list items and paragraphs.</summary>
-    private static void Sentence(StringBuilder text, string line)
+    private static void Sentence(List<string> lines, string line)
     {
         line = line.Trim();
         if (line.Length == 0) return;
-        if (text.Length > 0) text.Append(' ');
-        text.Append(line);
-        if (!EndsSentence(line)) text.Append('.');
+        lines.Add(EndsSentence(line) ? line : line + ".");
     }
 
     private static bool EndsSentence(string line)
