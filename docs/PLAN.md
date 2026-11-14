@@ -3,7 +3,7 @@
 ## Status (updated 2026-11-13)
 
 - **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 (characters, lore, memory, group chat), M4 (Story), M5 (Documents), M6 (Voice), M7 (Polish), M8 (Locked data).
-- **Next:** the roadmap's "Possible later additions" (local API, image understanding) and the "still owed" lists below, including what M8 left untried (see the next entry).
+- **Next:** **M9 Pictures** (image generation; planned 2026-11-13; step 1, the trial, is done and recorded under "M9: Pictures" below; no app code yet; step 2, the engine, is next). After that: the roadmap's "Possible later additions" (local API, image understanding) and the "still owed" lists below, including what M8 left untried (see the next entry).
 - **Locked data, part 2 (M8 finished, 2026-11-13): the screens, locking, and the leak checks.** The owner can now turn the lock on, live with it, and turn it off, all from inside DOG.ai.
   - *Settings → Privacy.* **Lock DOG.ai with a password…** asks for a password (at least 8 characters, typed twice), shows the 24-character recovery key with **Print…** (prints only the key and the date, through Windows' print preview) and a tick box "I have written down or printed my recovery key", then asks for two of its six groups, picked at random. Only then is `lock.json` written and DOG.ai restarted; the lock screen asks for the new password and encrypts (as built in part 1). With the lock on, the section has **Lock now** (and Ctrl+L), the idle time (Never, 5, 15, 30 minutes or 1 hour; 15 by default), **Unlock with Windows Hello on this PC** (on and off), **Change password…** (current password, new one twice; instant), **New recovery key…** (current password, then the same show-and-check steps; the old key works until the new one is confirmed), and **Turn the lock off…** (password, restart, decrypted at the lock screen). The off state and the setup window say in one sentence that losing both the password and the recovery key means the data is gone for good; the lock screen's recovery page says the same.
   - *Lock screen in the app's looks.* The lock screen (still a plain WPF window, since nothing else may run before the unlock) now wears the skin and dark or light chosen in Settings: colours, fonts, corners and buttons copied from `app.css` into `LockPalette` (keep the two in step), Fireside's serif headings, pill buttons in Fireside and Playhouse, the DOG.ai wordmark. "Match Windows" follows Windows. The look and whether the tray icon is on are copied into `lock.json` whenever they change and after every unlock.
@@ -277,7 +277,7 @@ You want a private, almost fully offline Windows desktop app for running local L
 
 **Your machine (measured):** RTX 4090 (24 GB VRAM), Core Ultra 9 285K (24 cores), 32 GB RAM, VS 2022 Pro 17.14 with the .NET desktop workload, .NET SDK 9.0.320. `D:` is empty (931 GB free); `C:` has 184 GB free.
 
-**Decisions you made:** WPF + Blazor Hybrid UI; app-managed `llama-server` engine; extras = chat with documents, voice in/out. Image understanding and image generation are out of scope.
+**Decisions you made:** WPF + Blazor Hybrid UI; app-managed `llama-server` engine; extras = chat with documents, voice in/out. Image understanding and image generation are out of scope. *(Changed 2026-11-13: image generation is now planned as M9.)*
 
 **Decisions I made (say so if you disagree):**
 - **Target `net9.0-windows`** (since M8: `net9.0-windows10.0.19041.0` for the app, the same .NET 9 with access to Windows Hello). It is the newest framework VS 2022 supports. .NET 10 needs VS 2026; the code will move over with a one-line change if you upgrade.
@@ -396,8 +396,99 @@ Each ends with a runnable app, passing tests, and a git commit.
 | M6 ✅ | Voice | Speech-to-text, text-to-speech, per-character voices |
 | M7 ✅ | Polish | Assistants, prompt library, search, backup/restore, self-contained publish profile; also tray and global key, link prompt, code colours and maths, pinned chats, markdown export |
 | M8 ✅ | Locked data | Database encrypted with a key from the owner's password; Windows Hello to unlock day to day; printed recovery key; lock on idle; backups stay encrypted (details below) |
+| M9 | Pictures | Local image generation with stable-diffusion.cpp (SDXL family: Illustrious, NoobAI, Pony, base SDXL): character and persona portraits, story illustrations, an Images tab in Models (details below) |
 
-Possible later additions, not planned: local OpenAI-compatible API for other tools, image understanding, image generation.
+Possible later additions, not planned: local OpenAI-compatible API for other tools, image understanding.
+
+## M9: Pictures (planned 2026-11-13, not started)
+
+DOG.ai draws pictures on this PC with **stable-diffusion.cpp**, a sibling of llama.cpp, run the same way as the chat engine: a child process on `127.0.0.1` that DOG.ai starts and stops. Nothing goes online to draw.
+
+**Decisions the owner made (2026-11-13):**
+- stable-diffusion.cpp as a second engine (not ComfyUI, not ONNX, not an online service).
+- First version supports the **SDXL family only** (Illustrious, NoobAI, Pony, base SDXL): one checkpoint file each, plus LoRAs.
+- Pictures are made in two places: **character and persona portraits** and **story illustrations**. A picture button in chats and a standalone Images screen are later steps.
+- **Civitai files are added by hand** (downloaded in a browser, dropped into the image models folder). **Hugging Face downloads happen in the app**, as for chat models. Civitai is not added to the allow-list.
+- After the chat model writes a picture prompt, DOG.ai **draws at once** by default; a switch in Settings makes it **show the prompt first**.
+- The owner supplies an Illustrious checkpoint and LoRAs for the trial.
+- LoRAs can be **character LoRAs as well as style LoRAs**: a card can carry its own, and a checkpoint can have style LoRAs that apply to every picture.
+- Default shapes: **Tall** for portraits, **Wide** for story illustrations.
+- **No automatic illustrations**; pictures are made only when asked for.
+- A story picture shows **at most two or three people**.
+- Prompt wording follows the checkpoint, with no switch to flip per picture: **Danbooru-style tags** for Illustrious, NoobAI and Pony, sentences for base SDXL. The checkpoint's quality words ("masterpiece, best quality…", Pony's score tags) and negative prompt are added by DOG.ai, never left to the chat model.
+
+**What was read about the engine (2026-11-13, from its documentation, not yet run here):**
+- It ships a server program, `sd-server.exe`, with its own API: start a picture (returns a job), ask a job for its progress and a small preview, cancel a job, list what it can do, load and unload a model without exiting. Pictures come back in the reply, not as files; PNG, JPEG or WebP.
+- LoRAs are given per picture as a list (file and strength). `<lora:...>` tags typed in a prompt are **not** read by the server, so DOG.ai picks LoRAs in its own controls.
+- Per picture: clip skip, sampler, steps, "hires fix" (draw, enlarge, refine). Per loaded model: the VAE. A face-detail pass is mentioned but not documented. V-prediction is not in the server's documentation: **the trial must settle it.**
+- Windows downloads are a CUDA 12 zip plus a separate zip of NVIDIA runtime files. MIT licence.
+- The server has a built-in web page. It will listen only on `127.0.0.1` on a random port, like llama-server.
+
+### Trial results (step 1, 2026-11-13)
+
+Run by hand on this PC, outside DOG.ai: engine build `master-1094-3bad892` (CUDA 12 zip plus the NVIDIA runtime zip, both SHA-256 checked against the release page; about 1.2 GB unpacked, most of it NVIDIA libraries), the owner's checkpoint `illustrious_novaFurryXL_ilV180A` (6.6 GB, recognised as SDXL, eps-prediction) and three LoRAs (detail, style, character; all plain LoRAs of 218 MB). 25 pictures drawn; seven looked at.
+
+- **It works, and the pictures are good.** The first try (tags: silver hair, green eyes, scar on cheek, leather armor, green cloak, forest, dappled sunlight) showed every tag, with no black-picture VAE problem and no extra VAE file needed.
+- **Speed (832×1216):** Draft (20 steps) 5 s; Standard (28 steps) 6.5 s; Fine (28 steps, hires fix ×1.5 with 14 more steps) 14 to 15 s, giving 1248×1824. About 5 steps a second. The very first picture after a start takes about 4 s longer (the model is read into graphics memory then, not at start, so the server itself is up in under a second). Four pictures in one request: 25 s.
+- **Graphics memory (above what Windows already uses):** about 8 GB held while the model is loaded and idle, about 11.5 GB at the peak of a Standard picture, about 17 GB at the peak of a Fine one. Unloading through the API gives it all back without stopping the server.
+- **Beside the chat model: no.** The owner's 27B chat model is a 16.8 GB file, so the two cannot both be on the card; this is arithmetic, not a test (the test was not run). The swap in "Sharing the graphics card" is needed every time with this chat model, and Fine quality needs the card nearly to itself.
+- **LoRAs:** each worked alone and all three together. The character LoRA with its trigger word gave the same character in two shapes and seeds; without the LoRA the same prompt gave a generic one. Changing the LoRA set costs about 3 s on the next picture (about 10 s for three at once); going back to none also works. Trigger words and the most common training tags can be read from the files' own metadata.
+- **Cancel** stopped a 60-step picture within about 0.3 s, and the next picture was normal. **Preview** ("proj" mode needs no extra file) gave a new small picture every few steps. Progress reports the stage (conditioning, sampling, decoding, encoding) and the step.
+- **Hires fix** makes a visibly sharper picture but can change small things (it drew a second scar). So Fine is for a picture already chosen, not for trying ideas.
+- **Picture size on disk:** PNG about 1.7 MB (3.6 MB for Fine), JPEG at 92 about 255 KB, WebP at 90 about 128 KB. Decision for storage: **WebP**, with the quality number fixed in step 5 after comparing by eye (not compared closely yet).
+- **Privacy:** the server wrote **no file** to its working folder or its temp folder in the whole run, and at its normal log level the prompt does **not** appear in its output (model path, timings and step counters do). Its verbose level was not tried and must never be switched on by DOG.ai. `--disable-image-metadata` exists, so the prompt need not be embedded in a picture that gets exported.
+- **V-prediction:** the engine has a load option for it (`--prediction v`). Not tried: the owner's checkpoint is the normal kind. Needs a v-prediction checkpoint to confirm.
+- **More than planned is there:** a face-detail pass (needs one small extra detection model), reference-picture control for SDXL (IP-Adapter), image-to-image and inpainting. None are in M9, but they are no longer blocked by the engine.
+- **Not tried:** drawing while a chat model is loaded; loading a different checkpoint through the API (only unloading was tried; the first load was from the command line); a separate VAE file; LyCORIS-type LoRAs (none in the samples); face detail; verbose logging; the engine under DOG.ai's portable temp folder.
+- **Suggested starting numbers for this family** (to be tuned in step 6): Euler a, guidance 5.5, clip skip 2, quality words "masterpiece, best quality, amazing quality, very aesthetic, absurdres", negative "worst quality, low quality, bad quality, lowres, bad anatomy, bad hands, jpeg artifacts, signature, watermark, text".
+
+### How it will work
+
+**Engine (`DogAI.Engine/Images`).** `ImageServer` follows `EmbeddingServer`: started the first time a picture is asked for, random loopback port, `EngineEnvironment.Clean`, `ProcessJob` so it dies with DOG.ai, stopped when idle. It is found by its own locator in `data\engine` (override `DOGAI_SD_SERVER` for tests), and Models' engine updater gets a second entry that downloads it from the project's GitHub releases (one new allowed path in `OriginPolicy`, checksum checked). Core sees only an `IImageEngine` interface, so tests use a fake.
+
+**Sharing the graphics card.** A 27B chat model and an SDXL model do not fit in 24 GB together. A small coordinator decides per picture: if both fit (measured free memory), keep both; otherwise the prompt is written first, the chat model is unloaded, the picture is drawn, and the chat model is loaded again **only when it is next needed** (not straight away, so "Try again" and a run of pictures cost one swap, not one each). The image model is let go after a short idle time. A chat model the owner unloaded by hand stays unloaded.
+
+**Image models folder.** `<models>\image\checkpoints`, `\loras`, `\vae`, `\upscalers`. Only `.safetensors` is accepted; the old `.ckpt` format can carry program code and is refused with a plain message. DOG.ai reads each file's header to tell what it is (SDXL checkpoint, SDXL LoRA, something else) and shows files it cannot use as such.
+
+**Models → Images tab.** Installed checkpoints and LoRAs, **Open folder** (for Civitai files), recommended downloads from Hugging Face, the image engine's install and update. Each checkpoint has a small settings card so pictures come out right without fiddling: prompt style (tags or sentences), the "quality" words it wants before and after a prompt, the negative prompt, sampler, steps, guidance, clip skip, normal or v-prediction, and its VAE. Known families get these filled in when the file is recognised; the owner can change them. Each LoRA has its trigger words (read from the file when it has them) and a default strength.
+
+**Looks on a card.** Characters and personas get a **Looks** box: appearance tags ("silver hair, green eyes, scar on left cheek…"), and optionally a LoRA with its strength. The chat model can draft the tags from the card's description. Stored in the card's extra data so export and import keep it. This is what keeps a character recognisable from one picture to the next.
+
+**Writing the prompt (`DogAI.Core/Images`).** A DOG.ai model job (schema-constrained, checked before use, thinking off) turns a card or a story passage into the pieces of a prompt in the checkpoint's style. The final prompt is assembled by code, not by the model: checkpoint quality words + the Looks of the people in the scene + scene tags + the checkpoint's negative prompt. For a story, the people are the passage's cast (`StoryPrompt.People`), at most two or three (SDXL handles more badly, and the plan says so in the app).
+
+*Tag prompts.* For tag-style checkpoints the model does not write a free prompt. It first picks **one moment** of the passage that can be shown as a still picture, then fills named slots: who is in it (as a count, "1girl, 1boy"), clothing, expression, pose or action, place, time and light, framing ("upper body", "from above"). Code puts the slots in the order these checkpoints expect and adds each person's Looks from their card (so the model cannot change a character's hair colour). Every tag is checked against a **bundled list of real Danbooru tags** (shipped with DOG.ai, no lookup online): near misses are corrected to the real tag, unknown ones are dropped, and the prompt is kept short. Where the list comes from and its licence are settled in the trial. What this does well: one or two people, their looks, clothes, mood, place and light. What it does poorly, said plainly in the app: exact actions between people, one person's features leaking onto another, unusual objects, anything that depends on what happened earlier in the story.
+
+**Quality choices.** Three named levels in place of raw numbers: **Draft** (fast, for trying ideas), **Standard**, **Fine** (hires fix, and face detail if the trial shows it works). Shapes: Tall, Square, Wide, using SDXL's native sizes. A live preview and step count while drawing; **Cancel** works mid-picture. Every picture keeps its seed and settings, so **Edit and redraw** changes one thing and keeps the rest. Raw settings stay available behind "More".
+
+**Portraits.** **Generate picture** in the character and persona editors opens the picture maker (shared component in `Components/Images/`): Draw, Try again (variations side by side, held in memory), Edit and redraw, **Use this picture**, which hands the result to the existing cropper. Nothing is saved until Use.
+
+**Story illustrations.** **Illustrate** in a passage's actions. The picture sits above the passage, opens large on click, and can be redrawn or removed. Which picture belongs to a passage is recorded through `StoryTurn`. HTML and EPUB exports include the pictures; Markdown does not.
+
+**Keeping pictures (and keeping them private).** Kept pictures go **inside the database** (a new `Pictures` table), so the lock, backups, restore and portable mode cover them with no new machinery. They are stored compressed (the trial compares PNG and WebP for size and looks); tried-and-discarded variations never touch the disk. The image engine is started so that it writes no picture, prompt or preview to disk, and DOG.ai's log never records a prompt (the engine prints prompts in its own output, so those lines are filtered). Drawing counts as "busy" for the idle lock.
+
+**Settings → Pictures.** Default checkpoint, default quality, "Show me the prompt before drawing" (off by default), and the **rating** pictures aim for (owner's decision 2026-11-13: a setting, not the chat model's choice). The rating tag is added by code, the tags for anything above the chosen rating go into the negative prompt, and the prompt job is told the rating so it picks a moment that fits. Which rating words each family uses (Illustrious, NoobAI, Pony differ) sits on the checkpoint's settings card.
+
+### Steps, and which model to use for each
+
+Each step is one session ending in a build, passing tests, a look at the app, and a commit. "Effort" is the session's effort setting.
+
+| # | Step | Delivers | Model / effort |
+|---|---|---|---|
+| 1 ✅ | **Trial** (no app code; results above) | The engine downloaded to a scratch folder and run by hand with the owner's checkpoint and LoRAs. Measured: load time, seconds per picture at each quality level, memory used, whether it fits beside the chat model, v-prediction, VAE, hires fix, face detail, LoRA formats, cancel, unload, PNG against WebP, and what the engine writes to disk and to its output. Ends with the open points in this plan settled and the three quality levels given real numbers. | Fable 5.2, high |
+| 2 | **Engine** | Locator, download and update in Models, `ImageServer`, the API client, `IImageEngine`, tests with a fake and one real-engine smoke test behind an environment variable. | Opus 5.5, high |
+| 3 | **Sharing the graphics card** | The coordinator between chat model and image model, with lazy reload; busy state for the idle lock. | Fable 5.2, high |
+| 4 | **Models → Images** | Folders, file recognition, the Images tab, checkpoint and LoRA settings cards, Hugging Face downloads, Open folder. All three looks, dark and light. | Opus 5.5, medium |
+| 5 | **Keeping pictures** | `Pictures` table and migration, lock, backup, restore and portable checks, log filtering, a first leak check. | Fable 5.2, high |
+| 6 | **Prompts and quality** | Looks on cards, the prompt job, prompt assembly, quality levels tuned by looking at real pictures from the owner's checkpoint. | Fable 5.2, high |
+| 7 | **Portraits** | The picture maker and Generate picture in both editors, Settings → Pictures. All three looks, dark and light. | Opus 5.5, high |
+| 8 | **Story illustrations** | Illustrate on passages, the large view, exports. All three looks, dark and light. | Opus 5.5, high |
+| 9 | **Finish** | Full leak check as in M8, walkthroughs in the published portable build, `/code-review high`, this plan's Status and `CLAUDE.md` ("How pictures work") updated. | Fable 5.2, xhigh |
+
+Why this split: steps 1, 3, 5, 6 and 9 are where a wrong judgement costs most (what the engine can really do, two models fighting over memory, private data on disk, whether pictures look good), so they get the strongest model. Steps 2, 4, 7 and 8 mostly repeat patterns the code already has (`EmbeddingServer`, the Voice tab, the card editor), so Opus 5.5 is enough and cheaper. Sonnet and Haiku are not suggested for any step: every one of them touches several projects at once.
+
+### Left for later (not in M9)
+
+A picture button in General, character and group chats; a standalone Images screen with a gallery; newer model families (Flux, Z-Image, Qwen-Image); changing an existing picture (image-to-image, inpainting); pose and reference-picture control; automatic illustration of every passage or chapter; in-app Civitai downloads; video.
 
 ## M8: Locked data (built 2026-11-13)
 
