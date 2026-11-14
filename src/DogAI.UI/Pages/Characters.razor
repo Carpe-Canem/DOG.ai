@@ -133,7 +133,7 @@ else
     }
     else
     {
-        <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" Swipes="true" Speech="true" @bind-Notice="_notice"
+        <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" Swipes="true" Speech="true" @bind-Notice="_notice" PicturePeople="@PicturePeople"
                     AssistantName="@_character.Name" AssistantAvatar="@Format.PictureUrl("character", _character.Id, _character.UpdatedAt, _character.Avatar)"
                     UserName="@(_persona?.Name ?? "You")" UserAvatar="@(_persona is { } p ? Format.PictureUrl("persona", p.Id, p.CreatedAt, p.Avatar) : null)" />
     }
@@ -183,6 +183,25 @@ else
     private IReadOnlyList<ChatMessage> _path = [];
     private List<Persona> _personas = [];
     private Persona? _persona;
+    private Persona? _peopleFor;
+    private Character? _peopleOf;
+    private IReadOnlyList<IllustrationPerson> _people = [];
+
+    /// <summary>Who may be in a picture of this chat: the character, then the persona. Made again only when one of them changes.</summary>
+    private IReadOnlyList<IllustrationPerson> PicturePeople
+    {
+        get
+        {
+            if (!ReferenceEquals(_peopleOf, _character) || !ReferenceEquals(_peopleFor, _persona))
+            {
+                _peopleOf = _character;
+                _peopleFor = _persona;
+                _people = _character is null ? [] : ChatPictures.People([_character], _persona);
+            }
+            return _people;
+        }
+    }
+
     private bool _loaded;
     private int _loadVersion;
     private int _listVersion;

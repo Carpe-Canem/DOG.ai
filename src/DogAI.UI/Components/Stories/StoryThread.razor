@@ -9,7 +9,6 @@
 @inject IChatStore Store
 @inject IDesktopShell Desktop
 @inject IJSRuntime JS
-@inject IPictureStore Pictures
 @inject PictureWriter Writer
 
 <div class="thread story" @ref="_root">
@@ -56,7 +55,7 @@
             <div class="passage" data-id="@m.Id">
                 @if (PictureOf(m) is { } src)
                 {
-                    <button class="illustration" data-picture="@Illustrations.Shown(m)" title="Open the picture large" @onclick="() => _viewing = m">
+                    <button class="illustration" data-picture="@Illustrations.Shown(m)" title="Open the picture large" @onclick="() => _pics?.View(m)">
                         <img src="@src" alt="Picture of this passage" />
                     </button>
                 }
@@ -84,7 +83,7 @@
                             @if (m.Content.Trim().Length > 0)
                             {
                                 <button class="illustrate" title="@(PictureOf(m) is null ? "Draw a picture of a moment in this passage" : "Draw another picture for this passage")"
-                                        @onclick="() => Illustrate(m)">@(PictureOf(m) is null ? "Illustrate" : "Redraw picture")</button>
+                                        @onclick="() => _pics?.Illustrate(m)">@(PictureOf(m) is null ? "Illustrate" : "Redraw picture")</button>
                             }
                             <button disabled="@(!Engine.IsReady)" title="Write this passage again; the earlier version is kept" @onclick="() => Run(() => Chat.RegeneratePassageAsync(m.ConversationId, m.Id))">Rewrite</button>
                             @if (isLast && m.Content.Length > 0)
@@ -168,38 +167,9 @@
     <PromptInspector Message="inspected" OnClose="() => _inspect = null" />
 }
 
-@if (_viewing is { } viewed && PictureOf(viewed) is { } large)
-{
-    <Modal Title="Picture" Class="wide picture-view" OnClose="CloseView">
-        <img class="picture-large" id="picture-large" src="@large" alt="Picture of this passage" />
-        @if (_pictureProblem is not null)
-        {
-            <div class="notice bad"><span>@_pictureProblem</span></div>
-        }
-        <div class="row">
-            <button class="btn primary" id="picture-redraw" disabled="@Chat.IsBusy" title="Opens the picture maker with this picture: try again, change it and draw it again, or plan a new one"
-                    @onclick="() => RedrawFromView(viewed)">Redraw</button>
-            @if (_confirmRemove)
-            {
-                <button class="btn danger" id="picture-remove-yes" @onclick="() => RemovePictureAsync(viewed)">Yes, remove it</button>
-                <button class="btn" @onclick="() => _confirmRemove = false">Keep</button>
-            }
-            else
-            {
-                <button class="btn" id="picture-remove" @onclick="() => _confirmRemove = true">Remove</button>
-            }
-            <span class="small" id="picture-meta">@PictureMeta(viewed)</span>
-        </div>
-    </Modal>
-}
-
-@if (_illustrating is { } passage)
-{
-    <PictureMaker Title="Picture for this passage" OwnerKind="@PictureOwners.Message" OwnerId="@passage.Id" People="@PeopleWithLooks"
-                  Plan="(style, rating, ct) => Illustrations.PlanAsync(Writer, Info, People, passage, style, rating, ct)"
-                  DefaultShape="PictureShape.Wide" ChatMode="story" Png="false" Intro="@IllustrateIntro"
-                  OnUse="used => KeepPictureAsync(passage, used)" OnClose="() => _illustrating = null" />
-}
+<MessagePictures @ref="_pics" ConversationId="@Conversation.Id" Path="@Path" People="@People" What="passage" ChatMode="story"
+                 Plan="(passage, style, rating, ct) => Illustrations.PlanAsync(Writer, Info, People, passage, style, rating, ct)"
+                 OnLoaded="StateHasChanged" />
 
 @if (_revise is { } revise)
 {
@@ -281,128 +251,11 @@
     }
 
     // ---- Pictures ----
-    // Kept pictures are read from the database once and shown from memory (a data: address, never a file). The address
-    // string is kept per picture id, so the many renders while a passage streams reuse it instead of encoding again.
-    private Dictionary<long, string> _pictures = [];
-    private readonly Dictionary<long, string> _pictureMeta = [];
-    private readonly HashSet<long> _missing = [];
-    private ChatMessage? _illustrating, _viewing;
-    private bool _confirmRemove;
-    private string? _pictureProblem;
-
-    private static readonly string IllustrateIntro =
-        $"Draw asks the chat model to pick one moment of this passage and plan a picture of it, with at most {Illustrations.MaxPeople} people, " +
-        "then draws it. People whose card has Looks keep them exactly as written.";
-
-    private IReadOnlyList<(string Name, DogAI.Core.Images.Looks Looks)> PeopleWithLooks => People.Select(p => (p.Name, p.Looks)).ToList();
+    // Reading the kept pictures, the large view and the picture maker are MessagePictures' (shared with chats).
+    private MessagePictures? _pics;
 
     /// <summary>The picture a passage shows, as a data: address; null when it has none or its row is gone.</summary>
-    private string? PictureOf(ChatMessage m) => Illustrations.Shown(m) is { } id ? _pictures.GetValueOrDefault(id) : null;
-
-    private string PictureMeta(ChatMessage m) => Illustrations.Shown(m) is { } id ? _pictureMeta.GetValueOrDefault(id) ?? "" : "";
-
-    private bool _loadingPictures, _loadPicturesAgain;
-
-    /// <summary>
-    /// Reads the pictures shown on the branch that are not in memory yet, and lets go of the others. One load at a time:
-    /// a render that arrives while pictures are being read asks for one more look afterwards, so no picture is read twice
-    /// and an older, slower load never replaces a newer result.
-    /// </summary>
-    private async Task LoadPicturesAsync()
-    {
-        if (_loadingPictures)
-        {
-            _loadPicturesAgain = true;
-            return;
-        }
-        _loadingPictures = true;
-        try
-        {
-            do
-            {
-                _loadPicturesAgain = false;
-                await ReadPicturesAsync();
-            } while (_loadPicturesAgain);
-        }
-        finally
-        {
-            _loadingPictures = false;
-        }
-    }
-
-    private async Task ReadPicturesAsync()
-    {
-        // A picture looked up and not found (its row is gone) is not asked for again on every render.
-        var wanted = Path.Select(Illustrations.Shown).OfType<long>().Distinct().Where(id => !_missing.Contains(id)).ToList();
-        if (_pictures.Count == wanted.Count && wanted.All(_pictures.ContainsKey)) return;
-        var next = new Dictionary<long, string>();
-        foreach (var id in wanted)
-        {
-            if (_pictures.TryGetValue(id, out var known))
-            {
-                next[id] = known;
-                continue;
-            }
-            if (await Pictures.GetAsync(id) is { Image: { } image } row)
-            {
-                next[id] = "data:image/webp;base64," + Convert.ToBase64String(image);
-                _pictureMeta[id] = $"{row.ImageWidth}×{row.ImageHeight} · seed {row.Seed} · {System.IO.Path.GetFileNameWithoutExtension(row.Checkpoint)}";
-            }
-            else
-            {
-                _missing.Add(id);
-            }
-        }
-        _pictures = next;
-    }
-
-    private void Illustrate(ChatMessage passage)
-    {
-        _pictureProblem = null;
-        _illustrating = passage;
-    }
-
-    private void RedrawFromView(ChatMessage passage)
-    {
-        CloseView();
-        Illustrate(passage);
-    }
-
-    private void CloseView()
-    {
-        _viewing = null;
-        _confirmRemove = false;
-        _pictureProblem = null;
-    }
-
-    /// <summary>Use in the picture maker: the picture is kept for the passage now (the passage already exists).</summary>
-    private async Task KeepPictureAsync(ChatMessage passage, PictureMaker.Used used)
-    {
-        // A failure reaches the maker, which says so; the picture stays there to try again. The maker expects an
-        // InvalidOperationException; a database failure (disk full, database busy) is put into the same words.
-        try
-        {
-            await Illustrations.KeepAsync(Pictures, Chat, passage.ConversationId, passage.Id, used.Try);
-        }
-        catch (Exception e) when (e is not InvalidOperationException and not OperationCanceledException)
-        {
-            throw new InvalidOperationException(e.InnerException?.Message ?? e.Message, e);
-        }
-        _illustrating = null;
-    }
-
-    private async Task RemovePictureAsync(ChatMessage passage)
-    {
-        try
-        {
-            await Illustrations.RemoveAsync(Pictures, Chat, passage.ConversationId, passage.Id);
-            CloseView();
-        }
-        catch (InvalidOperationException e)
-        {
-            _pictureProblem = e.Message;
-        }
-    }
+    private string? PictureOf(ChatMessage m) => _pics?.Src(m);
 
     private long? _editingId;
     private string _editText = "";
@@ -462,7 +315,7 @@
         }
     };
 
-    protected override async Task OnParametersSetAsync()
+    protected override void OnParametersSet()
     {
         if (Conversation.Id != _shownConversation)
         {
@@ -470,10 +323,7 @@
             _inspect = null;
             _selection = null;
             _revise = null;
-            _illustrating = null;
-            CloseView();
         }
-        await LoadPicturesAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

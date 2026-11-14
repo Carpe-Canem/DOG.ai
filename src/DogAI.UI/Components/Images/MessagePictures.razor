@@ -1,0 +1,213 @@
+@* The kept pictures of a thread's messages, shared by stories and chats: each message shows at most one (see
+   Illustrations). This component reads them once into memory, and owns the large view and the picture maker. The thread
+   draws the small picture and the Illustrate button itself, through Src, View and Illustrate. *@
+@inject ChatService Chat
+@inject IPictureStore Pictures
+
+@if (Viewing is { } viewed && Src(viewed) is { } large)
+{
+    <Modal Title="Picture" Class="wide picture-view" OnClose="CloseView">
+        <img class="picture-large" id="picture-large" src="@large" alt="@($"Picture of this {What}")" />
+        @if (_problem is not null)
+        {
+            <div class="notice bad"><span>@_problem</span></div>
+        }
+        <div class="row">
+            <button class="btn primary" id="picture-redraw" disabled="@Chat.IsBusy" title="Opens the picture maker with this picture: try again, change it and draw it again, or plan a new one"
+                    @onclick="() => RedrawFromView(viewed)">Redraw</button>
+            @if (_confirmRemove)
+            {
+                <button class="btn danger" id="picture-remove-yes" @onclick="() => RemoveAsync(viewed)">Yes, remove it</button>
+                <button class="btn" @onclick="() => _confirmRemove = false">Keep</button>
+            }
+            else
+            {
+                <button class="btn" id="picture-remove" @onclick="() => _confirmRemove = true">Remove</button>
+            }
+            <span class="small" id="picture-meta">@Meta(viewed)</span>
+        </div>
+    </Modal>
+}
+
+@if (Illustrating is { } message)
+{
+    <PictureMaker Title="@($"Picture for this {What}")" OwnerKind="@PictureOwners.Message" OwnerId="@message.Id" People="@PeopleWithLooks"
+                  Plan="(style, rating, ct) => Plan(message, style, rating, ct)"
+                  DefaultShape="@DefaultShape" ChatMode="@ChatMode" Png="false" Intro="@Intro"
+                  OnUse="used => KeepAsync(message, used)" OnClose="() => _illustratingId = null" />
+}
+
+@code {
+    /// <summary>The story or chat on screen; a change closes the large view and the maker.</summary>
+    [Parameter, EditorRequired] public long ConversationId { get; set; }
+
+    /// <summary>The branch on screen: its pictures are held in memory, others are let go.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<ChatMessage> Path { get; set; } = [];
+
+    /// <summary>Who may be in a picture.</summary>
+    [Parameter] public IReadOnlyList<IllustrationPerson> People { get; set; } = [];
+
+    /// <summary>The model job that plans a picture of one message.</summary>
+    [Parameter, EditorRequired] public Func<ChatMessage, PromptStyle, PictureRating, CancellationToken, Task<PictureScene>> Plan { get; set; } = default!;
+
+    /// <summary>The mode whose default chat model plans the picture when none is loaded.</summary>
+    [Parameter] public string ChatMode { get; set; } = "story";
+
+    /// <summary>What a message is called here: "passage" or "reply".</summary>
+    [Parameter] public string What { get; set; } = "passage";
+
+    [Parameter] public PictureShape DefaultShape { get; set; } = PictureShape.Wide;
+
+    /// <summary>Raised when pictures were read, so the thread draws them.</summary>
+    [Parameter] public EventCallback OnLoaded { get; set; }
+
+    // Kept pictures are read from the database once and shown from memory (a data: address, never a file). The address
+    // string is kept per picture id, so the many renders while a reply streams reuse it instead of encoding again.
+    private Dictionary<long, string> _pictures = [];
+    private readonly Dictionary<long, string> _meta = [];
+    private readonly HashSet<long> _missing = [];
+    private long? _illustratingId, _viewingId;
+    private long _shownConversation = -1;
+    private bool _confirmRemove;
+    private string? _problem;
+    private bool _loading, _loadAgain;
+
+    private ChatMessage? Viewing => _viewingId is { } id ? Path.FirstOrDefault(m => m.Id == id) : null;
+    private ChatMessage? Illustrating => _illustratingId is { } id ? Path.FirstOrDefault(m => m.Id == id) : null;
+
+    private string Intro =>
+        $"Draw asks the chat model to pick one moment of this {What} and plan a picture of it, with at most {Illustrations.MaxPeople} people, " +
+        "then draws it. People whose card has Looks keep them exactly as written.";
+
+    private IReadOnlyList<(string Name, Looks Looks)> PeopleWithLooks => People.Select(p => (p.Name, p.Looks)).ToList();
+
+    /// <summary>The picture a message shows, as a data: address; null when it has none or its row is gone.</summary>
+    public string? Src(ChatMessage m) => Illustrations.Shown(m) is { } id ? _pictures.GetValueOrDefault(id) : null;
+
+    private string Meta(ChatMessage m) => Illustrations.Shown(m) is { } id ? _meta.GetValueOrDefault(id) ?? "" : "";
+
+    /// <summary>Opens the picture maker for a message.</summary>
+    public void Illustrate(ChatMessage message)
+    {
+        _problem = null;
+        _illustratingId = message.Id;
+        StateHasChanged();
+    }
+
+    /// <summary>Opens a message's picture large.</summary>
+    public void View(ChatMessage message)
+    {
+        _viewingId = message.Id;
+        StateHasChanged();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ConversationId != _shownConversation)
+        {
+            _shownConversation = ConversationId;
+            _illustratingId = null;
+            CloseView();
+        }
+        await LoadAsync();
+    }
+
+    /// <summary>
+    /// Reads the pictures shown on the branch that are not in memory yet, and lets go of the others. One load at a time:
+    /// a render that arrives while pictures are being read asks for one more look afterwards, so no picture is read twice
+    /// and an older, slower load never replaces a newer result.
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        if (_loading)
+        {
+            _loadAgain = true;
+            return;
+        }
+        _loading = true;
+        var changed = false;
+        try
+        {
+            do
+            {
+                _loadAgain = false;
+                changed |= await ReadAsync();
+            } while (_loadAgain);
+        }
+        finally
+        {
+            _loading = false;
+        }
+        // Only when something changed: the thread's render sets this component's parameters again.
+        if (changed) await OnLoaded.InvokeAsync();
+    }
+
+    private async Task<bool> ReadAsync()
+    {
+        // A picture looked up and not found (its row is gone) is not asked for again on every render.
+        var wanted = Path.Select(Illustrations.Shown).OfType<long>().Distinct().Where(id => !_missing.Contains(id)).ToList();
+        if (_pictures.Count == wanted.Count && wanted.All(_pictures.ContainsKey)) return false;
+        var next = new Dictionary<long, string>();
+        foreach (var id in wanted)
+        {
+            if (_pictures.TryGetValue(id, out var known))
+            {
+                next[id] = known;
+                continue;
+            }
+            if (await Pictures.GetAsync(id) is { Image: { } image } row)
+            {
+                next[id] = "data:image/webp;base64," + Convert.ToBase64String(image);
+                _meta[id] = $"{row.ImageWidth}×{row.ImageHeight} · seed {row.Seed} · {System.IO.Path.GetFileNameWithoutExtension(row.Checkpoint)}";
+            }
+            else
+            {
+                _missing.Add(id);
+            }
+        }
+        _pictures = next;
+        return true;
+    }
+
+    private void RedrawFromView(ChatMessage message)
+    {
+        CloseView();
+        _illustratingId = message.Id;
+    }
+
+    private void CloseView()
+    {
+        _viewingId = null;
+        _confirmRemove = false;
+        _problem = null;
+    }
+
+    /// <summary>Use in the picture maker: the picture is kept for the message now (the message already exists).</summary>
+    private async Task KeepAsync(ChatMessage message, PictureMaker.Used used)
+    {
+        // A failure reaches the maker, which says so; the picture stays there to try again. The maker expects an
+        // InvalidOperationException; a database failure (disk full, database busy) is put into the same words.
+        try
+        {
+            await Illustrations.KeepAsync(Pictures, Chat, message.ConversationId, message.Id, used.Try);
+        }
+        catch (Exception e) when (e is not InvalidOperationException and not OperationCanceledException)
+        {
+            throw new InvalidOperationException(e.InnerException?.Message ?? e.Message, e);
+        }
+        _illustratingId = null;
+    }
+
+    private async Task RemoveAsync(ChatMessage message)
+    {
+        try
+        {
+            await Illustrations.RemoveAsync(Pictures, Chat, message.ConversationId, message.Id);
+            CloseView();
+        }
+        catch (InvalidOperationException e)
+        {
+            _problem = e.Message;
+        }
+    }
+}

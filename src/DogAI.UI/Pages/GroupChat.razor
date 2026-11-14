@@ -98,6 +98,7 @@ else
     else
     {
         <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" Swipes="true" Speech="true" @bind-Notice="_notice" SpeakerOf="SpeakerOf"
+                    PicturePeople="@ChatPictures.People(Members, _persona)"
                     UserName="@(_persona?.Name ?? "You")" UserAvatar="@(_persona is { } p ? Format.PictureUrl("persona", p.Id, p.CreatedAt, p.Avatar) : null)" />
     }
 }

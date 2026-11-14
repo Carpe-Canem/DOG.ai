@@ -168,6 +168,14 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - Exports: `StoryExport.ToHtml`/`ToEpub` take pictures by id (`ExportPicture`): HTML embeds WebP as `data:`; EPUB gets JPEG at 92 made in the page (`pictures.js` `toJpeg`), as `OEBPS/images/picture-N.jpg` manifest items, the `<figure>` written outside the markdown so the plain-paragraph fallback keeps it. Markdown has no pictures.
 - Deleting a passage's message or its story deletes its pictures (the `Pictures_message_ad` trigger). There is no per-passage delete in the UI.
 
+## How chat pictures work (after M9)
+
+- A reply in a character chat or group chat can show one kept picture, stored exactly as a story passage's: a `Pictures` row owned by the message, pointed at by `picture` in `ChatMessage.ExtraJson` (read with `StoryTurn.Of`, shown with `Illustrations.Shown`, kept and removed with `Illustrations.KeepAsync` / `RemoveAsync`). No table or migration of its own.
+- `ChatPictures` (Core/Chat) says who may be in it (`People`: the characters in order, then the persona, each with their own Looks; a persona named like a character is left out) and what the planner reads (`PlanAsync`: the reply as "Name: text", and `Background`, up to six earlier messages, newest kept, under the planner's 1,500-character cut). At most two people.
+- UI: `Components/Images/MessagePictures.razor` is shared by `StoryThread` and `ChatThread`: it reads the branch's pictures once into memory (one load at a time, as before), and owns the large view and the picture maker. A thread draws the small picture and the button itself through `Src`, `View` and `Illustrate`. It raises `OnLoaded` only when the set of pictures changed; raising it on every load would loop, because the thread's render sets its parameters again.
+- `ChatThread` shows pictures only when the page passes `PicturePeople` (Characters and GroupChat do; General does not). The picture sits in `MessageView`'s `Above` slot. Ids are the story ones: `.illustration[data-picture]`, `button.illustrate`, `#picture-large`, `#picture-redraw`, `#picture-remove`.
+- Regenerate and swipes make a sibling message with no picture. `StoryFromChatAsync` copies no `ExtraJson`, so a story made from a chat has no pictures (a test pins both).
+
 ## How pictures work: the short map (M9, finished in step 9)
 
 - Order of reading: the engine (`ImageServer`, step 2) → sharing the card (`CardCoordinator`, step 3) → image models and settings (step 4) → kept pictures (step 5) → prompts (step 6) → the picture maker and portraits (step 7) → story illustrations (step 8). The sections above have the rules for each.

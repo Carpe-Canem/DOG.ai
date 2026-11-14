@@ -10,6 +10,7 @@
     }
     <div class="msg-col">
         <div class="msg-name">@Name</div>
+        @Above
         @if (!string.IsNullOrEmpty(Reasoning))
         {
             <details class="thinking">
@@ -48,6 +49,9 @@
     [Parameter] public bool Streaming { get; set; }
     [Parameter] public RenderFragment? Editor { get; set; }
     [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>Shown above the text (a reply's kept picture).</summary>
+    [Parameter] public RenderFragment? Above { get; set; }
 
     /// <summary>Shown under the text, above the buttons (a reply's sources).</summary>
     [Parameter] public RenderFragment? Below { get; set; }

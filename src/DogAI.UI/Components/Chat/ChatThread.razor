@@ -7,6 +7,7 @@
 @inject IChatStore Store
 @inject IDesktopShell Desktop
 @inject IJSRuntime JS
+@inject PictureWriter Writer
 
 <div class="thread">
     @foreach (var message in Visible)
@@ -24,6 +25,7 @@
                      Content="@m.Content" Reasoning="@m.Reasoning" AvatarUrl="@(isUser ? UserAvatar : who is not null ? who.Avatar : AssistantAvatar)"
                      Letter="@(who is not null ? who.Letter : Letter)" MessageId="@m.Id" Citations="@(sources?.Passages.Count ?? 0)"
                      Speech="@ColourSpeech" Tone="@who?.Tone"
+                     Above="@(!isUser && _pics?.Src(m) is { } src ? PictureAbove(m, src) : null)"
                      Below="@(sources is null || _editingId == m.Id ? null : SourcesRow(sources))"
                      Editor="@(_editingId == m.Id ? EditBox(m) : null)">
             <Actions>
@@ -56,6 +58,12 @@
                         <button @onclick="() => StartEdit(m)">Edit</button>
                         @if (!isUser)
                         {
+                            @if (PicturePeople is not null && m.Content.Trim().Length > 0)
+                            {
+                                var has = _pics?.Src(m) is not null;
+                                <button class="illustrate" title="@(has ? "Draw another picture for this reply" : "Draw a picture of a moment in this reply")"
+                                        @onclick="() => _pics?.Illustrate(m)">@(has ? "Redraw picture" : "Illustrate")</button>
+                            }
                             @if (m.ParentId is not null)
                             {
                                 <button disabled="@(!Engine.IsReady)" @onclick="() => Run(() => Chat.RegenerateAsync(m.ConversationId, m.Id))">Regenerate</button>
@@ -113,6 +121,13 @@
     <PassageViewer ChunkId="@source.ChunkId" Number="@source.Number" Similarity="@source.Similarity" OnClose="() => _source = null" />
 }
 
+@if (PicturePeople is { } people)
+{
+    <MessagePictures @ref="_pics" ConversationId="@Conversation.Id" Path="@Path" People="@people" What="reply" ChatMode="@PictureChatMode"
+                     Plan="(reply, style, rating, ct) => ChatPictures.PlanAsync(Writer, people, Path, reply, NameOf, style, rating, ct)"
+                     OnLoaded="StateHasChanged" />
+}
+
 @code {
     [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();
     [Parameter, EditorRequired] public MessageTree Tree { get; set; } = new([]);
@@ -136,6 +151,28 @@
     [Parameter] public bool Speech { get; set; }
 
     private bool ColourSpeech => Speech && Appearance.SpeechColours;
+
+    /// <summary>
+    /// Character and group chats: who may be in a picture of a reply (<see cref="ChatPictures.People"/>). Replies then
+    /// get an Illustrate button and can show one kept picture. Null (General) means no pictures.
+    /// </summary>
+    [Parameter] public IReadOnlyList<IllustrationPerson>? PicturePeople { get; set; }
+
+    /// <summary>The mode whose default chat model plans a picture when none is loaded.</summary>
+    [Parameter] public string PictureChatMode { get; set; } = "characters";
+
+    private MessagePictures? _pics;
+
+    /// <summary>The name a message was written under, for the picture planner.</summary>
+    private string NameOf(ChatMessage m) =>
+        m.Role == ChatRole.User ? UserName : SpeakerOf?.Invoke(m.SpeakerId).Name ?? AssistantName ?? "";
+
+    private RenderFragment PictureAbove(ChatMessage m, string src) => __builder =>
+    {
+        <button class="illustration" data-picture="@Illustrations.Shown(m)" title="Open the picture large" @onclick="() => _pics?.View(m)">
+            <img src="@src" alt="Picture of this reply" />
+        </button>
+    };
 
     /// <summary>A problem the page wants shown under the thread (for example a refused send).</summary>
     [Parameter] public string? Notice { get; set; }
