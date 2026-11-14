@@ -286,7 +286,8 @@
             var version = ++_measureVersion;
             var text = CharacterPrompt.Build(_c, null) + "\n" + _c.FirstMessage;
             (_tokens, _exactTokens) = (text.Length / 4, false);
-            if (Engine.IsReady)
+            // Only a model that is in memory now: counting must not bring back one that was set aside for a picture.
+            if (Engine.IsLoaded)
             {
                 try
                 {

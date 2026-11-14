@@ -22,6 +22,8 @@ public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher,
         IsRunning = true;
         try
         {
+            // The whole measurement has the graphics card to itself: no picture starts, and the idle picture model is let go.
+            using var turn = await engine.TakeCardTurnAsync(waking: false, ct).ConfigureAwait(false);
             status("Working out how much fits on the graphics card…");
             var plan = await launcher.PlanAsync(file, context, ct).ConfigureAwait(false);
             if (plan is { Kind: FitKind.TooLarge })

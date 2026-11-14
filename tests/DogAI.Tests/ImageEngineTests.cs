@@ -108,12 +108,25 @@ internal sealed class FakeImageEngine : IImageEngine
 {
     public ImageModel? Model { get; private set; }
     public bool IsBusy { get; private set; }
+
+    /// <summary>Like the real engine: it holds its model in graphics memory from the first picture until it is let go.</summary>
+    public bool IsRunning { get; private set; }
     public string? Error => null;
     public event Action? Changed;
     public List<ImageRequest> Requests { get; } = [];
 
+    /// <summary>What happened, in order ("draw", "drawn", "release", "unload"); tests share one list with other fakes.</summary>
+    public List<string> Events { get; init; } = [];
+
+    /// <summary>When set, every picture stops after its first step until this completes (to do things mid-picture).</summary>
+    public TaskCompletionSource? Hold { get; set; }
+
+    /// <summary>Completes when a picture has reached <see cref="Hold"/>.</summary>
+    public TaskCompletionSource Held { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public Task LoadAsync(ImageModel model, CancellationToken ct = default)
     {
+        if (Model != model) IsRunning = false;
         Model = model;
         Changed?.Invoke();
         return Task.CompletedTask;
@@ -121,7 +134,17 @@ internal sealed class FakeImageEngine : IImageEngine
 
     public Task UnloadAsync(CancellationToken ct = default)
     {
+        lock (Events) Events.Add("unload");
         Model = null;
+        IsRunning = false;
+        Changed?.Invoke();
+        return Task.CompletedTask;
+    }
+
+    public Task ReleaseAsync(CancellationToken ct = default)
+    {
+        lock (Events) Events.Add("release");
+        IsRunning = false;
         Changed?.Invoke();
         return Task.CompletedTask;
     }
@@ -131,15 +154,24 @@ internal sealed class FakeImageEngine : IImageEngine
         if (Model is null) throw new ImageEngineException("No picture model is loaded.");
         if (request.Problems() is { Count: > 0 } problems) throw new ImageEngineException(string.Join(" ", problems));
         Requests.Add(request);
+        lock (Events) Events.Add("draw");
         IsBusy = true;
+        IsRunning = true;
         try
         {
             for (var step = 1; step <= request.Steps; step++)
             {
                 ct.ThrowIfCancellationRequested();
                 progress?.Report(new ImageProgress("sampling", step, request.Steps));
+                if (step == 1 && Hold is { } hold)
+                {
+                    Held.TrySetResult();
+                    await hold.Task.WaitAsync(ct);
+                    Held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                }
                 await Task.Yield();
             }
+            lock (Events) Events.Add("drawn");
             var seed = request.Seed >= 0 ? request.Seed : 1234;
             return new ImageResult(Enumerable.Range(0, request.Count).Select(i => new[] { (byte)(seed + i) }).ToList(), request.Format, seed);
         }

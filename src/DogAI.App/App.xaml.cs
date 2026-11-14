@@ -109,6 +109,9 @@ public partial class App : Application
                 if (pictures.Error is { } error && error != lastPictureError) log.LogWarning("Picture engine problem: {Error}", error);
                 lastPictureError = pictures.Error;
             };
+            // Made now, not when the first picture is asked for: it is what makes chat model loads wait for a picture.
+            // Its notes say what was moved and the memory numbers, never a prompt.
+            _services.GetRequiredService<DogAI.Core.Images.CardCoordinator>().Noted += note => log.LogInformation("Graphics card: {Note}", note);
 
             await _services.MigrateDogDatabaseAsync();
             await EnsureFirstRunDefaultsAsync(_services, paths);
@@ -233,7 +236,12 @@ public partial class App : Application
         services.AddSingleton<DogAI.Core.Documents.IEmbedder>(sp => sp.GetRequiredService<EmbeddingServer>());
         services.AddSingleton<DogAI.Engine.Images.SdServerLocator>();
         services.AddSingleton<DogAI.Engine.Images.ImageServer>();
-        services.AddSingleton<DogAI.Core.Images.IImageEngine>(sp => sp.GetRequiredService<DogAI.Engine.Images.ImageServer>());
+        // Everything that draws gets the coordinator, which shares the graphics card with the chat model; only the
+        // engine's own screens (install, update) know the server itself.
+        services.AddSingleton<DogAI.Core.Images.ICardMeter, DogAI.Engine.Images.CardMeter>();
+        services.AddSingleton(sp => new DogAI.Core.Images.CardCoordinator(sp.GetRequiredService<DogAI.Engine.Images.ImageServer>(),
+            sp.GetRequiredService<EngineManager>(), sp.GetRequiredService<DogAI.Core.Images.ICardMeter>()));
+        services.AddSingleton<DogAI.Core.Images.IImageEngine>(sp => sp.GetRequiredService<DogAI.Core.Images.CardCoordinator>());
         services.AddSingleton<DogAI.Core.Documents.DocumentLibrary>();
         services.AddSingleton<WindowsIntegration>();
         services.AddSingleton<IWindowsIntegration>(sp => sp.GetRequiredService<WindowsIntegration>());

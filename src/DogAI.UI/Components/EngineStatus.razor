@@ -3,7 +3,7 @@
 @inject HardwareProbe Probe
 
 <span>@Text</span>
-@if (Engine.IsReady && Engine.LastTokensPerSecond > 0)
+@if (Engine.IsLoaded && Engine.LastTokensPerSecond > 0)
 {
     <span>@Engine.LastTokensPerSecond.ToString("0.0") tok/s</span>
 }
@@ -26,6 +26,7 @@
         EngineState.Loading => $"Loading {Engine.ModelName}…",
         EngineState.Ready => $"{Engine.ModelName} · {Engine.ContextLength:N0} token context",
         EngineState.Failed => "Model failed to load",
+        EngineState.Resting => $"{Engine.ModelName} · set aside for pictures, back with your next message",
         _ => "No model loaded",
     };
 

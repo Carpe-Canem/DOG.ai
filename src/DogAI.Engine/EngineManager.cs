@@ -11,6 +11,12 @@ public enum EngineState
     Loading,
     Ready,
     Failed,
+
+    /// <summary>
+    /// Set aside to make room for a picture: the model is out of graphics memory but remembered, and loads again by
+    /// itself the next time it is asked for. Not the same as unloaded by the owner.
+    /// </summary>
+    Resting,
 }
 
 /// <param name="ContextLength">Context window to allocate, in tokens. Capped at what the model was trained for.</param>
@@ -21,11 +27,16 @@ public sealed record EngineOptions(int ContextLength = 8192, int GpuLayers = -1)
 /// Owns the llama-server process: starts it for one model on a random port bound to 127.0.0.1,
 /// waits until it is ready, and stops it on unload or exit. One model at a time.
 /// </summary>
-public sealed class EngineManager : IChatEngine, IDisposable
+public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlot, IDisposable
 {
     private static readonly TimeSpan LoadTimeout = TimeSpan.FromMinutes(10);
 
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SemaphoreSlim _waking = new(1, 1);
+
+    /// <summary>Guards "a request starts" against "the model is set aside", so a request is never cut off by a picture.</summary>
+    private readonly object _use = new();
+    private EngineOptions _options = new();
     private readonly ProcessJob _job = new();
     private readonly Queue<string> _recentOutput = new();
     private Process? _process;
@@ -55,7 +66,24 @@ public sealed class EngineManager : IChatEngine, IDisposable
     /// <summary>What went wrong, in plain words, when <see cref="State"/> is Failed.</summary>
     public string? Error { get; private set; }
 
-    public bool IsReady => State == EngineState.Ready;
+    /// <summary>
+    /// True when the model can be asked: it is loaded, or it was set aside for a picture and comes back by itself with
+    /// the next request. Use <see cref="IsLoaded"/> for things that should not bring it back (such as counting tokens
+    /// while typing).
+    /// </summary>
+    public bool IsReady => State is EngineState.Ready or EngineState.Resting;
+
+    /// <summary>True when the model is in graphics memory now.</summary>
+    public bool IsLoaded => State == EngineState.Ready;
+
+    /// <summary>True when the model was set aside for a picture (see <see cref="EngineState.Resting"/>).</summary>
+    public bool IsResting => State == EngineState.Resting;
+
+    /// <summary>
+    /// Set by the graphics-card coordinator. Everything that loads a chat model takes a turn first
+    /// (<see cref="TakeCardTurnAsync"/>), so a load never races a picture.
+    /// </summary>
+    public DogAI.Core.Images.CardTurn? CardTurn { get; set; }
 
     /// <summary>True while a reply or benchmark is being generated; idle unload waits for it.</summary>
     public bool IsBusy => Volatile.Read(ref _busy) > 0;
@@ -80,7 +108,10 @@ public sealed class EngineManager : IChatEngine, IDisposable
 
     public string? FindExecutable() => _locator.Find();
 
-    /// <summary>Loads a model, replacing any model already loaded. Problems end up in <see cref="Error"/>, not as exceptions.</summary>
+    /// <summary>
+    /// Loads a model, replacing any model already loaded. Problems end up in <see cref="Error"/>, not as exceptions.
+    /// Callers take a turn on the graphics card first (<see cref="TakeCardTurnAsync"/>) and keep it until this returns.
+    /// </summary>
     public async Task LoadAsync(string modelPath, EngineOptions options)
     {
         _loadCts?.Cancel();
@@ -90,6 +121,7 @@ public sealed class EngineManager : IChatEngine, IDisposable
         try
         {
             StopProcess();
+            _options = options;
             var info = GgufReader.TryRead(modelPath);
             ModelPath = modelPath;
             ModelName = info?.DisplayName(modelPath) ?? Path.GetFileNameWithoutExtension(modelPath);
@@ -181,24 +213,90 @@ public sealed class EngineManager : IChatEngine, IDisposable
         }
     }
 
-    public Task<int> CountTokensAsync(string text, CancellationToken ct = default) => Api().TokenizeAsync(text, ct);
-
-    public Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default) =>
-        Api().ApplyTemplateAsync(messages, ct);
-
-    public IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, CancellationToken ct = default) =>
-        TrackAsync(Api().StreamChatAsync(messages, sampler, ct));
-
-    public IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, SamplerPreset sampler, CancellationToken ct = default) =>
-        TrackAsync(Api().StreamCompletionAsync(prompt, sampler, ct));
-
-    /// <summary>Counts the reply as engine activity (for idle unload) and reports its speed.</summary>
-    private async IAsyncEnumerable<ChatDelta> TrackAsync(IAsyncEnumerable<ChatDelta> source)
+    /// <summary>
+    /// Sets the loaded model aside for a picture: its program ends and the graphics memory is given back, but the model,
+    /// its context size and its settings are remembered, and the next request loads it again (<see cref="EngineState.Resting"/>).
+    /// False, with nothing changed, when no model is loaded or a request is in progress.
+    /// </summary>
+    public async Task<bool> RestAsync()
     {
-        Interlocked.Increment(ref _busy);
+        await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            await foreach (var delta in source.ConfigureAwait(false))
+            lock (_use)
+            {
+                if (State != EngineState.Ready || _busy > 0) return false;
+                _api = null;
+                State = EngineState.Resting;
+            }
+            var context = ContextLength;
+            StopProcess();
+            // Still shown, and still what prompts are measured against: the model comes back with the same settings.
+            ContextLength = context;
+            Changed?.Invoke();
+            return true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Takes a turn on the graphics card before a chat model is loaded: waits for a picture being drawn and makes room
+    /// (see <see cref="DogAI.Core.Images.CardCoordinator"/>). Dispose the result when the load has ended. Without a
+    /// coordinator there is nothing to wait for.
+    /// </summary>
+    /// <param name="waking">True only when the model that was set aside is coming back.</param>
+    public Task<IDisposable> TakeCardTurnAsync(bool waking, CancellationToken ct = default) =>
+        CardTurn is { } take ? take(waking, ct) : Task.FromResult<IDisposable>(NoTurn.Instance);
+
+    private sealed class NoTurn : IDisposable
+    {
+        public static readonly NoTurn Instance = new();
+        public void Dispose() { }
+    }
+
+    public async Task<int> CountTokensAsync(string text, CancellationToken ct = default)
+    {
+        var api = await BeginUseAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await api.TokenizeAsync(text, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            EndUse();
+        }
+    }
+
+    public async Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default)
+    {
+        var api = await BeginUseAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await api.ApplyTemplateAsync(messages, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            EndUse();
+        }
+    }
+
+    public IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, CancellationToken ct = default) =>
+        TrackAsync(api => api.StreamChatAsync(messages, sampler, ct), ct);
+
+    public IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, SamplerPreset sampler, CancellationToken ct = default) =>
+        TrackAsync(api => api.StreamCompletionAsync(prompt, sampler, ct), ct);
+
+    /// <summary>Counts the reply as engine activity (for idle unload) and reports its speed.</summary>
+    private async IAsyncEnumerable<ChatDelta> TrackAsync(Func<LlamaApi, IAsyncEnumerable<ChatDelta>> start,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        var api = await BeginUseAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await foreach (var delta in start(api).ConfigureAwait(false))
             {
                 if (delta.Stats is { TokensPerSecond: > 0 } stats)
                 {
@@ -211,7 +309,7 @@ public sealed class EngineManager : IChatEngine, IDisposable
         finally
         {
             LastActivity = DateTimeOffset.Now;
-            Interlocked.Decrement(ref _busy);
+            EndUse();
         }
     }
 
@@ -221,8 +319,7 @@ public sealed class EngineManager : IChatEngine, IDisposable
     /// </summary>
     public async Task<BenchmarkTimings> BenchmarkAsync(int tokens = 160, CancellationToken ct = default)
     {
-        var api = Api();
-        Interlocked.Increment(ref _busy);
+        var api = await BeginUseAsync(ct).ConfigureAwait(false);
         try
         {
             return await api.BenchmarkAsync(tokens, ct).ConfigureAwait(false);
@@ -230,12 +327,78 @@ public sealed class EngineManager : IChatEngine, IDisposable
         finally
         {
             LastActivity = DateTimeOffset.Now;
-            Interlocked.Decrement(ref _busy);
+            EndUse();
+        }
+    }
+
+    /// <summary>
+    /// Starts a request to the model and counts it as busy until <see cref="EndUse"/>. A model set aside for a picture
+    /// is loaded again first: the request waits for any picture being drawn, then for the load.
+    /// </summary>
+    /// <exception cref="EngineException">No model is loaded, or the model that was set aside could not be loaded again.</exception>
+    private async Task<LlamaApi> BeginUseAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            lock (_use)
+            {
+                if (State == EngineState.Ready && _api is { } api)
+                {
+                    _busy++;
+                    return api;
+                }
+                if (State != EngineState.Resting)
+                    throw new EngineException(State == EngineState.Failed && Error is { } why ? why : "No model is loaded.");
+            }
+            await WakeAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    private void EndUse()
+    {
+        lock (_use) _busy--;
+    }
+
+    /// <summary>
+    /// Loads the model that was set aside again, with the settings it had. Stopping the request that asked for it
+    /// (<paramref name="ct"/>) does not stop the load: the model is wanted again either way, and the turn on the
+    /// graphics card is kept until the load has ended.
+    /// </summary>
+    private async Task WakeAsync(CancellationToken ct)
+    {
+        var turn = await TakeCardTurnAsync(waking: true, ct).ConfigureAwait(false);
+        Task load;
+        try
+        {
+            load = WakeLockedAsync();
+        }
+        catch
+        {
+            turn.Dispose();
+            throw;
+        }
+        _ = load.ContinueWith(_ => turn.Dispose(), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        await load.WaitAsync(ct).ConfigureAwait(false);
+    }
+
+    private async Task WakeLockedAsync()
+    {
+        await _waking.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            // Someone else may have brought it back, or the owner unloaded it, while this request waited.
+            if (State != EngineState.Resting || ModelPath is not { } path) return;
+            await LoadAsync(path, _options).ConfigureAwait(false);
+        }
+        finally
+        {
+            _waking.Release();
         }
     }
 
     private async Task UnloadIfIdleAsync()
     {
+        // A model set aside for a picture holds no memory, so there is nothing to give back; it stays remembered.
         if (IdleUnloadAfter is not { } limit || State != EngineState.Ready || IsBusy) return;
         if (DateTimeOffset.Now - LastActivity < limit) return;
         await UnloadAsync().ConfigureAwait(false);
@@ -252,8 +415,6 @@ public sealed class EngineManager : IChatEngine, IDisposable
         StopProcess();
         _job.Dispose();
     }
-
-    private LlamaApi Api() => _api is { } api && IsReady ? api : throw new EngineException("No model is loaded.");
 
     private async Task WaitUntilReadyAsync(Process process, LlamaApi api, CancellationToken ct)
     {

@@ -44,11 +44,20 @@ public sealed class ImageServer : IImageEngine, IDisposable
         _http = http;
         _locator = locator;
         _paths = paths;
-        _idleTimer = new Timer(_ => StopIfIdle(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+        _idleTimer = new Timer(_ => StopIfIdle(), null, IdleCheck, IdleCheck);
     }
 
-    /// <summary>How long the engine may sit unused before it is stopped. M9 step 3 (sharing the graphics card) tunes it.</summary>
-    public TimeSpan IdleStop { get; set; } = TimeSpan.FromMinutes(5);
+    /// <summary>How often the idle time is looked at; the engine stops at most this long after <see cref="IdleStop"/>.</summary>
+    private static readonly TimeSpan IdleCheck = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// How long the engine may sit unused, counted from the end of the last picture, before it is stopped. Two minutes:
+    /// long enough to look at a picture, change the prompt and draw again without paying for a reload, and short because
+    /// keeping it costs 8 GB of graphics memory (a third of a 24 GB card) while getting it back costs about 4 seconds.
+    /// The chat model does not wait for this: the card coordinator lets the picture model go as soon as the chat model
+    /// needs the room.
+    /// </summary>
+    public TimeSpan IdleStop { get; set; } = TimeSpan.FromMinutes(2);
 
     public ImageModel? Model { get; private set; }
 
@@ -58,6 +67,16 @@ public sealed class ImageServer : IImageEngine, IDisposable
     public bool IsRunning => _api is not null && _process is { HasExited: false };
 
     public bool IsStarting { get; private set; }
+
+    /// <summary>Process id of the running program, for measuring its graphics memory.</summary>
+    public int? ProcessId
+    {
+        get
+        {
+            try { return _process is { HasExited: false } p ? p.Id : null; }
+            catch (InvalidOperationException) { return null; }
+        }
+    }
 
     /// <summary>The port the running program listens on (tests only).</summary>
     internal int? Port { get; private set; }
@@ -186,6 +205,9 @@ public sealed class ImageServer : IImageEngine, IDisposable
         _lastUse = DateTime.UtcNow;
         return await api.CapabilitiesAsync(ct).ConfigureAwait(false);
     }
+
+    /// <summary>Gives the graphics memory back by ending the program; the checkpoint stays chosen (see <see cref="StopAsync"/>).</summary>
+    public Task ReleaseAsync(CancellationToken ct = default) => StopAsync();
 
     /// <summary>Ends the program. The chosen checkpoint stays chosen; the next picture starts the program again.</summary>
     public async Task StopAsync()

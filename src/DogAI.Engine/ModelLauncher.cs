@@ -59,7 +59,9 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
 
     /// <summary>
     /// Unloads (or stops loading) because the user asked. Defaults are then not loaded on their own until the user
-    /// loads a model again; unloading after idle time does not count.
+    /// loads a model again; unloading after idle time does not count, and neither does the graphics-card coordinator
+    /// setting the model aside for a picture (<see cref="EngineManager.RestAsync"/>), which never comes through here.
+    /// A model that was set aside is forgotten by this too, so it does not come back with the next message.
     /// </summary>
     public async Task UnloadByUserAsync()
     {
@@ -75,6 +77,7 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
     /// <exception cref="ModelRefusedException">The default cannot fit or cannot chat.</exception>
     public async Task<string?> LoadDefaultIfIdleAsync(AppSettings settings, string mode)
     {
+        // A model set aside for a picture is not Idle: opening a page must not bring it (or a default) back early.
         if (engine.State != EngineState.Idle || _heldUnloaded) return null;
         if (!settings.DefaultModels.TryGetValue(mode, out var path) || !File.Exists(path)) return null;
         if (engine.FindExecutable() is null) return null;
@@ -96,6 +99,9 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
     {
         var info = await Task.Run(() => GgufReader.TryRead(path)).ConfigureAwait(false);
         if (ChatRefusal(info, path) is { } cannotChat) throw new ModelRefusedException(cannotChat);
+        // Waits for a picture being drawn and lets the idle picture model go, before measuring what fits: otherwise the
+        // picture model's 8 GB would count against this model and push part of it off the graphics card.
+        using var turn = await engine.TakeCardTurnAsync(waking: false).ConfigureAwait(false);
         var decision = await DecideAsync(path, context).ConfigureAwait(false);
         if (decision.Refusal is { } why) throw new ModelRefusedException(why);
         _heldUnloaded = false;

@@ -4,6 +4,7 @@
 @inject EngineManager Engine
 @inject DogAI.Engine.Images.ImageServer Pictures
 @inject DogAI.Engine.Images.SdServerLocator PictureLocator
+@inject DogAI.Core.Images.CardCoordinator Card
 @inject ModelsContext Ctx
 @inject OnlineGate Gate
 @inject OnlineSession Session
@@ -34,7 +35,27 @@
         {
             <div class="kv"><span>Source</span><span>Set for testing (@DogAI.Engine.Images.SdServerLocator.OverrideVariable)</span></div>
         }
+        @if (_pictureExe is not null)
+        {
+            <div class="kv"><span>Now</span><span id="picture-state">@PictureState</span></div>
+        }
     </div>
+    @if (_testCheckpoint is not null && _pictureExe is not null)
+    {
+        @* For test runs only, until the Images tab exists (M9 step 4): shown when DOGAI_TEST_IMAGE_MODEL names a checkpoint. *@
+        <div class="row">
+            <button class="btn" id="test-picture" disabled="@Card.IsBusy" @onclick="() => TestPictureAsync(false)">Draw a test picture</button>
+            <button class="btn" id="test-picture-fine" disabled="@Card.IsBusy" @onclick="() => TestPictureAsync(true)">Draw a fine one (hires fix)</button>
+        </div>
+        @if (_testNote is not null)
+        {
+            <p class="note" id="test-picture-note">@_testNote</p>
+        }
+        @if (_testPicture is not null)
+        {
+            <img id="test-picture-result" alt="The test picture" src="@_testPicture" style="max-width:220px;border-radius:8px" />
+        }
+    }
     <p class="note">Draws pictures on this PC (coming in a later version of DOG.ai). DOG.ai installs stable-diffusion.cpp’s CUDA 12 build and NVIDIA’s runtime for it from the project’s GitHub releases (two files, about 0.9 GB), checks both against their published checksums, and puts them in @Paths.ImageEngineDirectory. It needs an NVIDIA graphics card.</p>
 </section>
 
@@ -144,8 +165,69 @@
     {
         _exe = Engine.FindExecutable();
         _pictureExe = PictureLocator.Find();
+        _testCheckpoint = Environment.GetEnvironmentVariable("DOGAI_TEST_IMAGE_MODEL") is { Length: > 0 } checkpoint ? checkpoint : null;
         Gate.Changed += Refresh;
         Ctx.Changed += Refresh;
+        Card.Changed += Refresh;
+        Engine.Changed += Refresh;
+    }
+
+    private string? _testCheckpoint, _testNote, _testPicture;
+
+    private string PictureState =>
+        Card.IsBusy ? "Drawing a picture"
+        : Pictures.IsRunning ? "Running; it holds its model in graphics memory from the first picture until it has sat unused for " + Minutes(Pictures.IdleStop)
+        : "Not running; it starts with the next picture";
+
+    private static string Minutes(TimeSpan time) => time.TotalMinutes == 1 ? "a minute" : $"{time.TotalMinutes:0.#} minutes";
+
+    /// <summary>Draws one fixed picture through the card coordinator, to see the graphics card being shared (test runs only).</summary>
+    private async Task TestPictureAsync(bool fine)
+    {
+        _testPicture = null;
+        _testNote = "Starting…";
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var loras = Environment.GetEnvironmentVariable("DOGAI_TEST_IMAGE_LORAS") is { Length: > 0 } folder ? folder : null;
+            var model = new DogAI.Core.Images.ImageModel(_testCheckpoint!, loras);
+            if (Card.Model != model) await Card.LoadAsync(model);
+            var request = new DogAI.Core.Images.ImageRequest(
+                "1girl, silver hair, green eyes, scar on cheek, leather armor, green cloak, forest, dappled sunlight, masterpiece, best quality",
+                "worst quality, low quality, lowres, bad anatomy, bad hands, signature, watermark, text",
+                832, 1216, Steps: 28, Sampler: "euler_a", Guidance: 5.5, ClipSkip: 2,
+                Hires: fine ? new DogAI.Core.Images.HiresFix(1.5, 14, 0.5) : null,
+                Format: DogAI.Core.Images.ImageFormat.Jpeg, Quality: 90);
+            var progress = new Progress<DogAI.Core.Images.ImageProgress>(p =>
+            {
+                _testNote = p.Stage switch
+                {
+                    DogAI.Core.Images.CardCoordinator.Waiting => "Waiting for the graphics card…",
+                    DogAI.Core.Images.CardCoordinator.MakingRoom => "Setting the chat model aside to make room…",
+                    "sampling" => $"Drawing, step {p.Step} of {p.TotalSteps}{(p.Pass > 1 ? " (second pass)" : "")}…",
+                    _ => "Drawing…",
+                };
+                StateHasChanged();
+            });
+            var result = await Task.Run(() => Card.DrawAsync(request, progress));
+            _testPicture = "data:image/jpeg;base64," + Convert.ToBase64String(result.Images[0]);
+            _testNote = $"Drawn in {clock.Elapsed.TotalSeconds:0.0} seconds. " + (Card.LastDecision?.Choice switch
+            {
+                DogAI.Core.Images.CardChoice.KeptBoth => "Both fitted on the graphics card, so the chat model stayed loaded.",
+                DogAI.Core.Images.CardChoice.SetChatAside => "The chat model was set aside to make room; it loads again with your next message.",
+                _ => "No chat model was in graphics memory.",
+            });
+        }
+        catch (DogAI.Core.Images.ImageEngineException e)
+        {
+            _testNote = e.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            _testNote = "The picture was cancelled.";
+        }
+        // The hardware panel beside this shows what was measured when the page opened; measure again now.
+        await Ctx.RefreshAsync();
     }
 
     private void Refresh() => InvokeAsync(StateHasChanged);
@@ -274,5 +356,7 @@
     {
         Gate.Changed -= Refresh;
         Ctx.Changed -= Refresh;
+        Card.Changed -= Refresh;
+        Engine.Changed -= Refresh;
     }
 }

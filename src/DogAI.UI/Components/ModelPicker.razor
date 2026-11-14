@@ -30,6 +30,13 @@
                 <button class="btn" @onclick="Launcher.UnloadByUserAsync">Unload</button>
             </div>
         }
+        else if (Engine.State == EngineState.Resting)
+        {
+            <div class="notice">
+                <span><b>@Engine.ModelName</b> was set aside to make room for pictures. It loads again by itself with your next message.</span>
+                <button class="btn" @onclick="Launcher.UnloadByUserAsync">Unload</button>
+            </div>
+        }
 
         @if (_defaultRefused is not null && Engine.State == EngineState.Idle)
         {
@@ -117,13 +124,14 @@
         EngineState.Loading => "Loading model…",
         EngineState.Ready => Engine.ModelName ?? "Model loaded",
         EngineState.Failed => "Model failed to load",
+        EngineState.Resting => $"{Engine.ModelName ?? "Model"} · set aside",
         _ => "Choose a model",
     };
 
     private string StateClass => Engine.State switch
     {
         EngineState.Ready => "ok",
-        EngineState.Loading => "warn",
+        EngineState.Loading or EngineState.Resting => "warn",
         EngineState.Failed => "bad",
         _ => "",
     };
