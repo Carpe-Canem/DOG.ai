@@ -27,7 +27,7 @@
 <div class="pictures-part" data-part="@ModelsPlaces.Checkpoints" hidden="@(Part != ModelsPlaces.Checkpoints)">
 <section class="group">
     <h3 class="group-title">Checkpoints</h3>
-    <p class="note">A checkpoint is the model that draws. Each one has settings for how prompts are written and drawn; DOG.ai fills them in for families it recognises (Illustrious, NoobAI, Pony, SDXL).</p>
+    <p class="note">A checkpoint is the model that draws. DOG.ai fills in its settings for the families it recognises (Illustrious, NoobAI, Pony, SDXL).</p>
     @if (_scanned && Checkpoints.Count == 0)
     {
         <div class="notice" id="no-checkpoint"><span>No checkpoint yet. Download one in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.GetPictures)">Get models › Pictures</a>, or put a .safetensors checkpoint from Civitai in the checkpoints folder with <b>Open folder</b>, then <b>Look again</b>.</span></div>

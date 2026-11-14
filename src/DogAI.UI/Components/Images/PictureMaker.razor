@@ -126,7 +126,7 @@
             @if (_editing && !Busy)
             {
                 <div class="maker-edit" id="maker-edit-box">
-                    <p class="small">Change one thing and draw it again with the same seed. A different quality alone keeps the picture and draws it faster or finer; a different shape or prompt changes more.</p>
+                    <p class="small">Change one thing and draw it again with the same seed.<InfoButton About="edit and redraw">A different quality alone keeps the picture and draws it faster or finer; a different shape or prompt changes more.</InfoButton></p>
                     <label class="field-block">
                         <span class="field-label">Prompt</span>
                         <textarea class="field" id="maker-edit-prompt" rows="4" @bind="_editPrompt"></textarea>
@@ -196,7 +196,7 @@
         {
             @Strip()
         }
-        <p class="small">Pictures you try are kept in memory only, until you use one. SDXL can get details wrong: who holds what, hands, and one person’s features showing up on another.</p>
+        <p class="small">Tries stay in memory only until you use one. SDXL can get details wrong: hands, who holds what, one person’s features on another.</p>
     }
 </Modal>
 

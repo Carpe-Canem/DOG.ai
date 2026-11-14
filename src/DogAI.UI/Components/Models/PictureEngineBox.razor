@@ -75,7 +75,7 @@
     {
         <div class="notice @(_bad ? "bad" : "ok")"><span>@_message</span></div>
     }
-    <p class="note">DOG.ai installs stable-diffusion.cpp’s CUDA 12 build and NVIDIA’s runtime for it from the project’s GitHub releases (two files, about 0.9 GB), checks both against their published checksums, and puts them in @Paths.ImageEngineDirectory. It needs an NVIDIA graphics card. Updating it does not unload the chat model.</p>
+    <p class="note">DOG.ai installs stable-diffusion.cpp from the project’s GitHub releases (about 0.9 GB), into @Paths.ImageEngineDirectory. It needs an NVIDIA graphics card.<InfoButton About="how the picture engine is installed">Two files: the CUDA 12 build and NVIDIA’s runtime for it, both checked against their published checksums. Updating it does not unload the chat model.</InfoButton></p>
 </section>
 
 @code {

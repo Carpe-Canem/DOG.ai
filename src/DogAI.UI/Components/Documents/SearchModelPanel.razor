@@ -8,13 +8,13 @@
     @if (_path is null)
     {
         <p class="small">None yet. Documents can be added, but they are searched only once there is one.</p>
-        <p class="small"><a class="link-text" href="models">Get one in Models</a>: Recommended → Document search. Qwen3 Embedding 0.6B is small (about 0.6 GB) and works in many languages.</p>
+        <p class="small">Get one in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.Recommended)">@ModelsPlaces.RecommendedName</a>, under Document search (about 0.6 GB).</p>
     }
     else
     {
         <div class="kv"><span>Model</span><span>@Path.GetFileNameWithoutExtension(_path)</span></div>
         <div class="kv"><span>State</span><span>@State</span></div>
-        <p class="small">It runs beside the chat model, starts when needed and stops after ten idle minutes. To use another, pick it in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName › Default models</a>; documents are then indexed again.</p>
+        <p class="small">Starts when needed, stops after ten idle minutes.<InfoButton About="the document search model">It runs beside the chat model. To use another, pick it in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName › Default models</a>; documents are then indexed again.</InfoButton></p>
     }
     @if (Search.Error is { } error)
     {

@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
 using DogAI.Core;
@@ -58,6 +58,19 @@ public partial class MainWindow : Window
             if (!appLock.CanLock) return;
             e.Handled = true;
             appLock.LockNow();
+        };
+
+        // Ctrl+K opens the quick-jump box, and closes it again. The page listens for it too (JumpBox), but the browser
+        // control reports Ctrl keys to the window first, so this is the one that usually runs; the box takes two
+        // reports of one press as one. Typing must go to the page afterwards, so the focus is moved into it.
+        var jumpKey = services.GetRequiredService<DogAI.Core.Search.JumpKey>();
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != System.Windows.Input.Key.K || System.Windows.Input.Keyboard.Modifiers != System.Windows.Input.ModifierKeys.Control) return;
+            e.Handled = true;
+            if (e.IsRepeat) return;
+            WebView.WebView?.Focus();
+            jumpKey.Ask();
         };
 
         var appearance = services.GetRequiredService<AppearanceState>();

@@ -7,7 +7,7 @@
 
 <div class="panel" id="connection">
     <h4>Connection</h4>
-    <div class="small"><b id="connection-state">@(Gate.IsOnline ? "Online." : "Offline.")</b> Only Models goes online, and only to Hugging Face and GitHub (never Civitai). Leaving Models goes offline again, unless a download is still running.</div>
+    <div class="small"><b id="connection-state">@(Gate.IsOnline ? "Online." : "Offline.")</b> Only Models goes online, and only to Hugging Face and GitHub.<InfoButton About="going online">Never Civitai. Leaving Models goes offline again, unless a download is still running.</InfoButton></div>
     @if (WithToken)
     {
         <div class="small" id="hf-token">

@@ -14,7 +14,7 @@
 <div class="field-block looks-box">
     <div class="field-label">
         Looks
-        <span class="small">How @Who look@(Who == "you" ? "" : "s") in pictures. These words go into every picture of @Them, so @They stay recognisable from one picture to the next. Never sent to the chat model.</span>
+        <span class="small">How @Who look@(Who == "you" ? "" : "s") in pictures: these words go into every picture of @Them. Never sent to the chat model.</span>
     </div>
     <textarea class="field" id="looks-tags" rows="2" maxlength="@Looks.MaxTagsLength" value="@Value.Tags" disabled="@(_draftCts is not null)"
               placeholder="@(_style == PromptStyle.Tags ? "1girl, silver hair, long hair, green eyes, scar on cheek" : "a tall woman with long silver hair, green eyes and a scar on her cheek")"

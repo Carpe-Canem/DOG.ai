@@ -138,12 +138,11 @@ else
 
 <SectionContent SectionName="aside">
     <SearchModelPanel />
-    <div class="panel">
-        <h4>How it works</h4>
+    <Fold Id="documents-how" Title="How it works" Summary="Everything stays on this PC" OpenByDefault="false" Level="4" Class="panel side-panel">
         <p class="small">Each file is cut into passages of a few hundred words. The document search model turns every passage into numbers that capture its meaning, once.</p>
         <p class="small">When you send a message, the passages closest to it in meaning, or sharing its rare words, are sent to the model with your message. General chats cite them as [1], [2]; press a number to see the passage in its file.</p>
         <p class="small">Everything stays on this PC.</p>
-    </div>
+    </Fold>
 </SectionContent>
 
 @code {

@@ -76,7 +76,7 @@
     }
 </section>
 
-<p class="note">DOG.ai installs the CUDA build of llama.cpp that matches your graphics driver (Vulkan on other cards) from the project’s GitHub releases, checks every file against its published checksum, and only replaces the engine once the new one is complete. It goes in @Paths.EngineDirectory.</p>
+<p class="note">DOG.ai installs the llama.cpp build that fits your graphics card from the project’s GitHub releases, into @Paths.EngineDirectory.<InfoButton About="how the chat engine is installed">The CUDA build that matches your graphics driver (Vulkan on other cards). Every file is checked against its published checksum, and the engine is only replaced once the new one is complete.</InfoButton></p>
 
 <PictureEngineBox Blocked="@(_installing is not null)" Working="on => _pictureInstalling = on" />
 

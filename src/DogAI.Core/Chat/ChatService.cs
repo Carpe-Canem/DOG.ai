@@ -718,8 +718,9 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         var through = from - 1;
         var chunkBudget = Math.Max(256, engine.ContextLength / 2 - SummaryMaxTokens);
         // Low temperature for accuracy, with repetition penalties because small models easily loop when summarising.
-        var preset = SamplerPresets.Get("precise") with { MaxTokens = SummaryMaxTokens, RepeatPenalty = 1.1, DryMultiplier = 0.8 };
-        if (conversation.Mode == Story.Mode) preset = _storyOptions.Apply(preset);
+        // Never with thinking: a model that thinks first spends the summary's whole length on it and writes nothing
+        // (seen with Qwen3.5), so the chat would never get a summary. Stories were already asked this way.
+        var preset = SamplerPresets.Get("precise") with { MaxTokens = SummaryMaxTokens, RepeatPenalty = 1.1, DryMultiplier = 0.8, Thinking = false };
         while (through < to)
         {
             var lines = new StringBuilder();

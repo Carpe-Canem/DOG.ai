@@ -189,6 +189,9 @@ function Front-Window {
     $w = $A::RootElement.FindAll('Children', (ByPid)) | Select-Object -First 1
     if (-not $w) { return [IntPtr]::Zero }
     $h = [IntPtr]$w.Current.NativeWindowHandle
+    # Already in front: nothing to do. (The Alt below would put the window in menu mode, which swallows the next key
+    # when the page has no focus, so it is pressed only when it is needed.)
+    if ([DogWalk.Win]::GetForegroundWindow() -eq $h) { return $h }
     # Windows lets a program bring another to the front only just after a key press; a lone Alt counts.
     [DogWalk.Win]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [DogWalk.Win]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
     [DogWalk.Win]::SetForegroundWindow($h) | Out-Null

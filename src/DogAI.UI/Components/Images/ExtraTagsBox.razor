@@ -24,9 +24,7 @@
     else
     {
         <p class="note" id="extra-tags-state">
-            <b>Off.</b> DOG.ai checks the tags the chat model writes against its own list, which leaves some tags out;
-            the chat model’s tags of that kind are dropped from pictures. Adding the full tag list brings them back, for pictures at
-            the two highest ratings in Settings › Pictures.
+            <b>Off.</b> DOG.ai’s own tag list leaves some tags out, so tags of that kind written by the chat model are dropped from pictures.<InfoButton About="extra tags">Adding the full tag list brings them back, for pictures at the two highest ratings in Settings › Pictures.</InfoButton>
         </p>
         @if (Job is { Status: not (DownloadStatus.Done or DownloadStatus.Failed) } job)
         {

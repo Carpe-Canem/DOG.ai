@@ -34,7 +34,7 @@
         <span class="small">What pictures should avoid.</span>
     </label>
     <div class="field-block wide-field">
-        <span class="field-label">Rating words <span class="small">The words this checkpoint knows for each rating. The rating chosen in Settings › Pictures goes into the prompt; the ones above it go into the negative prompt. Leave a level empty if the checkpoint has no word for it.</span></span>
+        <span class="field-label">Rating words <span class="small">The words this checkpoint knows for each rating.<InfoButton About="rating words">The rating chosen in Settings › Pictures goes into the prompt; the ones above it go into the negative prompt. Leave a level empty if the checkpoint has no word for it.</InfoButton></span></span>
         <div class="rating-words">
             @foreach (var r in Enum.GetValues<PictureRating>())
             {

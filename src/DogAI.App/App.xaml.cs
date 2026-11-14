@@ -254,6 +254,8 @@ public partial class App : Application
         services.AddSingleton(sp => new DogAI.Core.Images.ImageModelCatalog(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton(sp => new InterfaceMemory(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton<ChatService>();
+        services.AddSingleton<DogAI.Core.Search.QuickJumpIndex>();
+        services.AddSingleton<DogAI.Core.Search.JumpKey>();
         services.AddSingleton<DogAI.Core.Characters.CardBuilder>();
         services.AddSingleton<DogAI.Core.Images.PictureWriter>();
         services.AddSingleton<DogAI.Core.Stories.StoryBuilder>();

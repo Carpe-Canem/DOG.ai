@@ -4,6 +4,7 @@
 @inject ChatService Chat
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject JumpKey Jump
 
 <SectionContent SectionName="title">
     <div class="head-row">
@@ -24,6 +25,7 @@
     @if (_query.Trim().Length == 0)
     {
         <p class="small">Type a few words. Every word must appear; the last one can be unfinished. Matches in a chat's name come first.</p>
+        <p class="small" id="search-jump-note">Looking for a chat, character, story or setting by its name? <button type="button" class="btn" id="search-jump" @onclick="Jump.Ask">Jump to… <kbd>Ctrl</kbd>+<kbd>K</kbd></button></p>
     }
     else if (_failed is not null)
     {

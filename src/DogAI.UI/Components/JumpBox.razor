@@ -1,0 +1,305 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject QuickJumpIndex Index
+@inject ISearchStore Finder
+@inject ChatService Chat
+@inject NavigationManager Nav
+@inject JumpKey Key
+
+@* Ctrl+K: one box that jumps to any screen, chat, character, story, document collection or setting, and to words
+   inside messages. What it lists and in which order is QuickJump (Core). It sits inside .shell so it takes the look. *@
+
+@if (_open)
+{
+    <div class="modal-back jump-back" @onclick="() => CloseAsync(true)">
+        <div class="modal jump" id="jump" role="dialog" aria-modal="true" aria-label="Jump to" @onclick:stopPropagation="true" @onclick="Nothing">
+            <div class="jump-box">
+                <Icon Name="search" Size="18" />
+                <input @ref="_input" id="jump-input" class="field" type="text" role="combobox" autocomplete="off" spellcheck="false"
+                       aria-label="Jump to a chat, character, story, screen or setting" aria-expanded="true" aria-controls="jump-list"
+                       aria-activedescendant="@(_shown.Count > 0 ? $"jump-{_at}" : null)"
+                       placeholder="Jump to a chat, character, story or setting…"
+                       @bind="_query" @bind:event="oninput" @bind:after="TypedAsync" @onkeydown="OnKeyAsync" />
+                <kbd>Esc</kbd>
+            </div>
+            <div class="jump-list" id="jump-list" role="listbox" aria-label="Places">
+                @if (_shown.Count == 0)
+                {
+                    <p class="small" id="jump-none">@NoneText</p>
+                }
+                @for (var i = 0; i < _shown.Count; i++)
+                {
+                    var at = i;
+                    var t = _shown[i];
+                    <button type="button" class="jump-item @(at == _at ? "on" : "")" id="jump-@at" role="option" aria-selected="@(at == _at ? "true" : "false")"
+                            data-kind="@t.Kind.ToString().ToLowerInvariant()" data-route="@t.Route" @onclick="() => GoAsync(t)">
+                        <span class="jump-text">
+                            <span class="jump-title">@t.Title</span>
+                            @if (t.Snippet is { } snippet)
+                            {
+                                <span class="jump-where">
+                                    @foreach (var part in ChatSearch.Parts(snippet))
+                                    {
+                                        if (part.Match)
+                                        {
+                                            <mark>@part.Text</mark>
+                                        }
+                                        else
+                                        {
+                                            @part.Text
+                                        }
+                                    }
+                                </span>
+                            }
+                            else if (Where(t) is { Length: > 0 } where)
+                            {
+                                <span class="jump-where">@where</span>
+                            }
+                        </span>
+                        <span class="chip">@t.Label</span>
+                    </button>
+                }
+            </div>
+            <p class="small jump-foot"><kbd>↑</kbd> <kbd>↓</kbd> choose · <kbd>Enter</kbd> open · <kbd>Ctrl</kbd>+<kbd>K</kbd> opens this from anywhere</p>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _open;
+    private bool _focus;
+    private bool _scroll;
+    private bool _looking;
+    private string _query = "";
+    private string? _failed;
+    private int _at;
+    private int _version;
+    private int _opened;
+    private DateTime _toggled;
+    private ElementReference _input;
+    private IReadOnlyList<JumpTarget> _yours = [];
+    private IReadOnlyList<JumpTarget> _found = [];
+    private IReadOnlyList<JumpTarget> _inMessages = [];
+    private List<JumpTarget> _shown = [];
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<JumpBox>? _self;
+
+    protected override void OnInitialized() => Key.Asked += OnAsked;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
+                _self = DotNetObjectReference.Create(this);
+                await _module.InvokeVoidAsync("watchJumpKey", _self);
+            }
+            catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException)
+            {
+                // Without the listener Ctrl+K works only through the window; every place is still reachable by the menus.
+            }
+        }
+        if (_module is null) return;
+        try
+        {
+            if (_focus && _open)
+            {
+                _focus = false;
+                await _module.InvokeVoidAsync("jumpOpened", _input);
+            }
+            if (_scroll && _open)
+            {
+                _scroll = false;
+                await _module.InvokeVoidAsync("showJumpChoice");
+            }
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+        }
+    }
+
+    private void OnAsked() => InvokeAsync(Toggle);
+
+    /// <summary>
+    /// Ctrl+K: opens the box, or closes it when it is open. The window and the page can both report one key press
+    /// (which of them sees it depends on where the focus is), so a second report within a moment is the same press.
+    /// </summary>
+    [JSInvokable]
+    public async Task Toggle()
+    {
+        var now = DateTime.UtcNow;
+        if (now - _toggled < TimeSpan.FromMilliseconds(250)) return;
+        _toggled = now;
+        if (_open) await CloseAsync(true);
+        else await OpenAsync();
+    }
+
+    private async Task OpenAsync()
+    {
+        try
+        {
+            if (_module is not null && !await _module.InvokeAsync<bool>("jumpAllowed")) return;
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+        }
+        _version++;
+        var opened = ++_opened;
+        _query = "";
+        _failed = null;
+        _looking = false;
+        _inMessages = [];
+        _open = _focus = true;
+        Show(QuickJump.Find(_yours = [], ""));
+        StateHasChanged();
+        try
+        {
+            // Typing may start before the list is read: it is then matched against what has been typed by then.
+            var yours = await Index.LoadAsync();
+            if (!_open || opened != _opened) return;
+            _yours = yours;
+            Show(QuickJump.Find(_yours, _query));
+        }
+        catch (Exception e) when (e is System.Data.Common.DbException or InvalidOperationException)
+        {
+            // Screens and settings are still listed; the owner's own things could not be read.
+            _failed = "Your chats could not be read: " + e.Message;
+        }
+        StateHasChanged();
+    }
+
+    private async Task CloseAsync(bool restoreFocus)
+    {
+        if (!_open) return;
+        _open = false;
+        _version++;
+        StateHasChanged();
+        try
+        {
+            if (_module is not null) await _module.InvokeVoidAsync("jumpClosed", restoreFocus);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+        }
+    }
+
+    private void Show(IReadOnlyList<JumpTarget> found)
+    {
+        _found = found;
+        _shown = [.. _found, .. _inMessages];
+        _at = 0;
+        _scroll = true;
+    }
+
+    /// <summary>Names are matched at once; words inside messages after a pause in typing.</summary>
+    private async Task TypedAsync()
+    {
+        var version = ++_version;
+        _inMessages = [];
+        _failed = null;
+        Show(QuickJump.Find(_yours, _query));
+        _looking = QuickJump.LooksInMessages(_query);
+        if (!_looking) return;
+        await Task.Delay(200);
+        if (version != _version) return;
+        try
+        {
+            var hits = await Finder.SearchAsync(_query, 20);
+            if (version != _version) return;
+            _inMessages = hits.Select(QuickJump.FromHit).OfType<JumpTarget>().Take(QuickJump.MessageHits).ToList();
+            var at = _at;
+            Show(_found);
+            _at = Math.Min(at, Math.Max(0, _shown.Count - 1));
+        }
+        catch (Exception e) when (e is System.Data.Common.DbException or InvalidOperationException)
+        {
+            if (version == _version) _failed = "Messages could not be searched: " + e.Message;
+        }
+        finally
+        {
+            if (version == _version) _looking = false;
+        }
+    }
+
+    private async Task OnKeyAsync(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Escape":
+                await CloseAsync(true);
+                break;
+            case "ArrowDown" when _shown.Count > 0:
+                _at = (_at + 1) % _shown.Count;
+                _scroll = true;
+                break;
+            case "ArrowUp" when _shown.Count > 0:
+                _at = (_at + _shown.Count - 1) % _shown.Count;
+                _scroll = true;
+                break;
+            case "Enter" when _at < _shown.Count:
+                await GoAsync(_shown[_at]);
+                break;
+        }
+    }
+
+    private async Task GoAsync(JumpTarget target)
+    {
+        await CloseAsync(false);
+        try
+        {
+            if (target is { ConversationId: { } chat, MessageId: { } message })
+            {
+                // As the Search screen does: the branch that holds the message is shown, then the message is scrolled to.
+                await Chat.SelectBranchAsync(chat, message);
+                if (_module is not null) await _module.InvokeVoidAsync("scrollToMessage", message);
+            }
+            else if (target.Anchor is { } anchor && _module is not null)
+            {
+                await _module.InvokeVoidAsync("scrollToSetting", anchor);
+            }
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException)
+        {
+            // Scrolling is a convenience; the place still opens.
+        }
+        Nav.NavigateTo(target.Route);
+    }
+
+    private static string Where(JumpTarget t) => t.Kind == JumpKind.Chat && t.UpdatedAt is { } updated
+        ? (t.Where.Length > 0 ? $"{t.Where} · {Format.When(updated)}" : Format.When(updated))
+        : t.Where;
+
+    private string NoneText
+    {
+        get
+        {
+            if (_failed is not null) return _failed;
+            if (_looking) return "Looking…";
+            var typed = _query.Trim();
+            return QuickJump.LooksInMessages(typed)
+                ? $"Nothing is called “{typed}”, and no message has those words."
+                : $"Nothing is called “{typed}”.";
+        }
+    }
+
+    private static void Nothing() { }
+
+    public async ValueTask DisposeAsync()
+    {
+        Key.Asked -= OnAsked;
+        try
+        {
+            if (_module is not null)
+            {
+                await _module.InvokeVoidAsync("unwatchJumpKey", _self);
+                await _module.DisposeAsync();
+            }
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException or JSException)
+        {
+        }
+        _self?.Dispose();
+    }
+}

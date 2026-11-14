@@ -84,7 +84,7 @@ html, body { margin: 0; height: 100%; background: #16181c; }
 .list { padding: 12px; }
 .aside { padding: 14px; }
 .list:empty, .aside:empty, .head:empty, .composer-wrap:empty { display: none; }
-.list-head { display: flex; justify-content: space-between; align-items: center; margin: 2px 4px 10px; }
+.list-head { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: 2px 4px 10px; }
 .list-head h3, .panel h4, .settings h3 { font-size: .78em; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .list-note { margin: 0 4px; color: var(--muted); font-size: .9em; }
 
@@ -553,7 +553,7 @@ button.cite:hover { border-color: var(--accent); }
 .info-btn { display: inline-flex; vertical-align: -3px; margin-left: 4px; padding: 1px; border-radius: 50%; color: var(--muted); }
 .info-btn:hover, .info-btn[aria-expanded=true] { color: var(--accent); }
 .info-text { display: block; margin-top: 4px; max-width: 72ch; font-size: .85em; font-weight: 400; color: var(--muted); }
-.small .info-text, .info-text .small { font-size: 1em; margin-top: 3px; }
+.small .info-text, .info-text .small, .note .info-text { font-size: 1em; margin-top: 3px; }
 .page-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
 .page-tab { padding: 7px 12px; margin-bottom: -1px; border-bottom: 2px solid transparent; color: var(--muted); white-space: nowrap; }
 .page-tab:hover { color: var(--text); }
@@ -783,3 +783,26 @@ div.math[data-math] { margin: .6em 0; text-align: center; }
 .picture-view .modal-body { min-height: 0; gap: 10px; }
 .picture-large { display: block; max-width: 100%; max-height: calc(100vh - 210px); margin: 0 auto; border-radius: min(var(--r), 12px); }
 .picture-view .row .small { margin-left: auto; }
+
+/* ---- M13: a ⋯ menu with no room below opens upwards (chat.js placeMenu) ---- */
+.menu-pop.up { top: auto; bottom: calc(100% + 4px); }
+
+/* ---- M13: the quick-jump box (Ctrl+K). Shared, tokens only. ---- */
+kbd { display: inline-block; padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--surface2); color: var(--muted); font: .85em var(--ui); line-height: 1.5; white-space: nowrap; }
+.btn kbd { margin-left: 2px; }
+.modal-back.jump-back { place-items: start center; padding-top: min(10vh, 90px); }
+.modal.jump { width: min(640px, 100%); max-height: min(84vh, 740px); overflow: hidden; }
+.jump-box { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 14px; color: var(--muted); border-bottom: 1px solid var(--line); }
+.jump-box .field { border: 0; background: none; padding: 4px 0; font-size: 1.1em; }
+.jump-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 6px; }
+.jump-list > .small { margin: 0; padding: 10px; }
+.jump-item { flex: none; display: flex; align-items: center; gap: 12px; width: 100%; padding: 7px 10px; text-align: left; color: var(--text); border: 1px solid transparent; border-radius: min(var(--r), 10px); }
+.jump-item:hover { background: var(--surface2); }
+.jump-item.on { background: var(--surface2); border-color: var(--accent); }
+.jump-text { flex: 1; min-width: 0; display: block; }
+.jump-title, .jump-where { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jump-title { font-weight: 600; }
+.jump-where { color: var(--muted); font-size: .88em; }
+.jump-where mark { background: color-mix(in srgb, var(--accent) 24%, transparent); color: var(--text); border-radius: 3px; padding: 0 2px; }
+.jump-item .chip { flex: none; }
+.jump-foot { flex: none; margin: 0; padding: 8px 14px; border-top: 1px solid var(--line); }

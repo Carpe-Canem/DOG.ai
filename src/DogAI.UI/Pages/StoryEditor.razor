@@ -51,7 +51,7 @@
 
             <div class="card-text builder">
                 <label class="field-block">
-                    <span class="field-label">Let the model draft it <span class="small">Describe the story in a sentence or two. The loaded model fills in the story bible below@(_s.Kind == StoryKind.Authored ? " and an outline" : "") for you to change before saving.@(Cast.Count > 0 ? $" It builds the story around {CastNames}, so you can leave this empty." : "")</span></span>
+                    <span class="field-label">Let the model draft it <span class="small">A sentence or two about the story; the loaded model fills in the story bible@(_s.Kind == StoryKind.Authored ? " and an outline" : "") for you to change.@(Cast.Count > 0 ? $" It is built around {CastNames}, so this can stay empty." : "")</span></span>
                     <textarea class="field" rows="2" @bind="_idea" @bind:event="oninput" disabled="@(_draftCts is not null)"
                               placeholder="For example: a lighthouse keeper's daughter finds a door under the lamp room that was not there yesterday"></textarea>
                 </label>
@@ -114,7 +114,7 @@
 
         <div class="editor-tab" data-tab="@EditorTabs.Cast" hidden="@(_tab != EditorTabs.Cast)">
             <div class="field-block">
-                <div class="field-label">Character cards <span class="small">People from your Characters list. The model is given each card with every passage, and the card's lore when it comes up. Editing a card later changes the story too.</span></div>
+                <div class="field-label">Character cards <span class="small">People from your Characters list, given to the model with every passage.<InfoButton About="character cards in a story">A card's lore is sent when it comes up. Editing a card later changes the story too.</InfoButton></span></div>
                 @foreach (var link in _s.Characters)
                 {
                     var character = Card(link.CharacterId);
@@ -188,7 +188,7 @@
             @if (_s.Kind == StoryKind.Authored)
             {
                 <div class="field-block">
-                    <div class="field-label">Outline <span class="small">The chapters in order, each with what happens in it. The model writes towards the current chapter's plan and does not run ahead.</span></div>
+                    <div class="field-label">Outline <span class="small">Chapters in order; the model writes towards the current one and does not run ahead.</span></div>
                     @for (var i = 0; i < _s.Outline.Count; i++)
                     {
                         var index = i;

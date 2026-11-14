@@ -46,8 +46,8 @@
     <div class="notice bad"><span>@_error</span></div>
 }
 <p class="note">
-    Voice models are in <b>@(_folder ?? "the models folder")</b>. Windows’ own voices always work without one.
-    Choose the default voice, microphone and speakers in <a href="settings/voice">Settings › Voice</a>, and a voice for each character in its editor.
+    Voice models are in <b>@(_folder ?? "the models folder")</b>; Windows’ own voices work without one.
+    Default voice, microphone and speakers: <a href="settings/voice">Settings › Voice</a>.<InfoButton About="voices">A character’s own voice is chosen in its editor (Looks and voice), and a story’s narrator in the story’s setup (World and style).</InfoButton>
 </p>
 
 @if (_confirmDelete is { } doomed)

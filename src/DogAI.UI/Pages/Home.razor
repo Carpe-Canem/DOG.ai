@@ -2,13 +2,14 @@
 @implements IDisposable
 @inject AppearanceState Appearance
 @inject NavigationManager Nav
+@inject EngineManager Engine
 
 @* Only Playhouse has a home screen. The other skins open straight into General. *@
 @if (Appearance.Skin == Skins.Playhouse)
 {
     <div class="home-inner">
         <h1>@Greeting</h1>
-        <p class="sub">No model is loaded yet. Get one from Models to begin.</p>
+        <p class="sub" id="home-model">@ModelLine</p>
         <div class="tiles">
             @foreach (var mode in Modes.All)
             {
@@ -35,9 +36,20 @@
         }
     }
 
+    /// <summary>What the home screen says about the chat model: the truth as it is now, not a fixed line.</summary>
+    private string ModelLine => Engine.State switch
+    {
+        EngineState.Loading => $"Loading {Engine.ModelName}…",
+        EngineState.Ready or EngineState.Resting => $"{Engine.ModelName} is ready.",
+        _ => "No model is loaded yet. A mode loads its default model when you open it; get models in Models.",
+    };
+
+    private void OnEngineChanged() => InvokeAsync(StateHasChanged);
+
     protected override void OnInitialized()
     {
         Appearance.Changed += OnAppearanceChanged;
+        Engine.Changed += OnEngineChanged;
         RedirectIfNoHome();
     }
 
@@ -49,5 +61,9 @@
             Nav.NavigateTo("general", replace: true);
     }
 
-    public void Dispose() => Appearance.Changed -= OnAppearanceChanged;
+    public void Dispose()
+    {
+        Appearance.Changed -= OnAppearanceChanged;
+        Engine.Changed -= OnEngineChanged;
+    }
 }

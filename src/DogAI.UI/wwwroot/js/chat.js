@@ -153,6 +153,68 @@ export function unwatchLockKey(dotnet) {
   if (lockTarget === dotnet) lockTarget = null;
 }
 
+// Ctrl+K anywhere in DOG.ai opens the quick-jump box (JumpBox), and closes it again. While the box is open the
+// arrow keys choose a result, so they must not also move the caret in its text field.
+let jumpTarget = null;
+let jumpCameFrom = null;
+export function watchJumpKey(dotnet) {
+  jumpTarget = dotnet;
+  if (document._dogJumpKey) return;
+  document._dogJumpKey = true;
+  document.addEventListener('keydown', e => {
+    if (!jumpTarget) return;
+    if (e.target instanceof Element && e.target.id === 'jump-input' && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      return;
+    }
+    if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey || e.repeat) return;
+    if (e.key !== 'k' && e.key !== 'K') return;
+    e.preventDefault();
+    e.stopPropagation();
+    jumpTarget.invokeMethodAsync('Toggle');
+  }, true);
+}
+
+export function unwatchJumpKey(dotnet) {
+  if (jumpTarget === dotnet) jumpTarget = null;
+}
+
+// A dialog that is open (the picture maker, a confirmation) is answered first: the box does not open over it.
+export function jumpAllowed() {
+  return !document.querySelector('.modal-back:not(.jump-back)');
+}
+
+// Remembers where typing was when the box opened, and puts it back when the box is closed without a choice.
+export function jumpOpened(input) {
+  if (!(document.activeElement instanceof HTMLElement) || document.activeElement.id !== 'jump-input') jumpCameFrom = document.activeElement;
+  input?.focus();
+}
+
+export function jumpClosed(restore) {
+  const from = jumpCameFrom;
+  jumpCameFrom = null;
+  if (restore && from instanceof HTMLElement && from.isConnected) from.focus();
+}
+
+export function showJumpChoice() {
+  document.querySelector('.jump-item.on')?.scrollIntoView({ block: 'nearest' });
+}
+
+// A "⋯" menu opens below its button. When that would run past the bottom of the part of the page that scrolls (the
+// last card of a list), and there is room above the button, it opens upwards instead.
+export function placeMenu(pop) {
+  if (!(pop instanceof HTMLElement)) return;
+  pop.classList.remove('up');
+  let box = pop.parentElement;
+  while (box && box !== document.body && !/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
+  const edge = box && box !== document.body ? box.getBoundingClientRect() : { top: 0, bottom: innerHeight };
+  const bottom = Math.min(edge.bottom, innerHeight);
+  const top = Math.max(edge.top, 0);
+  const menu = pop.getBoundingClientRect();
+  const button = pop.parentElement.getBoundingClientRect();
+  if (menu.bottom > bottom - 4 && button.top - menu.height - 4 >= top) pop.classList.add('up');
+}
+
 // Prints one element only (the recovery key): everything else is hidden while the print dialog is open.
 export function printOnly(selector) {
   const target = document.querySelector(selector);

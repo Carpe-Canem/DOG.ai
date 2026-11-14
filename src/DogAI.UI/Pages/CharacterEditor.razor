@@ -33,7 +33,7 @@
         {
             <div class="card-text builder">
                 <label class="field-block">
-                    <span class="field-label">Let the model draft it <span class="small">Describe the character in a sentence or two. The loaded model fills in the card below for you to change before saving.</span></span>
+                    <span class="field-label">Let the model draft it <span class="small">A sentence or two about the character; the loaded model fills in the card for you to change.</span></span>
                     <textarea class="field" rows="2" @bind="_idea" @bind:event="oninput" disabled="@(_draftCts is not null)"
                               placeholder="For example: a retired sea captain who runs a lighthouse café and hides a smuggling past"></textarea>
                 </label>

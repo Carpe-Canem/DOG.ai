@@ -57,37 +57,46 @@
               Items="@(Group.Places.Select(p => (p.Id, p.Title)).ToList())" Href="@(id => ModelsPlaces.Address(id))" />
 }
 
-@switch (Place.Id)
+@* Where fit is judged, nothing is listed until this PC has been measured (a moment, once per run): judged against
+   nothing, every model would read "Too large for this PC". *@
+@if (ShowsHardware && !Ctx.Measured)
 {
-    case ModelsPlaces.Browse when Repo is { Length: > 0 } repo:
-        <RepoView Repo="@repo" Installed="_installed" />
-        break;
-    case ModelsPlaces.Browse:
-        <BrowseTab />
-        break;
-    case ModelsPlaces.GetPictures:
-        <PictureDownloads />
-        break;
-    case ModelsPlaces.GetVoice:
-        <VoiceDownloads />
-        break;
-    case ModelsPlaces.Library:
-        <LibraryTab Changed="ScanAsync" />
-        break;
-    case ModelsPlaces.Pictures:
-        <ImagesTab Part="@PicturePart" />
-        break;
-    case ModelsPlaces.Voice:
-        <VoiceTab />
-        break;
-    case ModelsPlaces.Engines:
-        <EngineTab />
-        break;
-    default:
-        @* The side panel has the hardware; below 1050 px it is hidden, so the same facts show here instead. *@
-        <div class="hw when-no-aside">@foreach (var chip in HardwareChips) {<span class="chip">@chip</span>}</div>
-        <RecommendedTab Installed="_installed" />
-        break;
+    <p class="note" id="models-measuring">Measuring this PC…</p>
+}
+else
+{
+    @switch (Place.Id)
+    {
+        case ModelsPlaces.Browse when Repo is { Length: > 0 } repo:
+            <RepoView Repo="@repo" Installed="_installed" />
+            break;
+        case ModelsPlaces.Browse:
+            <BrowseTab />
+            break;
+        case ModelsPlaces.GetPictures:
+            <PictureDownloads />
+            break;
+        case ModelsPlaces.GetVoice:
+            <VoiceDownloads />
+            break;
+        case ModelsPlaces.Library:
+            <LibraryTab Changed="ScanAsync" />
+            break;
+        case ModelsPlaces.Pictures:
+            <ImagesTab Part="@PicturePart" />
+            break;
+        case ModelsPlaces.Voice:
+            <VoiceTab />
+            break;
+        case ModelsPlaces.Engines:
+            <EngineTab />
+            break;
+        default:
+            @* The side panel has the hardware; below 1050 px it is hidden, so the same facts show here instead. *@
+            <div class="hw when-no-aside">@foreach (var chip in HardwareChips) {<span class="chip">@chip</span>}</div>
+            <RecommendedTab Installed="_installed" />
+            break;
+    }
 }
 
 @if (ShowsHardware || ShowsCard || ShowsConnection)
