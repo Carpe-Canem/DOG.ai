@@ -90,6 +90,8 @@ public sealed class LockedDataTests : IDisposable
         var files = Directory.Exists(path) ? Directory.GetFiles(path, "*", SearchOption.AllDirectories) : [path];
         return files.Any(file =>
         {
+            // SQLite removes its log files when the last connection closes; a file that is gone holds nothing.
+            if (!File.Exists(file)) return false;
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var bytes = new byte[stream.Length];
             stream.ReadExactly(bytes);

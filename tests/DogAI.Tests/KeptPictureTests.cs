@@ -165,6 +165,8 @@ public sealed class KeptPictureTests : IDisposable
         var files = Directory.Exists(path) ? Directory.GetFiles(path, "*", SearchOption.AllDirectories) : [path];
         return files.Any(file =>
         {
+            // SQLite removes its log files when the last connection closes; a file that is gone holds nothing.
+            if (!File.Exists(file)) return false;
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var all = new byte[stream.Length];
             stream.ReadExactly(all);
@@ -473,7 +475,6 @@ public sealed class KeptPictureTests : IDisposable
         {
             AssertSame(original, (await Store(services).GetAsync(id))!);
             var later = await Store(services).AddAsync(Sample(PictureOwners.Character, 3, seed: 9));
-            Assert.True(File.Exists(paths.DatabaseFile + "-wal"));
             Assert.False(HoldsPicture(paths.Root));
             Assert.Equal(Sample(seed: 9).Image, await Store(services).ImageAsync(later.Id));
             await Store(services).DeleteAsync(later.Id);

@@ -14,9 +14,12 @@ public static class DataServices
     public static IServiceCollection AddDogData(this IServiceCollection services)
     {
         // Locked data (M8): the app registers a DatabaseKey once the owner has unlocked; without one the database is plain.
+        // What is deleted leaves the database files too: see DatabaseTidy.
+        services.AddSingleton(sp => new DatabaseTidy(sp.GetRequiredService<AppPaths>(), sp.GetService<DogAI.Core.Privacy.DatabaseKey>()));
         services.AddDbContextFactory<DogDbContext>((sp, o) =>
             o.UseSqlite(DatabaseLock.ConnectionString(sp.GetRequiredService<AppPaths>().DatabaseFile,
-                sp.GetService<DogAI.Core.Privacy.DatabaseKey>()?.Bytes, pooling: true)));
+                    sp.GetService<DogAI.Core.Privacy.DatabaseKey>()?.Bytes, pooling: true))
+                .AddInterceptors(new DeleteWatcher(sp.GetRequiredService<DatabaseTidy>())));
         services.AddSingleton<ISettingsStore, SqliteSettingsStore>();
         services.AddSingleton<IChatStore, SqliteChatStore>();
         services.AddSingleton<DogAI.Core.Search.ISearchStore, SqliteSearchStore>();
@@ -36,6 +39,9 @@ public static class DataServices
         var factory = services.GetRequiredService<IDbContextFactory<DogDbContext>>();
         await using var db = await factory.CreateDbContextAsync(ct);
         await db.Database.MigrateAsync(ct);
+        // An update can rewrite stored data (the search index, for one); the log file should not keep the old pages
+        // for as long as DOG.ai then runs.
+        services.GetService<DatabaseTidy>()?.Deleted();
     }
 }
 

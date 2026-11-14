@@ -132,6 +132,13 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - Log: only `ImageServer.Logged` is written to the log (`picture engine: …`). It passes through `PictureLogFilter` (Core): status lines only, and none sharing a word with a prompt sent in the last ten minutes. `ImageServer.Output` is everything the engine prints and must never be logged. Anything new that sends text to the picture engine must tell the filter first (`Sending`).
 - For checks: `$env:DOGAI_TEST_PICTURE_WORDS` adds its words to the test picture's prompt and shows `#keep-picture`, `#keep-note` and `#kept-pictures` (rows `[data-picture]` with `[data-act=again]` and `[data-act=remove]`) under the test picture.
 
+## How removed data leaves the disk
+
+- Deleted rows must not stay readable in a plain database. Three things do it: the SQLite build is compiled with secure delete (deleted content is zeroed; `RemovedDataTests` pins it, so check that test after any SQLite package change); the search index has FTS5's own `secure-delete` on (`SearchWipe` migration); and `DatabaseTidy` (Data) empties the `-wal` file shortly after any delete and once after each start.
+- `DeleteWatcher` (an EF command interceptor added in `AddDogData`) tells `DatabaseTidy` about every command whose text contains DELETE. So delete through EF (`ExecuteDeleteAsync`, as every store does); a delete on a hand-made `SqliteConnection` must call `DatabaseTidy.Deleted()` itself.
+- A new FTS5 table needs `INSERT INTO <table>(<table>, rank) VALUES('secure-delete', 1)` in its migration.
+- Tests that search a data folder's bytes wait with `DatabaseTidy.SettledAsync()` and must tolerate `-wal`/`-shm` files vanishing (`SqliteConnection.ClearAllPools()` in another test class closes everyone's pooled connections).
+
 ## How locked data works (M8)
 
 - **SQLite build:** `SQLite3MC.PCLRaw.bundle` (SQLite3 Multiple Ciphers, ChaCha20-Poly1305) with `Microsoft.EntityFrameworkCore.Sqlite.Core`; never add the plain `Microsoft.EntityFrameworkCore.Sqlite` or `Microsoft.Data.Sqlite` package (it would bring a second, plain SQLite). A plain database works on it exactly as before.
