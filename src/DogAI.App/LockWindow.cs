@@ -451,7 +451,7 @@ public sealed class LockWindow : Window
     private void CancelTurningOn()
     {
         var answer = MessageBox.Show(this,
-            "Your data has not been encrypted yet, so nothing is lost. The password you chose is forgotten and DOG.ai opens as before. You can turn the lock on again in Settings.",
+            "Your data has not been encrypted yet, so nothing is lost. The password you chose is forgotten and DOG.ai opens as before. You can turn the lock on again in Settings › Privacy.",
             "Don't lock my data after all?", MessageBoxButton.OKCancel, MessageBoxImage.Question);
         if (answer != MessageBoxResult.OK) return;
         if (!DataLock.CancelTurningOn(_paths)) return;
