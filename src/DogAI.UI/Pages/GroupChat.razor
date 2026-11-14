@@ -32,7 +32,13 @@
                 <p>Several characters in one scene</p>
             </div>
         }
-        <ModelPicker Mode="characters" />
+        <div class="head-tools">
+            <ModelPicker Mode="characters" />
+            @if (_conversation.Id != 0)
+            {
+                <AsideToggle Place="@ChatPanels.Group" />
+            }
+        </div>
     </div>
 </SectionContent>
 
@@ -124,9 +130,8 @@ else
                       Placeholder="@(Members.Count == 0 ? "Add a member in the side panel first." : $"Message {Everyone}. Enter sends, Shift+Enter adds a line.")" />
     </SectionContent>
 
-    <SectionContent SectionName="aside">
-        <div class="panel">
-            <h4>Members</h4>
+    <AsideRegion Place="@ChatPanels.Group">
+        <SidePanel Place="@ChatPanels.Group" Panel="@ChatPanels.Members" Title="Members" Summary="@(Members.Count == 0 ? "None" : Everyone)">
             @for (var i = 0; i < _members.Count; i++)
             {
                 var index = i;
@@ -169,9 +174,8 @@ else
                 </div>
             }
             <p class="small">Removing someone keeps what they already said in the chat.</p>
-        </div>
-        <div class="panel">
-            <h4>Turn order</h4>
+        </SidePanel>
+        <SidePanel Place="@ChatPanels.Group" Panel="@ChatPanels.TurnOrder" Title="Turn order" Summary="@OrderNames[_conversation.TurnOrder].Short">
             <select class="field" aria-label="Turn order" value="@((int)_conversation.TurnOrder)" @onchange="SetOrderAsync">
                 @foreach (var (order, text) in OrderNames)
                 {
@@ -179,11 +183,10 @@ else
                 }
             </select>
             <p class="small">@OrderNames[_conversation.TurnOrder].Long</p>
-        </div>
+        </SidePanel>
         <RoleplayPanels Conversation="@_conversation" Path="@_path" Personas="@_personas" Persona="@_persona" PersonaChanged="p => _persona = p"
                         CharacterName="@Everyone" Group="true" Streaming="@Streaming" />
-        <div class="panel">
-            <h4>This chat</h4>
+        <SidePanel Place="@ChatPanels.Group" Panel="@ChatPanels.ThisChat" Title="This chat">
             <input class="field" aria-label="Chat name" value="@_conversation.Title" @onchange="RenameAsync" />
             <div class="row">
                 <button class="btn" disabled="@(_busy || Members.Count == 0)" @onclick="RestartAsync" title="A fresh chat with the same members">New chat</button>
@@ -197,8 +200,8 @@ else
                     <button class="btn" @onclick="() => _confirmDelete = true">Delete chat</button>
                 }
             </div>
-        </div>
-    </SectionContent>
+        </SidePanel>
+    </AsideRegion>
 }
 
 @code {

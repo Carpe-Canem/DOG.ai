@@ -1,0 +1,18 @@
+@* Fills the "aside" region with a chat's or story's side panels, unless the owner hid the side panel (AsideToggle).
+   Hidden, the region is not filled at all, so it collapses and the chat gets the room. *@
+@implements IDisposable
+@inject InterfaceMemory Memory
+
+@if (Memory.IsOpen(ChatPanels.AsideId(Place)))
+{
+    <SectionContent SectionName="aside">@ChildContent</SectionContent>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Place { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    protected override void OnInitialized() => Memory.Changed += Refresh;
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Memory.Changed -= Refresh;
+}

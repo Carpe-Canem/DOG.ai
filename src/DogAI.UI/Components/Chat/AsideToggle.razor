@@ -1,0 +1,20 @@
+@* The button in a chat's or story's heading that hides or shows its whole side panel (remembered per place).
+   Not shown below 1050 px, where the side panel is hidden anyway. *@
+@implements IDisposable
+@inject InterfaceMemory Memory
+
+<button type="button" class="btn icon aside-toggle" id="aside-toggle" aria-pressed="@(Shown ? "false" : "true")"
+        aria-label="@(Shown ? "Hide the side panel" : "Show the side panel")" title="@(Shown ? "Hide the side panel" : "Show the side panel")"
+        @onclick="ToggleAsync"><Icon Name="sidebar" Size="18" /></button>
+
+@code {
+    [Parameter, EditorRequired] public string Place { get; set; } = "";
+
+    private bool Shown => Memory.IsOpen(ChatPanels.AsideId(Place));
+
+    private Task ToggleAsync() => Memory.SetOpenAsync(ChatPanels.AsideId(Place), !Shown);
+
+    protected override void OnInitialized() => Memory.Changed += Refresh;
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Memory.Changed -= Refresh;
+}

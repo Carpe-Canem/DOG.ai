@@ -2,8 +2,7 @@
 @implements IDisposable
 @inject PresetCatalog Presets
 
-<div class="panel">
-    <h4>Style</h4>
+<SidePanel Place="@Place" Panel="@ChatPanels.Style" Title="Style" Summary="@Presets.Get(Value).Name">
     <select class="field" aria-label="Style" value="@Presets.Get(Value).Id" @onchange="PickAsync">
         @foreach (var preset in Presets.All)
         {
@@ -12,7 +11,7 @@
     </select>
     <p class="small">@Presets.Get(Value).Description</p>
     <div class="row"><button class="btn" @onclick="() => _editing = true">Edit styles…</button></div>
-</div>
+</SidePanel>
 
 @if (_editing)
 {
@@ -20,6 +19,8 @@
 }
 
 @code {
+    /// <summary>Which side panel this is in (ChatPanels): each place remembers its own open or closed.</summary>
+    [Parameter, EditorRequired] public string Place { get; set; } = "";
     [Parameter] public string? Value { get; set; }
     [Parameter] public EventCallback<string> ValueChanged { get; set; }
 

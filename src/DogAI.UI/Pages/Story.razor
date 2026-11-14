@@ -19,7 +19,13 @@
             <h2>@(_story is null ? "Story" : _conversation.Title)</h2>
             <p>@(_story is null ? "Authored stories and interactive adventures" : Interactive ? "Interactive adventure" : "Written story")</p>
         </div>
-        <ModelPicker Mode="story" />
+        <div class="head-tools">
+            <ModelPicker Mode="story" />
+            @if (_story is not null)
+            {
+                <AsideToggle Place="@ChatPanels.Story" />
+            }
+        </div>
     </div>
 </SectionContent>
 
@@ -108,9 +114,8 @@ else
         }
     </SectionContent>
 
-    <SectionContent SectionName="aside">
-        <div class="panel">
-            <h4>Story</h4>
+    <AsideRegion Place="@ChatPanels.Story">
+        <SidePanel Place="@ChatPanels.Story" Panel="@ChatPanels.StoryInfo" Title="Story" Summary="@(Interactive ? "Interactive adventure" : "Written story")">
             @if (_story.Bible.Premise.Trim().Length > 0)
             {
                 <p class="small premise">@_story.Bible.Premise</p>
@@ -132,15 +137,14 @@ else
                     <button class="btn" disabled="@(_tree.Count == 0)" @onclick="() => _map = true" title="Every path taken so far; go back to any point">Branch map</button>
                 }
             </div>
-        </div>
+        </SidePanel>
         @if (Interactive && _story.TrackState)
         {
             <StoryStatePanel State="@CurrentState" Disabled="@Chat.IsBusy" OnSave="SaveStateAsync" />
         }
         @if (!Interactive && _story.Outline.Count > 0)
         {
-            <div class="panel">
-                <h4>Outline</h4>
+            <SidePanel Place="@ChatPanels.Story" Panel="@ChatPanels.Outline" Title="Outline" Summary="@ChatPanels.OutlineSummary(CurrentChapter, _story.Outline.Count)">
                 <ol class="outline">
                     @for (var i = 0; i < _story.Outline.Count; i++)
                     {
@@ -148,14 +152,13 @@ else
                         <li class="@(i == CurrentChapter && _path.Count > 0 ? "now" : "")" title="@chapter.Plan">@(chapter.Title.Trim().Length > 0 ? chapter.Title : $"Chapter {i + 1}")</li>
                     }
                 </ol>
-            </div>
+            </SidePanel>
         }
-        <StylePanel Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />
-        <MemoryPanel Conversation="@_conversation" Path="@_path" Streaming="@Streaming" Label="Summarise earlier passages when the story outgrows the model's context"
+        <StylePanel Place="@ChatPanels.Story" Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />
+        <MemoryPanel Place="@ChatPanels.Story" Conversation="@_conversation" Path="@_path" Streaming="@Streaming" Label="Summarise earlier passages when the story outgrows the model's context"
                      RecallLabel="Also find earlier passages that matter to what happens next" />
-        <DocumentsPanel Conversation="@_conversation" Kind="story" />
-        <div class="panel">
-            <h4>Save a copy</h4>
+        <DocumentsPanel Place="@ChatPanels.Story" Conversation="@_conversation" Kind="story" />
+        <SidePanel Place="@ChatPanels.Story" Panel="@ChatPanels.SaveCopy" Title="Save a copy" Summary="Markdown, web, EPUB">
             <p class="small">The branch on screen, as a file for reading elsewhere.</p>
             <div class="row">
                 <button class="btn" disabled="@(_path.Count == 0)" @onclick="() => ExportAsync(ExportKind.Markdown)">Markdown</button>
@@ -166,9 +169,8 @@ else
             {
                 <p class="small">Saved to @_saved</p>
             }
-        </div>
-        <div class="panel">
-            <h4>This story</h4>
+        </SidePanel>
+        <SidePanel Place="@ChatPanels.Story" Panel="@ChatPanels.ThisChat" Title="This story" Summary="Name, delete">
             <input class="field" aria-label="Story name" value="@_conversation.Title" @onchange="RenameAsync" />
             <div class="row">
                 @if (_confirmDelete)
@@ -181,8 +183,8 @@ else
                     <button class="btn" @onclick="() => _confirmDelete = true">Delete story</button>
                 }
             </div>
-        </div>
-    </SectionContent>
+        </SidePanel>
+    </AsideRegion>
 
     @if (_map)
     {

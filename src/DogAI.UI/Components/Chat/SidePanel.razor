@@ -1,0 +1,17 @@
+@* One side panel of a chat or story that folds away to its heading and a one-line summary (M12). The id, and
+   whether it starts open, come from ChatPanels by place and panel, so each place remembers its own. *@
+
+<Fold Id="@ChatPanels.Id(Place, Panel)" Title="@Title" Summary="@Summary" OpenByDefault="@ChatPanels.OpensByDefault(Place, Panel)"
+      Level="4" Class="@($"panel side-panel {Class}")">@ChildContent</Fold>
+
+@code {
+    /// <summary>ChatPanels.General, Character, Group or Story.</summary>
+    [Parameter, EditorRequired] public string Place { get; set; } = "";
+    /// <summary>One of the panel names in ChatPanels.</summary>
+    [Parameter, EditorRequired] public string Panel { get; set; } = "";
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    /// <summary>Shown beside the heading while the panel is closed.</summary>
+    [Parameter] public string? Summary { get; set; }
+    [Parameter] public string Class { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

@@ -332,7 +332,7 @@ label.check { display: flex; align-items: center; gap: 8px; font-weight: 400; }
 .split-body { display: grid; gap: 12px; align-content: start; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
 .form-grid .wide-field { grid-column: 1 / -1; }
-@media (max-width: 760px) { .profile-top, .editor-top { flex-direction: column; } .split, .form-grid, .two { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .profile-top, .editor-top { flex-direction: column; } .editor-top { align-items: stretch; } .split, .form-grid, .two { grid-template-columns: 1fr; } }
 
 /* Group chats */
 .list-head.list-sub { margin-top: 18px; }
@@ -523,6 +523,22 @@ button.cite:hover { border-color: var(--accent); }
 .fold-name { flex: none; font-size: .78em; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .fold-sum { min-width: 0; font-size: .85em; font-weight: 400; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fold.open .fold-sum { display: none; }
+/* Side panels of chats and stories (M12): a Fold with Class="panel" and a level-4 heading. */
+.fold.panel { max-width: none; }
+.fold.panel + .fold.panel { margin-top: 0; }
+.fold.panel > .fold-title, .skin-fireside .fold.panel > .fold-title { margin: 0; font: inherit; text-transform: none; letter-spacing: 0; color: inherit; }
+.fold.panel.open > .fold-title { margin-bottom: 8px; }
+.fold.panel.closed { margin-bottom: 10px; }
+.skin-fireside .fold.panel.closed { padding-top: 6px; }
+.head-tools { display: flex; align-items: center; gap: 8px; flex: none; min-width: 0; }
+@media (max-width: 1050px) { .aside-toggle { display: none !important; } }
+/* Character and story editors in tabs (M12): every tab stays in the form, hidden; the Save bar stays in view. */
+.editor-tabs { margin-bottom: 0; }
+.editor-tab { display: grid; gap: 14px; align-content: start; }
+/* The bar reaches down over the main area's own bottom padding (20 px), so nothing scrolls by underneath it. */
+.editor-foot.save-bar { position: sticky; bottom: -20px; z-index: 2; margin-bottom: -20px; padding: 10px 0 28px; background: var(--bg); border-top: 1px solid var(--line); }
+.save-bar .notice { flex-basis: 100%; margin: 0; }
+.skin-playhouse .editor-foot.save-bar { background: var(--surface); }
 .more-menu { position: relative; display: inline-flex; }
 .more-btn { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; color: var(--muted); }
 .more-btn:hover, .more-menu.open .more-btn { color: var(--text); }

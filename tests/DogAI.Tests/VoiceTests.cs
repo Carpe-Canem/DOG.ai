@@ -1,3 +1,4 @@
+using DogAI.Core.Models;
 using DogAI.Core.Settings;
 using DogAI.Core.Voice;
 using DogAI.Engine.Voice;
@@ -395,6 +396,21 @@ public sealed class VoiceFlowTests
 
     private static float[] Tone(double seconds, double amplitude) =>
         Enumerable.Range(0, (int)(seconds * 16000)).Select(i => (float)(amplitude * Math.Sin(2 * Math.PI * 220 * i / 16000))).ToArray();
+
+    /// <summary>M12: the chat box shows the microphone and hands-free buttons only when there is a model to listen with.</summary>
+    [Fact]
+    public async Task Listening_is_offered_only_with_a_speech_model()
+    {
+        var ears = new FakeEars("hello") { Model = null };
+        using var dictation = new Dictation(new FakeMic(), ears, new MemorySettings());
+        Assert.False(await dictation.CanListenAsync());
+        await dictation.StartAsync();
+        Assert.False(dictation.IsOn);
+        Assert.Contains(ModelsPlaces.GetVoiceName, dictation.Problem);
+
+        ears.Model = "ggml-base.en.bin";   // a download finished
+        Assert.True(await dictation.CanListenAsync());
+    }
 
     [Fact]
     public async Task Push_to_talk_writes_down_what_was_said_without_sending()

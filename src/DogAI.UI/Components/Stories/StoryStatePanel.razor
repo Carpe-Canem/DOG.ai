@@ -1,8 +1,7 @@
 @* The tracked state of an interactive story: where the main character is, what they carry, their stats and
    the facts to remember. The model updates it after each passage; anything here can be corrected by hand. *@
 
-<div class="panel">
-    <h4>State</h4>
+<SidePanel Place="@ChatPanels.Story" Panel="@ChatPanels.State" Title="State" Summary="@(State is null ? "Empty" : ChatPanels.TextSummary(State.Location))">
     @if (State is null)
     {
         <p class="small">Location, inventory, stats and facts appear here after the first passage. The model keeps them up to date and you can correct them.</p>
@@ -26,7 +25,7 @@
         </div>
         <p class="small">Sent to the model with each of your actions. Going back to an earlier point brings back the state from then.</p>
     }
-</div>
+</SidePanel>
 
 @code {
     /// <summary>The state after the newest passage on screen; null before there is one.</summary>

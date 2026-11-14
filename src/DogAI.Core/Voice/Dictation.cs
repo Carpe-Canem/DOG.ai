@@ -85,6 +85,13 @@ public sealed class Dictation : IDisposable
         if (!IsOn) ForOtherPrograms = false;
     }
 
+    /// <summary>
+    /// Whether there is a speech recognition model to listen with. The chat box shows its microphone and hands-free
+    /// buttons only then (M12); asked when a chat opens and again when a voice download finishes, never per render.
+    /// </summary>
+    public async Task<bool> CanListenAsync(CancellationToken ct = default) =>
+        await _recognizer.ModelPathAsync(ct).ConfigureAwait(false) is not null;
+
     /// <summary>Hands-free: listens until <see cref="Stop"/>, sending each thing said.</summary>
     public Task StartHandsFreeAsync() => BeginAsync(handsFree: true);
 

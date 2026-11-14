@@ -3,8 +3,7 @@
 @inject IChatStore Store
 @inject ChatService Chat
 
-<div class="panel">
-    <h4>Memory</h4>
+<SidePanel Place="@Place" Panel="@ChatPanels.Memory" Title="Memory" Summary="@ChatPanels.MemorySummary(Conversation.MemoryEnabled, Conversation.Summary.Length > 0)">
     <label class="check"><input type="checkbox" checked="@Conversation.MemoryEnabled" @onchange="SetMemoryAsync" /> @Label</label>
     @if (Conversation.MemoryEnabled)
     {
@@ -21,9 +20,11 @@
             <div class="row"><button class="btn" disabled="@Streaming" @onclick="ForgetSummaryAsync" title="Write a fresh summary when one is next needed">Forget summary</button></div>
         }
     }
-</div>
+</SidePanel>
 
 @code {
+    /// <summary>Which side panel this is in (ChatPanels).</summary>
+    [Parameter, EditorRequired] public string Place { get; set; } = "";
     [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();
     [Parameter] public IReadOnlyList<ChatMessage> Path { get; set; } = [];
 

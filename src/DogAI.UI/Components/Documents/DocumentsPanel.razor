@@ -4,8 +4,7 @@
 @inject DocumentLibrary Library
 @inject IDesktopShell Desktop
 
-<div class="panel docs-panel">
-    <h4>@(Kind == "general" ? "Documents" : "Reference documents")</h4>
+<SidePanel Place="@Place" Panel="@ChatPanels.Documents" Title="@(Kind == "general" ? "Documents" : "Reference documents")" Summary="@Summary" Class="docs-panel">
     <p class="small">@Explain</p>
     @if (_files.Count > 0)
     {
@@ -48,9 +47,12 @@
     {
         <div class="notice bad"><span>@trouble</span></div>
     }
-</div>
+</SidePanel>
 
 @code {
+    /// <summary>Which side panel this is in (ChatPanels).</summary>
+    [Parameter, EditorRequired] public string Place { get; set; } = "";
+
     [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();
 
     /// <summary>"general", "roleplay" or "story": changes the wording.</summary>
@@ -67,6 +69,10 @@
     private string? _model;
     private bool _adding;
     private long _loadedFor = -1;
+
+    /// <summary>What a closed panel says: how many files and collections, and when they cannot be searched.</summary>
+    private string Summary => ChatPanels.DocumentsSummary(_files.Count, _attached.Count)
+        + (HasDocuments && (_model is null || Library.Problem is not null) ? " · cannot search" : "");
 
     private bool HasDocuments => _files.Count > 0 || _attached.Count > 0;
 

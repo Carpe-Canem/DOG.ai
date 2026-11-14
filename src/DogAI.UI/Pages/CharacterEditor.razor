@@ -56,112 +56,122 @@
                         }
                         else if (_drafted)
                         {
-                            <span class="small">Drafted. Read it through, change what you like, then create the character.</span>
+                            <span class="small">Drafted into the tabs below. Read them through, change what you like, then create the character.</span>
                         }
                     }
                 </div>
             </div>
         }
-        <div class="editor-top">
-            <div class="picture-pick">
-                @if (Format.PictureUrl("edit", _c.Id, _pictureStamp, _c.Avatar) is { } picture)
-                {
-                    <img class="portrait" src="@picture" alt="" />
-                }
-                else
-                {
-                    <div class="portrait empty-portrait" aria-hidden="true">@(_c.Name.Length > 0 ? _c.Name[..1].ToUpperInvariant() : "?")</div>
-                }
-                <div class="row">
-                    <button class="btn" @onclick="PickPictureAsync">@(_c.Avatar is null ? "Add picture" : "Change")</button>
-                    <button class="btn" id="generate-picture" title="Plan and draw a picture of them with the picture engine" @onclick="() => _making = true">Generate picture</button>
-                    @if (_c.Image is not null)
+        <PageTabs Items="@EditorTabs.Character" Current="@_tab" Selected="t => _tab = t" Label="Parts of the character" Class="editor-tabs" />
+
+        <div class="editor-tab" data-tab="@EditorTabs.Basics" hidden="@(_tab != EditorTabs.Basics)">
+            <div class="editor-top">
+                <div class="picture-pick">
+                    @if (Format.PictureUrl("edit", _c.Id, _pictureStamp, _c.Avatar) is { } picture)
                     {
-                        <button class="btn" @onclick="() => _cropping = true" title="Choose the part shown in lists and chats">Crop</button>
+                        <img class="portrait" src="@picture" alt="" />
                     }
-                    @if (_c.Avatar is not null)
+                    else
                     {
-                        <button class="btn" @onclick="RemovePicture">Remove</button>
+                        <div class="portrait empty-portrait" aria-hidden="true">@(_c.Name.Length > 0 ? _c.Name[..1].ToUpperInvariant() : "?")</div>
                     }
-                </div>
-            </div>
-            <div class="editor-fields">
-                <label>Name<input class="field" @bind="_c.Name" @bind:after="Measure" /></label>
-                <label>Tags<input class="field" placeholder="Separate with commas" @bind="_tags" /></label>
-                <div class="two">
-                    <label>Creator<input class="field" @bind="_c.Creator" /></label>
-                    <label>Version<input class="field" @bind="_c.CharacterVersion" /></label>
-                </div>
-                <label>
-                    Style for new chats
-                    <select class="field" @bind="_presetId">
-                        @foreach (var preset in Presets.All)
+                    <div class="row">
+                        <button class="btn" @onclick="PickPictureAsync">@(_c.Avatar is null ? "Add picture" : "Change")</button>
+                        <button class="btn" id="generate-picture" title="Plan and draw a picture of them with the picture engine" @onclick="() => _making = true">Generate picture</button>
+                        @if (_c.Image is not null)
                         {
-                            <option value="@preset.Id">@preset.Name</option>
+                            <button class="btn" @onclick="() => _cropping = true" title="Choose the part shown in lists and chats">Crop</button>
                         }
-                    </select>
-                </label>
-                <div class="label-like">
-                    Voice for reading replies aloud
-                    <VoicePicker @bind-Value="_c.Voice" Sample="@VoiceSample" />
+                        @if (_c.Avatar is not null)
+                        {
+                            <button class="btn" @onclick="RemovePicture">Remove</button>
+                        }
+                    </div>
+                </div>
+                <div class="editor-fields">
+                    <label>Name<input class="field" id="character-name" @bind="_c.Name" @bind:after="Measure" /></label>
+                    <label>Tags<input class="field" placeholder="Separate with commas" @bind="_tags" /></label>
+                    <div class="two">
+                        <label>Creator<input class="field" @bind="_c.Creator" /></label>
+                        <label>Version<input class="field" @bind="_c.CharacterVersion" /></label>
+                    </div>
+                    <label>
+                        Style for new chats
+                        <select class="field" @bind="_presetId">
+                            @foreach (var preset in Presets.All)
+                            {
+                                <option value="@preset.Id">@preset.Name</option>
+                            }
+                        </select>
+                    </label>
                 </div>
             </div>
         </div>
 
-        <p class="small">Write {{char}} for the character's name and {{user}} for yours; they are filled in during the chat.</p>
-
-        @Area("Description", "Who the character is: looks, background, how they behave. The most important part.", () => _c.Description, v => _c.Description = v, 8)
-        @Area("Personality", "A short summary of their personality.", () => _c.Personality, v => _c.Personality = v, 3)
-        @Area("Scenario", "Where and when the chat takes place, and what is going on.", () => _c.Scenario, v => _c.Scenario = v, 3)
-        @Area("First message", "What the character says to open a chat.", () => _c.FirstMessage, v => _c.FirstMessage = v, 6)
-
-        <div class="field-block">
-            <div class="field-label">Other greetings <span class="small">Alternative opening messages. In a chat, flip through them with the arrows.</span></div>
-            @for (var i = 0; i < _c.AlternateGreetings.Count; i++)
-            {
-                var index = i;
-                <div class="greeting">
-                    <textarea class="field" rows="4" aria-label="@($"Greeting {index + 2}")" value="@_c.AlternateGreetings[index]"
-                              @onchange="e => { _c.AlternateGreetings[index] = e.Value?.ToString() ?? string.Empty; Measure(); }"></textarea>
-                    <button class="btn" @onclick="() => { _c.AlternateGreetings.RemoveAt(index); Measure(); }">Remove</button>
-                </div>
-            }
-            <div class="row"><button class="btn" @onclick="() => _c.AlternateGreetings.Add(string.Empty)">Add a greeting</button></div>
+        <div class="editor-tab" data-tab="@EditorTabs.Personality" hidden="@(_tab != EditorTabs.Personality)">
+            @Placeholders
+            @Area("Description", "Who the character is: looks, background, how they behave. The most important part.", () => _c.Description, v => _c.Description = v, 8)
+            @Area("Personality", "A short summary of their personality.", () => _c.Personality, v => _c.Personality = v, 3)
+            @Area("Scenario", "Where and when the chat takes place, and what is going on.", () => _c.Scenario, v => _c.Scenario = v, 3)
         </div>
 
-        <div class="field-block">
-            <div class="field-label">Group-only greetings <span class="small">Openings used only in group chats, where other characters are present too. Optional.</span></div>
-            @for (var i = 0; i < _groupGreetings.Count; i++)
-            {
-                var index = i;
-                <div class="greeting">
-                    <textarea class="field" rows="3" aria-label="@($"Group greeting {index + 1}")" value="@_groupGreetings[index]"
-                              @onchange="e => _groupGreetings[index] = e.Value?.ToString() ?? string.Empty"></textarea>
-                    <button class="btn" @onclick="() => _groupGreetings.RemoveAt(index)">Remove</button>
-                </div>
-            }
-            <div class="row"><button class="btn" @onclick="() => _groupGreetings.Add(string.Empty)">Add a group greeting</button></div>
+        <div class="editor-tab" data-tab="@EditorTabs.Messages" hidden="@(_tab != EditorTabs.Messages)">
+            @Placeholders
+            @Area("First message", "What the character says to open a chat.", () => _c.FirstMessage, v => _c.FirstMessage = v, 6)
+
+            <div class="field-block">
+                <div class="field-label">Other greetings <span class="small">Alternative opening messages. In a chat, flip through them with the arrows.</span></div>
+                @for (var i = 0; i < _c.AlternateGreetings.Count; i++)
+                {
+                    var index = i;
+                    <div class="greeting">
+                        <textarea class="field" rows="4" aria-label="@($"Greeting {index + 2}")" value="@_c.AlternateGreetings[index]"
+                                  @onchange="e => { _c.AlternateGreetings[index] = e.Value?.ToString() ?? string.Empty; Measure(); }"></textarea>
+                        <button class="btn" @onclick="() => { _c.AlternateGreetings.RemoveAt(index); Measure(); }">Remove</button>
+                    </div>
+                }
+                <div class="row"><button class="btn" @onclick="() => _c.AlternateGreetings.Add(string.Empty)">Add a greeting</button></div>
+            </div>
+
+            <div class="field-block">
+                <div class="field-label">Group-only greetings <span class="small">Openings used only in group chats, where other characters are present too. Optional.</span></div>
+                @for (var i = 0; i < _groupGreetings.Count; i++)
+                {
+                    var index = i;
+                    <div class="greeting">
+                        <textarea class="field" rows="3" aria-label="@($"Group greeting {index + 1}")" value="@_groupGreetings[index]"
+                                  @onchange="e => _groupGreetings[index] = e.Value?.ToString() ?? string.Empty"></textarea>
+                        <button class="btn" @onclick="() => _groupGreetings.RemoveAt(index)">Remove</button>
+                    </div>
+                }
+                <div class="row"><button class="btn" @onclick="() => _groupGreetings.Add(string.Empty)">Add a group greeting</button></div>
+            </div>
+
+            @Area("Example dialogue", "Sample exchanges that show how the character talks. Start each one with <START>.", () => _c.ExampleMessages, v => _c.ExampleMessages = v, 6)
         </div>
 
-        @Area("Example dialogue", "Sample exchanges that show how the character talks. Start each one with <START>.", () => _c.ExampleMessages, v => _c.ExampleMessages = v, 6)
+        <div class="editor-tab" data-tab="@EditorTabs.LooksAndVoice" hidden="@(_tab != EditorTabs.LooksAndVoice)">
+            <LooksBox @bind-Value="_looks" Name="@_c.Name" About="@PictureWriter.About(_c)" />
+            <div class="label-like">
+                Voice for reading replies aloud
+                <VoicePicker @bind-Value="_c.Voice" Sample="@VoiceSample" />
+            </div>
+        </div>
 
-        <LooksBox @bind-Value="_looks" Name="@_c.Name" About="@PictureWriter.About(_c)" />
-
-        <details class="card-text" open="@(_c.SystemPrompt.Length > 0 || _c.PostHistoryInstructions.Length > 0)">
-            <summary>Advanced</summary>
+        <div class="editor-tab" data-tab="@EditorTabs.Advanced" hidden="@(_tab != EditorTabs.Advanced)">
+            @Placeholders
             @Area("Main instruction", $"Replaces DOG.ai's default role-play instruction. Leave empty to use the default. Write {{{{original}}}} to include the default inside your own.", () => _c.SystemPrompt, v => _c.SystemPrompt = v, 4)
             @Area("Final instruction", "A reminder added after everything else, such as \"Keep replies short\".", () => _c.PostHistoryInstructions, v => _c.PostHistoryInstructions = v, 3)
-        </details>
+            @Area("Creator's notes", "For people reading the card. Never sent to the model.", () => _c.CreatorNotes, v => _c.CreatorNotes = v, 3, measure: false)
+        </div>
 
-        @Area("Creator's notes", "For people reading the card. Never sent to the model.", () => _c.CreatorNotes, v => _c.CreatorNotes = v, 3, measure: false)
-
-        @if (_error is not null)
-        {
-            <div class="notice bad"><span>@_error</span></div>
-        }
-        <div class="editor-foot">
+        <div class="editor-foot save-bar">
+            @if (_error is not null)
+            {
+                <div class="notice bad" id="editor-error"><span>@_error</span></div>
+            }
             <div class="row">
-                <button class="btn primary" disabled="@_saving" @onclick="SaveAsync">@(CharacterId is null ? "Create character" : "Save")</button>
+                <button class="btn primary" id="editor-save" disabled="@_saving" @onclick="SaveAsync">@(CharacterId is null ? "Create character" : "Save")</button>
                 <a class="btn" href="@(CharacterId is null ? "characters" : $"characters/{CharacterId}")">Cancel</a>
             </div>
             <span class="small" title="How much of the model's context window the card takes in every reply">@TokenText</span>
@@ -184,6 +194,14 @@
     private string VoiceSample => string.IsNullOrWhiteSpace(_c.Name) ? "Hello! This is how I sound." : $"Hello, I'm {_c.Name.Trim()}. This is how I sound.";
 
     [Parameter] public long? CharacterId { get; set; }
+
+    /// <summary>The tab shown. All tabs stay in the form, hidden, so switching keeps what was typed.</summary>
+    private string _tab = EditorTabs.Basics;
+
+    private static readonly RenderFragment Placeholders = __builder =>
+    {
+        <p class="small">Write {{char}} for the character's name and {{user}} for yours; they are filled in during the chat.</p>
+    };
 
     private string _idea = "";
     private CancellationTokenSource? _draftCts;
@@ -403,6 +421,7 @@
         if (_c.Name.Length == 0)
         {
             _error = "Give the character a name.";
+            _tab = EditorTabs.ForCharacterProblem(EditorTabs.CharacterProblem.NoName);
             return;
         }
         _c.Tags = _tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -421,6 +440,7 @@
             catch (InvalidOperationException e)
             {
                 _error = "The character was saved, but its picture could not be kept for Edit and redraw: " + e.Message;
+                _tab = EditorTabs.ForCharacterProblem(EditorTabs.CharacterProblem.Picture);
                 return;
             }
             Nav.NavigateTo($"characters/{saved.Id}");

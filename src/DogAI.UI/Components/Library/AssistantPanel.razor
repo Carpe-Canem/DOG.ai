@@ -5,8 +5,7 @@
 @inject ISettingsStore SettingsStore
 
 @* Starts a chat from an assistant: copies its instructions and style into the chat. A model it prefers is only loaded if you say so. *@
-<div class="panel">
-    <h4>Assistant</h4>
+<SidePanel Place="@ChatPanels.General" Panel="@ChatPanels.Assistant" Title="Assistant" Summary="@(Library.FindAssistant(_applied)?.Name ?? "None")">
     <select class="field" aria-label="Assistant" @onchange="ChooseAsync">
         <option value="" selected="@(_applied is null)">None</option>
         @foreach (var a in Library.Assistants)
@@ -36,7 +35,7 @@
         <div class="notice bad"><span>@_problem</span></div>
     }
     <p class="small"><a class="link-text" href="general/library">Assistants and prompts</a></p>
-</div>
+</SidePanel>
 
 @code {
     /// <summary>The chat to start from the assistant. Its instructions and style are replaced.</summary>

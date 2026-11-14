@@ -1,20 +1,18 @@
 @* A section that opens and closes with a click on its heading, and remembers which (InterfaceMemory, by Id). Closed,
    its content stays on the page, only hidden, so typing and ids inside it survive. Summary is one line shown beside
-   the heading, so a closed section still says what is in it. *@
+   the heading, so a closed section still says what is in it. Level 4 is for side panels (Class="panel"). *@
 @implements IDisposable
 @inject InterfaceMemory Memory
 
 <section class="fold @(Open ? "open" : "closed") @Class" data-fold="@Id">
-    <h3 class="fold-title">
-        <button type="button" class="fold-head" id="@($"fold-{Id}")" aria-expanded="@(Open ? "true" : "false")" aria-controls="@($"fold-{Id}-body")" @onclick="ToggleAsync">
-            <span class="fold-chevron"><Icon Name="chevron" Size="14" /></span>
-            <span class="fold-name">@Title</span>
-            @if (!string.IsNullOrEmpty(Summary))
-            {
-                <span class="fold-sum">@Summary</span>
-            }
-        </button>
-    </h3>
+    @if (Level == 4)
+    {
+        <h4 class="fold-title">@Head</h4>
+    }
+    else
+    {
+        <h3 class="fold-title">@Head</h3>
+    }
     <div class="fold-body" id="@($"fold-{Id}-body")" hidden="@(!Open)">@ChildContent</div>
 </section>
 
@@ -25,9 +23,23 @@
     [Parameter] public string? Summary { get; set; }
     [Parameter] public bool OpenByDefault { get; set; } = true;
     [Parameter] public string Class { get; set; } = "";
+    /// <summary>The heading level: 3 on pages, 4 for side panels.</summary>
+    [Parameter] public int Level { get; set; } = 3;
     [Parameter] public RenderFragment? ChildContent { get; set; }
 
     private bool Open => Memory.IsOpen(Id, OpenByDefault);
+
+    private RenderFragment Head => __builder =>
+    {
+        <button type="button" class="fold-head" id="@($"fold-{Id}")" aria-expanded="@(Open ? "true" : "false")" aria-controls="@($"fold-{Id}-body")" @onclick="ToggleAsync">
+            <span class="fold-chevron"><Icon Name="chevron" Size="14" /></span>
+            <span class="fold-name">@Title</span>
+            @if (!string.IsNullOrEmpty(Summary))
+            {
+                <span class="fold-sum">@Summary</span>
+            }
+        </button>
+    };
 
     protected override void OnInitialized() => Memory.Changed += Refresh;
 

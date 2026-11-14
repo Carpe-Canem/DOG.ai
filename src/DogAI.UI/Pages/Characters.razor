@@ -28,7 +28,13 @@
                 <p>Personality chat driven by character cards</p>
             </div>
         }
-        <ModelPicker Mode="characters" />
+        <div class="head-tools">
+            <ModelPicker Mode="characters" />
+            @if (_conversation.Id != 0 && _character is not null)
+            {
+                <AsideToggle Place="@ChatPanels.Character" />
+            }
+        </div>
     </div>
 </SectionContent>
 
@@ -145,11 +151,10 @@ else
         <ChatComposer Path="@_path" OnSend="SendAsync" Impersonate="ImpersonateAsync" Placeholder="@($"Message {_character.Name}. Enter sends, Shift+Enter adds a line.")" />
     </SectionContent>
 
-    <SectionContent SectionName="aside">
+    <AsideRegion Place="@ChatPanels.Character">
         <RoleplayPanels Conversation="@_conversation" Path="@_path" Personas="@_personas" Persona="@_persona" PersonaChanged="p => _persona = p"
                         CharacterName="@_character.Name" Streaming="@Streaming" />
-        <div class="panel">
-            <h4>This chat</h4>
+        <SidePanel Place="@ChatPanels.Character" Panel="@ChatPanels.ThisChat" Title="This chat">
             <input class="field" aria-label="Chat name" value="@_conversation.Title" @onchange="RenameAsync" />
             <div class="row">
                 <button class="btn" disabled="@_busy" @onclick="StartChatAsync">New chat</button>
@@ -168,8 +173,8 @@ else
                     <button class="btn" @onclick="() => _confirmDelete = true">Delete chat</button>
                 }
             </div>
-        </div>
-    </SectionContent>
+        </SidePanel>
+    </AsideRegion>
 }
 
 @code {

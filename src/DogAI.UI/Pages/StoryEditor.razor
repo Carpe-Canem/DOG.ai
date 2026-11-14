@@ -74,151 +74,162 @@
                         }
                         else if (_drafted)
                         {
-                            <span class="small">Drafted. Read it through, change what you like, then create the story.</span>
+                            <span class="small">Drafted into the tabs below. Read them through, change what you like, then create the story.</span>
                         }
                     }
                 </div>
             </div>
         }
 
-        <label>Title<input class="field" @bind="_title" placeholder="Untitled story" /></label>
-        @Area("Premise", "What the story is about: who, what they want, what stands in the way.", () => _s.Bible.Premise, v => _s.Bible.Premise = v, 3)
-        <div class="two">
-            <label>Genre<input class="field" @bind="_s.Bible.Genre" placeholder="For example: gothic mystery" /></label>
-            <label>Tone<input class="field" @bind="_s.Bible.Tone" placeholder="For example: eerie, slow-burning, dry humour" /></label>
-        </div>
-        <div class="two">
-            <label>
-                Point of view
-                <input class="field" list="story-pov" @bind="_s.Bible.PointOfView" />
-                <datalist id="story-pov">
-                    <option value="Second person (you)"></option>
-                    <option value="First person (I)"></option>
-                    <option value="Third person, close on one character"></option>
-                    <option value="Third person, all-knowing"></option>
-                </datalist>
-            </label>
-            <label>
-                Tense
-                <input class="field" list="story-tense" @bind="_s.Bible.Tense" />
-                <datalist id="story-tense">
-                    <option value="Present"></option>
-                    <option value="Past"></option>
-                </datalist>
-            </label>
-        </div>
-        <div class="field-block">
-            <div class="field-label">Character cards <span class="small">People from your Characters list. The model is given each card with every passage, and the card's lore when it comes up. Editing a card later changes the story too.</span></div>
-            @foreach (var link in _s.Characters)
-            {
-                var character = Card(link.CharacterId);
-                if (character is null) continue;
-                <div class="member">
-                    <CharacterAvatar Character="character" />
-                    <span class="li-text">
-                        <span class="li-title">@character.Name</span>
-                        <span class="li-sub">@StoryPrompt.RoleLabel(_s.Kind, link.Main)</span>
-                    </span>
-                    <label class="check small" title="@(_s.Kind == StoryKind.Interactive ? "Tick to play this character yourself. Unticked, the narrator plays them." : "Tick if the story is told about this character.")">
-                        <input type="checkbox" checked="@link.Main" @onchange="e => SetMain(link, e.Value is true)" />
-                        @(_s.Kind == StoryKind.Interactive ? "I play this character" : "Main character")
-                    </label>
-                    <span class="member-tools">
-                        <button class="icon-btn" aria-label="@($"Remove {character.Name} from the story")" title="Remove from the story" @onclick="() => _s.Characters.Remove(link)">✕</button>
-                    </span>
-                </div>
-            }
-            @if (Addable.Count > 0)
-            {
-                <div class="row">
-                    <select class="field" aria-label="Character to add" @bind="_addId">
-                        <option value="0">@(_s.Characters.Count == 0 ? "Add a character…" : "Add another character…")</option>
-                        @foreach (var c in Addable)
-                        {
-                            <option value="@c.Id">@c.Name</option>
-                        }
-                    </select>
-                    <button class="btn" disabled="@(_addId == 0)" @onclick="AddCharacter">Add</button>
-                </div>
-            }
-            else if (_all.Count == 0)
-            {
-                <p class="small">You have no characters yet. Make or import one in Characters, then add it here.</p>
-            }
-            @if (Cast.Count > 1)
-            {
-                <p class="small">With several cards, each one's description is cut to about @(StoryPrompt.CastCardLength / 6) words so the story keeps its room. A single card is sent whole.</p>
-            }
-            @if (GreetingCard is { } greeter)
-            {
-                <label class="check"><input type="checkbox" @bind="_openWithGreeting" /> Open with @greeter.Name's first message <span class="small">The card's greeting becomes the opening passage, instead of one the model writes.</span></label>
-            }
-        </div>
-        @Area("Cast", Cast.Count > 0 ? "Anyone else in the story, one per line. The cards above need no line here."
-            : _s.Kind == StoryKind.Interactive ? "The people in the story, one per line. Start with the main character, whom you play."
-            : "The people in the story, one per line: who they are and what they want.", () => _s.Bible.Cast, v => _s.Bible.Cast = v, 5)
-        @Area("World", "The setting, and the facts and rules that matter.", () => _s.Bible.World, v => _s.Bible.World = v, 4)
-        @Area("Style guide", "Rules for the prose: sentence length, how much dialogue, what to avoid.", () => _s.Bible.StyleGuide, v => _s.Bible.StyleGuide = v, 3)
+        <PageTabs Items="@EditorTabs.Story(_s.Kind)" Current="@_tab" Selected="t => _tab = t" Label="Parts of the story" Class="editor-tabs" />
 
-        @if (_s.Kind == StoryKind.Authored)
-        {
+        <div class="editor-tab" data-tab="@EditorTabs.Basics" hidden="@(_tab != EditorTabs.Basics)">
+            <label>Title<input class="field" @bind="_title" placeholder="Untitled story" /></label>
+            @Area("Premise", "What the story is about: who, what they want, what stands in the way.", () => _s.Bible.Premise, v => _s.Bible.Premise = v, 3)
+            <div class="two">
+                <label>Genre<input class="field" @bind="_s.Bible.Genre" placeholder="For example: gothic mystery" /></label>
+                <label>Tone<input class="field" @bind="_s.Bible.Tone" placeholder="For example: eerie, slow-burning, dry humour" /></label>
+            </div>
+            <div class="two">
+                <label>
+                    Point of view
+                    <input class="field" list="story-pov" @bind="_s.Bible.PointOfView" />
+                    <datalist id="story-pov">
+                        <option value="Second person (you)"></option>
+                        <option value="First person (I)"></option>
+                        <option value="Third person, close on one character"></option>
+                        <option value="Third person, all-knowing"></option>
+                    </datalist>
+                </label>
+                <label>
+                    Tense
+                    <input class="field" list="story-tense" @bind="_s.Bible.Tense" />
+                    <datalist id="story-tense">
+                        <option value="Present"></option>
+                        <option value="Past"></option>
+                    </datalist>
+                </label>
+            </div>
+        </div>
+
+        <div class="editor-tab" data-tab="@EditorTabs.Cast" hidden="@(_tab != EditorTabs.Cast)">
             <div class="field-block">
-                <div class="field-label">Outline <span class="small">The chapters in order, each with what happens in it. The model writes towards the current chapter's plan and does not run ahead.</span></div>
-                @for (var i = 0; i < _s.Outline.Count; i++)
+                <div class="field-label">Character cards <span class="small">People from your Characters list. The model is given each card with every passage, and the card's lore when it comes up. Editing a card later changes the story too.</span></div>
+                @foreach (var link in _s.Characters)
                 {
-                    var index = i;
-                    var chapter = _s.Outline[i];
-                    <div class="chapter-edit">
-                        <div class="chapter-edit-head">
-                            <span class="small">Chapter @(index + 1)</span>
-                            <input class="field" aria-label="@($"Chapter {index + 1} title")" placeholder="Title" @bind="chapter.Title" />
-                            <span class="member-tools">
-                                <button class="icon-btn" disabled="@(index == 0)" aria-label="Move up" title="Move up" @onclick="() => Move(index, -1)">↑</button>
-                                <button class="icon-btn" disabled="@(index == _s.Outline.Count - 1)" aria-label="Move down" title="Move down" @onclick="() => Move(index, 1)">↓</button>
-                                <button class="icon-btn" aria-label="Remove chapter" title="Remove chapter" @onclick="() => _s.Outline.RemoveAt(index)">✕</button>
-                            </span>
-                        </div>
-                        <textarea class="field" rows="3" aria-label="@($"Chapter {index + 1} plan")" placeholder="What happens in this chapter" @bind="chapter.Plan"></textarea>
+                    var character = Card(link.CharacterId);
+                    if (character is null) continue;
+                    <div class="member">
+                        <CharacterAvatar Character="character" />
+                        <span class="li-text">
+                            <span class="li-title">@character.Name</span>
+                            <span class="li-sub">@StoryPrompt.RoleLabel(_s.Kind, link.Main)</span>
+                        </span>
+                        <label class="check small" title="@(_s.Kind == StoryKind.Interactive ? "Tick to play this character yourself. Unticked, the narrator plays them." : "Tick if the story is told about this character.")">
+                            <input type="checkbox" checked="@link.Main" @onchange="e => SetMain(link, e.Value is true)" />
+                            @(_s.Kind == StoryKind.Interactive ? "I play this character" : "Main character")
+                        </label>
+                        <span class="member-tools">
+                            <button class="icon-btn" aria-label="@($"Remove {character.Name} from the story")" title="Remove from the story" @onclick="() => _s.Characters.Remove(link)">✕</button>
+                        </span>
                     </div>
                 }
-                <div class="row"><button class="btn" @onclick="() => _s.Outline.Add(new StoryChapter())">Add a chapter</button></div>
-                @if (StoryId is not null && _s.Outline.Count > 0)
+                @if (Addable.Count > 0)
                 {
-                    <p class="small">Passages already written stay with their chapter number. Moving or removing chapters changes which heading they appear under.</p>
+                    <div class="row">
+                        <select class="field" aria-label="Character to add" @bind="_addId">
+                            <option value="0">@(_s.Characters.Count == 0 ? "Add a character…" : "Add another character…")</option>
+                            @foreach (var c in Addable)
+                            {
+                                <option value="@c.Id">@c.Name</option>
+                            }
+                        </select>
+                        <button class="btn" disabled="@(_addId == 0)" @onclick="AddCharacter">Add</button>
+                    </div>
+                }
+                else if (_all.Count == 0)
+                {
+                    <p class="small">You have no characters yet. Make or import one in Characters, then add it here.</p>
+                }
+                @if (Cast.Count > 1)
+                {
+                    <p class="small">With several cards, each one's description is cut to about @(StoryPrompt.CastCardLength / 6) words so the story keeps its room. A single card is sent whole.</p>
+                }
+                @if (GreetingCard is { } greeter)
+                {
+                    <label class="check"><input type="checkbox" @bind="_openWithGreeting" /> Open with @greeter.Name's first message <span class="small">The card's greeting becomes the opening passage, instead of one the model writes.</span></label>
                 }
             </div>
-        }
-        else
-        {
-            <div class="field-block">
-                <div class="field-label">Adventure rules</div>
-                <label class="check"><input type="checkbox" @bind="_s.TrackState" /> Keep track of location, inventory, stats and facts <span class="small">The model updates them after each passage; you can correct them.</span></label>
-                <label class="check"><input type="checkbox" @bind="_s.Dice" /> Decide risky actions with a dice roll <span class="small">A 20-sided dice: low fails, high succeeds, and the narrator follows the result.</span></label>
-            </div>
-        }
-
-        <label>
-            Passage length
-            <select class="field" @bind="_s.PassageWords">
-                @foreach (var (words, name) in Lengths)
-                {
-                    <option value="@words">@name</option>
-                }
-            </select>
-        </label>
-
-        <div class="label-like">
-            Narrator's voice <span class="small">for reading passages aloud</span>
-            <VoicePicker @bind-Value="_s.NarratorVoice" Label="Narrator's voice" Sample="Once upon a time, in a land far from here, a story began." />
+            @Area("Cast", Cast.Count > 0 ? "Anyone else in the story, one per line. The cards above need no line here."
+                : _s.Kind == StoryKind.Interactive ? "The people in the story, one per line. Start with the main character, whom you play."
+                : "The people in the story, one per line: who they are and what they want.", () => _s.Bible.Cast, v => _s.Bible.Cast = v, 5)
         </div>
 
-        @if (_error is not null)
-        {
-            <div class="notice bad"><span>@_error</span></div>
-        }
-        <div class="editor-foot">
+        <div class="editor-tab" data-tab="@EditorTabs.WorldAndStyle" hidden="@(_tab != EditorTabs.WorldAndStyle)">
+            @Area("World", "The setting, and the facts and rules that matter.", () => _s.Bible.World, v => _s.Bible.World = v, 4)
+            @Area("Style guide", "Rules for the prose: sentence length, how much dialogue, what to avoid.", () => _s.Bible.StyleGuide, v => _s.Bible.StyleGuide = v, 3)
+            <label>
+                Passage length
+                <select class="field" @bind="_s.PassageWords">
+                    @foreach (var (words, name) in Lengths)
+                    {
+                        <option value="@words">@name</option>
+                    }
+                </select>
+            </label>
+
+            <div class="label-like">
+                Narrator's voice <span class="small">for reading passages aloud</span>
+                <VoicePicker @bind-Value="_s.NarratorVoice" Label="Narrator's voice" Sample="Once upon a time, in a land far from here, a story began." />
+            </div>
+        </div>
+
+        <div class="editor-tab" data-tab="@EditorTabs.Plot" hidden="@(_tab != EditorTabs.Plot)">
+            @if (_s.Kind == StoryKind.Authored)
+            {
+                <div class="field-block">
+                    <div class="field-label">Outline <span class="small">The chapters in order, each with what happens in it. The model writes towards the current chapter's plan and does not run ahead.</span></div>
+                    @for (var i = 0; i < _s.Outline.Count; i++)
+                    {
+                        var index = i;
+                        var chapter = _s.Outline[i];
+                        <div class="chapter-edit">
+                            <div class="chapter-edit-head">
+                                <span class="small">Chapter @(index + 1)</span>
+                                <input class="field" aria-label="@($"Chapter {index + 1} title")" placeholder="Title" @bind="chapter.Title" />
+                                <span class="member-tools">
+                                    <button class="icon-btn" disabled="@(index == 0)" aria-label="Move up" title="Move up" @onclick="() => Move(index, -1)">↑</button>
+                                    <button class="icon-btn" disabled="@(index == _s.Outline.Count - 1)" aria-label="Move down" title="Move down" @onclick="() => Move(index, 1)">↓</button>
+                                    <button class="icon-btn" aria-label="Remove chapter" title="Remove chapter" @onclick="() => _s.Outline.RemoveAt(index)">✕</button>
+                                </span>
+                            </div>
+                            <textarea class="field" rows="3" aria-label="@($"Chapter {index + 1} plan")" placeholder="What happens in this chapter" @bind="chapter.Plan"></textarea>
+                        </div>
+                    }
+                    <div class="row"><button class="btn" @onclick="() => _s.Outline.Add(new StoryChapter())">Add a chapter</button></div>
+                    @if (StoryId is not null && _s.Outline.Count > 0)
+                    {
+                        <p class="small">Passages already written stay with their chapter number. Moving or removing chapters changes which heading they appear under.</p>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="field-block">
+                    <div class="field-label">Adventure rules</div>
+                    <label class="check"><input type="checkbox" @bind="_s.TrackState" /> Keep track of location, inventory, stats and facts <span class="small">The model updates them after each passage; you can correct them.</span></label>
+                    <label class="check"><input type="checkbox" @bind="_s.Dice" /> Decide risky actions with a dice roll <span class="small">A 20-sided dice: low fails, high succeeds, and the narrator follows the result.</span></label>
+                </div>
+            }
+        </div>
+
+        <div class="editor-foot save-bar">
+            @if (_error is not null)
+            {
+                <div class="notice bad" id="editor-error"><span>@_error</span></div>
+            }
             <div class="row">
-                <button class="btn primary" disabled="@(_saving || _draftCts is not null)" @onclick="SaveAsync">@(StoryId is null ? "Create story" : "Save")</button>
+                <button class="btn primary" id="editor-save" disabled="@(_saving || _draftCts is not null)" @onclick="SaveAsync">@(StoryId is null ? "Create story" : "Save")</button>
                 <a class="btn" href="@(StoryId is null ? "story" : $"story/{StoryId}")">Cancel</a>
             </div>
         </div>
@@ -227,6 +238,9 @@
 
 @code {
     [Parameter] public long? StoryId { get; set; }
+
+    /// <summary>The tab shown. All tabs stay in the form, hidden, so switching keeps what was typed.</summary>
+    private string _tab = EditorTabs.Basics;
 
     /// <summary>A new story started from a character's page: that card is already in the cast.</summary>
     [SupplyParameterFromQuery(Name = "character")] public long? FromCharacter { get; set; }

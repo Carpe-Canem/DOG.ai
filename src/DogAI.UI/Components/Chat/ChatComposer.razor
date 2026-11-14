@@ -7,23 +7,27 @@
 @inject Dictation Dict
 @inject ReadAloud Reader
 @inject ReplyVoice Voice
+@inject DownloadManager Downloads
 
 <div class="composer">
     <textarea @ref="_input" rows="1" aria-label="Message" @bind="_draft" @bind:event="oninput"
               placeholder="@(Engine.IsReady ? Placeholder : "Load a model to start chatting.")"></textarea>
     <span class="voice-btns">
         <button class="btn icon" @onclick="() => _picking = true" title="Use a saved prompt"><Icon Name="prompt" Size="18" /></button>
-        <button class="btn icon @(Dict.IsOn && !Dict.HandsFree ? "on" : "")" aria-pressed="@Aria(Dict.IsOn && !Dict.HandsFree)" @onclick="ToggleMicAsync"
-                title="@(Dict.IsOn && !Dict.HandsFree ? "Done talking: write it down" : "Talk instead of typing (or hold Ctrl+Space)")"><Icon Name="mic" Size="18" /></button>
-        <button class="btn icon @(Dict.HandsFree ? "on" : "")" aria-pressed="@Aria(Dict.HandsFree)" @onclick="ToggleHandsFreeAsync"
-                title="Hands-free: talk, pause, and it is sent. Click again to stop."><Icon Name="handsfree" Size="18" /></button>
+        @if (_canListen || Dict.IsOn)
+        {
+            <button class="btn icon @(Dict.IsOn && !Dict.HandsFree ? "on" : "")" id="composer-mic" aria-pressed="@Aria(Dict.IsOn && !Dict.HandsFree)" @onclick="ToggleMicAsync"
+                    title="@(Dict.IsOn && !Dict.HandsFree ? "Done talking: write it down" : "Talk instead of typing (or hold Ctrl+Space)")"><Icon Name="mic" Size="18" /></button>
+            <button class="btn icon @(Dict.HandsFree ? "on" : "")" id="composer-handsfree" aria-pressed="@Aria(Dict.HandsFree)" @onclick="ToggleHandsFreeAsync"
+                    title="Hands-free: talk, pause, and it is sent. Click again to stop."><Icon Name="handsfree" Size="18" /></button>
+        }
         @if (Reader.IsSpeaking)
         {
-            <button class="btn icon on" @onclick="Reader.Stop" title="Stop reading aloud"><Icon Name="stop" Size="18" /></button>
+            <button class="btn icon on" id="composer-read-stop" @onclick="Reader.Stop" title="Stop reading aloud"><Icon Name="stop" Size="18" /></button>
         }
         else
         {
-            <button class="btn icon @(Voice.AutoRead ? "on" : "")" aria-pressed="@Aria(Voice.AutoRead)" @onclick="() => Voice.SetAutoReadAsync(!Voice.AutoRead)"
+            <button class="btn icon @(Voice.AutoRead ? "on" : "")" id="composer-autoread" aria-pressed="@Aria(Voice.AutoRead)" @onclick="() => Voice.SetAutoReadAsync(!Voice.AutoRead)"
                     title="@(Voice.AutoRead ? "Replies are read aloud as they are written. Click to stop that." : "Read replies aloud as they are written")"><Icon Name="speaker" Size="18" /></button>
         }
     </span>
@@ -145,11 +149,39 @@
         Dict.Heard += OnHeard;
         Reader.Changed += OnVoiceChanged;
         Voice.Changed += OnVoiceChanged;
+        Downloads.Completed += OnDownloaded;
+        _ = CheckListeningAsync();
         // Hands-free does not listen while a reply is written or read aloud, so DOG.ai never hears itself.
         Dict.Paused = () => Chat.IsBusy || Reader.IsSpeaking;
     }
 
     private DateTime _lastVoiceRender;
+
+    /// <summary>
+    /// Whether there is a speech recognition model, so the microphone and hands-free buttons can work (M12). Looked up
+    /// when the box opens (so a model deleted in Models is noticed on coming back) and when a voice download finishes.
+    /// Read-aloud always shows: Windows' own voices need no download (owner's decision, 2026-11-14).
+    /// </summary>
+    private bool _canListen;
+
+    private async Task CheckListeningAsync()
+    {
+        try
+        {
+            var can = await Dict.CanListenAsync();
+            if (can == _canListen) return;
+            _canListen = can;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ObjectDisposedException)
+        {
+        }
+    }
+
+    private void OnDownloaded(DownloadJob job)
+    {
+        if (job.UseCase == VoiceTab.VoiceUse) _ = CheckListeningAsync();
+    }
 
     /// <summary>aria-pressed needs the words "true" or "false"; Blazor would drop a false attribute and leave a true one empty.</summary>
     private static string Aria(bool on) => on ? "true" : "false";
@@ -266,6 +298,7 @@
         Dict.Heard -= OnHeard;
         Reader.Changed -= OnVoiceChanged;
         Voice.Changed -= OnVoiceChanged;
+        Downloads.Completed -= OnDownloaded;
         // Leaving the screen turns the microphone off; reading aloud carries on.
         if (Dict.IsOn) Dict.Stop();
         _self?.Dispose();

@@ -13,7 +13,7 @@
             <h2>@(_conversation.Id == 0 ? "General" : _conversation.Title)</h2>
             <p>Questions, code and writing</p>
         </div>
-        <ModelPicker />
+        <div class="head-tools"><ModelPicker /><AsideToggle Place="@ChatPanels.General" /></div>
     </div>
 </SectionContent>
 
@@ -131,19 +131,17 @@ else
 
 <SectionContent SectionName="composer"><ChatComposer Path="@_path" OnSend="SendAsync" /></SectionContent>
 
-<SectionContent SectionName="aside">
+<AsideRegion Place="@ChatPanels.General">
     <AssistantPanel Conversation="@_conversation" OnApplied="SaveConversationAsync" />
-    <DocumentsPanel Conversation="@_conversation" Kind="general" EnsureConversation="EnsureSavedAsync" />
-    <StylePanel Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />
-    <div class="panel">
-        <h4>Instructions</h4>
+    <DocumentsPanel Place="@ChatPanels.General" Conversation="@_conversation" Kind="general" EnsureConversation="EnsureSavedAsync" />
+    <StylePanel Place="@ChatPanels.General" Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />
+    <SidePanel Place="@ChatPanels.General" Panel="@ChatPanels.Instructions" Title="Instructions" Summary="@ChatPanels.TextSummary(_conversation.SystemPrompt)">
         <textarea class="field" rows="6" aria-label="Instructions" placeholder="Optional. Tell the model how to behave in this chat."
                   value="@_conversation.SystemPrompt" @onchange="SetInstructionsAsync"></textarea>
-    </div>
+    </SidePanel>
     @if (_conversation.Id != 0)
     {
-        <div class="panel">
-            <h4>This chat</h4>
+        <SidePanel Place="@ChatPanels.General" Panel="@ChatPanels.ThisChat" Title="This chat" Summary="@ThisChatSummary">
             <input class="field" aria-label="Chat name" value="@_conversation.Title" @onchange="RenameAsync" />
             <div class="row">
                 <button class="btn" @onclick="TogglePinAsync">@(_conversation.Pinned ? "Unpin" : "Pin to top")</button>
@@ -180,9 +178,9 @@ else
                     <button class="btn" @onclick="() => _confirmDelete = true">Delete chat</button>
                 }
             </div>
-        </div>
+        </SidePanel>
     }
-</SectionContent>
+</AsideRegion>
 
 @code {
     [Parameter] public long? ChatId { get; set; }
@@ -218,6 +216,13 @@ else
             </span>
         </a>
     };
+    /// <summary>The closed "This chat" panel: pinned, and the folder it is in.</summary>
+    private string ThisChatSummary => string.Join(" · ", new[]
+    {
+        _conversation.Pinned ? "Pinned" : null,
+        _conversation.FolderId is { } f ? _folders.FirstOrDefault(x => x.Id == f)?.Name : null,
+    }.Where(x => x is not null).DefaultIfEmpty("Name, folder, delete"));
+
     private MessageTree _tree = new([]);
     private IReadOnlyList<ChatMessage> _path = [];
     private int _loadVersion;
