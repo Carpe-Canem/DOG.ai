@@ -120,6 +120,7 @@ public partial class App : Application
             await _services.GetRequiredService<DogAI.Core.Stories.StoryOptions>().LoadAsync();
             await _services.GetRequiredService<PresetCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Library.LibraryCatalog>().LoadAsync();
+            await _services.GetRequiredService<DogAI.Core.Images.ImageModelCatalog>().LoadAsync();
 
             var window = new MainWindow(_services);
             // WPF takes the first window it ever shows as the main one; after a lock screen that would be a closed window.
@@ -247,6 +248,7 @@ public partial class App : Application
         services.AddSingleton<IWindowsIntegration>(sp => sp.GetRequiredService<WindowsIntegration>());
         services.AddSingleton<PresetCatalog>();
         services.AddSingleton(sp => new DogAI.Core.Library.LibraryCatalog(sp.GetRequiredService<IDocumentStore>()));
+        services.AddSingleton(sp => new DogAI.Core.Images.ImageModelCatalog(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton<ChatService>();
         services.AddSingleton<DogAI.Core.Characters.CardBuilder>();
         services.AddSingleton<DogAI.Core.Stories.StoryBuilder>();
@@ -299,6 +301,8 @@ public partial class App : Application
             log.LogInformation("Downloaded {Repo} {Title} to {Path}", job.Repo, job.Title, job.MainPath);
             // Voice models are not chat models: they get no library record.
             if (job.UseCase == DogAI.UI.Components.Models.VoiceTab.VoiceUse) voices.Refresh();
+            // Image models are not chat models either; the Images tab finds them by looking in the image folder.
+            else if (job.UseCase == DogAI.Core.Images.ImageDownloads.UseCase) { }
             else _ = records.SaveAsync(new ModelRecord { Path = job.MainPath, Repo = job.Repo, Quant = job.Quant, UseCase = job.UseCase });
         };
         await downloads.LoadAsync();

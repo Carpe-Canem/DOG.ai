@@ -653,3 +653,10 @@ button.li { background: none; border: 0; color: inherit; font: inherit; cursor: 
 div.math[data-math] { margin: .6em 0; text-align: center; }
 .katex { font-size: 1.08em; }
 .word .ai { color: var(--accent); }
+
+/* Models → Images */
+.model .settings-card { grid-column: 1 / -1; display: grid; gap: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.model .settings-card.form-grid { display: grid; }
+.model .settings-card label { align-content: start; }
+.model.image-file.unusable .model-name { color: var(--muted); }
+.test-picture { display: block; max-width: min(320px, 100%); border-radius: min(var(--r), 12px); border: 1px solid var(--line); margin-top: 8px; }

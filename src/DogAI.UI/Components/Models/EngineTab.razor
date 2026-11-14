@@ -1,10 +1,7 @@
 @implements IDisposable
 @inject EngineUpdater Updater
-@inject ImageEngineUpdater ImageUpdater
 @inject EngineManager Engine
 @inject DogAI.Engine.Images.ImageServer Pictures
-@inject DogAI.Engine.Images.SdServerLocator PictureLocator
-@inject DogAI.Core.Images.CardCoordinator Card
 @inject ModelsContext Ctx
 @inject OnlineGate Gate
 @inject OnlineSession Session
@@ -25,38 +22,8 @@
 
 <section class="group">
     <h3 class="group-title">Picture engine</h3>
-    <div class="about">
-        <div class="kv"><span>Program</span><span>@(_pictureExe ?? "Not installed")</span></div>
-        @if (ImageUpdater.InstalledTag is { } pictureTag)
-        {
-            <div class="kv"><span>DOG.ai’s copy</span><span>stable-diffusion.cpp @pictureTag</span></div>
-        }
-        else if (_pictureExe is not null)
-        {
-            <div class="kv"><span>Source</span><span>Set for testing (@DogAI.Engine.Images.SdServerLocator.OverrideVariable)</span></div>
-        }
-        @if (_pictureExe is not null)
-        {
-            <div class="kv"><span>Now</span><span id="picture-state">@PictureState</span></div>
-        }
-    </div>
-    @if (_testCheckpoint is not null && _pictureExe is not null)
-    {
-        @* For test runs only, until the Images tab exists (M9 step 4): shown when DOGAI_TEST_IMAGE_MODEL names a checkpoint. *@
-        <div class="row">
-            <button class="btn" id="test-picture" disabled="@Card.IsBusy" @onclick="() => TestPictureAsync(false)">Draw a test picture</button>
-            <button class="btn" id="test-picture-fine" disabled="@Card.IsBusy" @onclick="() => TestPictureAsync(true)">Draw a fine one (hires fix)</button>
-        </div>
-        @if (_testNote is not null)
-        {
-            <p class="note" id="test-picture-note">@_testNote</p>
-        }
-        @if (_testPicture is not null)
-        {
-            <img id="test-picture-result" alt="The test picture" src="@_testPicture" style="max-width:220px;border-radius:8px" />
-        }
-    }
-    <p class="note">Draws pictures on this PC (coming in a later version of DOG.ai). DOG.ai installs stable-diffusion.cpp’s CUDA 12 build and NVIDIA’s runtime for it from the project’s GitHub releases (two files, about 0.9 GB), checks both against their published checksums, and puts them in @Paths.ImageEngineDirectory. It needs an NVIDIA graphics card.</p>
+    <p class="note">The picture engine (stable-diffusion.cpp) is installed and updated in Models → Images, beside the image models it draws with.</p>
+    <div class="row"><a class="btn" id="go-images" href="models/images">Open Images</a></div>
 </section>
 
 <section class="group">
@@ -105,35 +72,6 @@
             <div class="notice"><span>@_chatNote</span></div>
         }
 
-        @if (_pictureRelease is { } picture)
-        {
-            var current = ImageUpdater.InstalledTag == picture.Tag && ImageUpdater.IsInstalled;
-            <div class="model has-fit">
-                <div class="li-text">
-                    <div class="model-name">stable-diffusion.cpp @picture.Tag (@picture.Flavor)</div>
-                    <div class="model-meta">Draws pictures · @Sizes.Gb(picture.TotalBytes) download, including NVIDIA’s CUDA runtime@(picture.Published is { } p ? $" · released {p:d MMM yyyy}" : "")</div>
-                </div>
-                @if (_installing == Which.Pictures)
-                {
-                    <div class="progress wide">
-                        <div class="meter"><i style="width:@Percent(picture)%"></i></div>
-                        <span>@_step</span>
-                    </div>
-                }
-                else if (current)
-                {
-                    <span class="chip">Up to date</span>
-                }
-                else
-                {
-                    <button class="btn primary" disabled="@(_installing is not null)" @onclick="InstallPicturesAsync">@(ImageUpdater.IsInstalled ? "Update" : "Install")</button>
-                }
-            </div>
-        }
-        else if (_pictureNote is not null)
-        {
-            <div class="notice"><span>@_pictureNote</span></div>
-        }
         <div class="row"><button class="btn" disabled="@(_busy || _installing is not null)" @onclick="CheckAsync">@(_busy ? "Checking…" : "Check again")</button></div>
     }
     @if (_message is not null)
@@ -145,12 +83,12 @@
 <p class="note">DOG.ai installs the CUDA build of llama.cpp that matches your graphics driver (Vulkan on other cards) from the project’s GitHub releases, checks every file against its published checksum, and only replaces the engine once the new one is complete. It goes in @Paths.EngineDirectory.</p>
 
 @code {
-    private enum Which { Chat, Pictures }
+    private enum Which { Chat }
 
-    private EngineRelease? _release, _pictureRelease;
+    private EngineRelease? _release;
     private bool _busy, _checked, _bad;
     private Which? _installing;
-    private string? _message, _exe, _pictureExe, _step, _chatNote, _pictureNote;
+    private string? _message, _exe, _step, _chatNote;
     private long _done;
 
     private string Percent(EngineRelease release) => release.TotalBytes == 0 ? "0"
@@ -164,70 +102,9 @@
     protected override void OnInitialized()
     {
         _exe = Engine.FindExecutable();
-        _pictureExe = PictureLocator.Find();
-        _testCheckpoint = Environment.GetEnvironmentVariable("DOGAI_TEST_IMAGE_MODEL") is { Length: > 0 } checkpoint ? checkpoint : null;
         Gate.Changed += Refresh;
         Ctx.Changed += Refresh;
-        Card.Changed += Refresh;
         Engine.Changed += Refresh;
-    }
-
-    private string? _testCheckpoint, _testNote, _testPicture;
-
-    private string PictureState =>
-        Card.IsBusy ? "Drawing a picture"
-        : Pictures.IsRunning ? "Running; it holds its model in graphics memory from the first picture until it has sat unused for " + Minutes(Pictures.IdleStop)
-        : "Not running; it starts with the next picture";
-
-    private static string Minutes(TimeSpan time) => time.TotalMinutes == 1 ? "a minute" : $"{time.TotalMinutes:0.#} minutes";
-
-    /// <summary>Draws one fixed picture through the card coordinator, to see the graphics card being shared (test runs only).</summary>
-    private async Task TestPictureAsync(bool fine)
-    {
-        _testPicture = null;
-        _testNote = "Starting…";
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        try
-        {
-            var loras = Environment.GetEnvironmentVariable("DOGAI_TEST_IMAGE_LORAS") is { Length: > 0 } folder ? folder : null;
-            var model = new DogAI.Core.Images.ImageModel(_testCheckpoint!, loras);
-            if (Card.Model != model) await Card.LoadAsync(model);
-            var request = new DogAI.Core.Images.ImageRequest(
-                "1girl, silver hair, green eyes, scar on cheek, leather armor, green cloak, forest, dappled sunlight, masterpiece, best quality",
-                "worst quality, low quality, lowres, bad anatomy, bad hands, signature, watermark, text",
-                832, 1216, Steps: 28, Sampler: "euler_a", Guidance: 5.5, ClipSkip: 2,
-                Hires: fine ? new DogAI.Core.Images.HiresFix(1.5, 14, 0.5) : null,
-                Format: DogAI.Core.Images.ImageFormat.Jpeg, Quality: 90);
-            var progress = new Progress<DogAI.Core.Images.ImageProgress>(p =>
-            {
-                _testNote = p.Stage switch
-                {
-                    DogAI.Core.Images.CardCoordinator.Waiting => "Waiting for the graphics card…",
-                    DogAI.Core.Images.CardCoordinator.MakingRoom => "Setting the chat model aside to make room…",
-                    "sampling" => $"Drawing, step {p.Step} of {p.TotalSteps}{(p.Pass > 1 ? " (second pass)" : "")}…",
-                    _ => "Drawing…",
-                };
-                StateHasChanged();
-            });
-            var result = await Task.Run(() => Card.DrawAsync(request, progress));
-            _testPicture = "data:image/jpeg;base64," + Convert.ToBase64String(result.Images[0]);
-            _testNote = $"Drawn in {clock.Elapsed.TotalSeconds:0.0} seconds. " + (Card.LastDecision?.Choice switch
-            {
-                DogAI.Core.Images.CardChoice.KeptBoth => "Both fitted on the graphics card, so the chat model stayed loaded.",
-                DogAI.Core.Images.CardChoice.SetChatAside => "The chat model was set aside to make room; it loads again with your next message.",
-                _ => "No chat model was in graphics memory.",
-            });
-        }
-        catch (DogAI.Core.Images.ImageEngineException e)
-        {
-            _testNote = e.Message;
-        }
-        catch (OperationCanceledException)
-        {
-            _testNote = "The picture was cancelled.";
-        }
-        // The hardware panel beside this shows what was measured when the page opened; measure again now.
-        await Ctx.RefreshAsync();
     }
 
     private void Refresh() => InvokeAsync(StateHasChanged);
@@ -235,14 +112,11 @@
     private async Task CheckAsync()
     {
         _busy = true;
-        _message = _chatNote = _pictureNote = null;
-        _release = _pictureRelease = null;
+        _message = _chatNote = null;
+        _release = null;
         try
         {
-            // The two checks are independent: one failing must not hide the other.
-            var chat = CheckChatAsync();
-            var pictures = CheckPicturesAsync();
-            await Task.WhenAll(chat, pictures);
+            await CheckChatAsync();
             _checked = true;
         }
         finally
@@ -264,20 +138,6 @@
         }
     }
 
-    private async Task CheckPicturesAsync()
-    {
-        try
-        {
-            _pictureRelease = await ImageUpdater.LatestAsync(Ctx.Hardware.DriverCuda);
-            if (_pictureRelease is null)
-                _pictureNote = "The newest stable-diffusion.cpp release has no Windows CUDA 12 build yet (its files appear a few minutes after a release). Check again later.";
-        }
-        catch (Exception e) when (IsCheckProblem(e))
-        {
-            _pictureNote = "Picture engine: " + Plain(e);
-        }
-    }
-
     private static bool IsCheckProblem(Exception e) =>
         e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException or OperationCanceledException;
 
@@ -296,15 +156,6 @@
         await Updater.InstallAsync(release, progress, ct);
         _exe = Engine.FindExecutable();
         return $"llama.cpp {release.Tag} is installed. Models load with it from now on.";
-    });
-
-    private Task InstallPicturesAsync() => InstallAsync(Which.Pictures, _pictureRelease, async (release, progress, ct) =>
-    {
-        // Only the picture engine stops; a loaded chat model stays loaded.
-        await Pictures.StopAsync();
-        await ImageUpdater.InstallAsync(release, progress, ct);
-        _pictureExe = PictureLocator.Find();
-        return $"stable-diffusion.cpp {release.Tag} is installed.";
     });
 
     private async Task InstallAsync(Which which, EngineRelease? release, Func<EngineRelease, Action<long>, CancellationToken, Task<string>> install)
@@ -337,7 +188,7 @@
         {
             // A llama.cpp update can succeed and still fail to bring the picture engine across; then it did change.
             var changed = which == Which.Chat && Updater.InstalledTag == release.Tag && Updater.IsInstalled;
-            Say(changed ? e.Message : (which == Which.Pictures ? "The picture engine was not changed: " : "The engine was not changed: ") + e.Message, bad: true);
+            Say(changed ? e.Message : "The engine was not changed: " + e.Message, bad: true);
         }
         finally
         {
@@ -356,7 +207,6 @@
     {
         Gate.Changed -= Refresh;
         Ctx.Changed -= Refresh;
-        Card.Changed -= Refresh;
         Engine.Changed -= Refresh;
     }
 }

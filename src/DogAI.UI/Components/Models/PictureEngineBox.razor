@@ -1,0 +1,190 @@
+@* The picture engine (stable-diffusion.cpp's sd-server): what is installed, what it is doing, and its install and update.
+   Lives on Models → Images; the Engine tab only links here, so there is one install button and two installs can never
+   race on the engine\images folder. *@
+@implements IDisposable
+@inject ImageEngineUpdater ImageUpdater
+@inject DogAI.Engine.Images.ImageServer Pictures
+@inject DogAI.Engine.Images.SdServerLocator PictureLocator
+@inject DogAI.Core.Images.CardCoordinator Card
+@inject ModelsContext Ctx
+@inject OnlineGate Gate
+@inject OnlineSession Session
+@inject AppPaths Paths
+
+<section class="group" id="picture-engine">
+    <h3 class="group-title">Picture engine</h3>
+    <div class="about">
+        <div class="kv"><span>Program</span><span>@(_exe ?? "Not installed")</span></div>
+        @if (ImageUpdater.InstalledTag is { } tag)
+        {
+            <div class="kv"><span>DOG.ai’s copy</span><span>stable-diffusion.cpp @tag</span></div>
+        }
+        else if (_exe is not null)
+        {
+            <div class="kv"><span>Source</span><span>Set for testing (@DogAI.Engine.Images.SdServerLocator.OverrideVariable)</span></div>
+        }
+        @if (_exe is not null)
+        {
+            <div class="kv"><span>Now</span><span id="picture-state">@State</span></div>
+        }
+    </div>
+    @if (!Gate.IsOnline)
+    {
+        <p class="note">@(_exe is null ? "Go online at the top of this page to install it." : "Go online at the top of this page to check for a newer version.")</p>
+    }
+    else if (!_checked)
+    {
+        <div class="row"><button class="btn @(_exe is null ? "primary" : "")" id="picture-engine-check" disabled="@_busy" @onclick="CheckAsync">@(_busy ? "Checking…" : "Check for the picture engine")</button></div>
+    }
+    else
+    {
+        @if (_release is { } release)
+        {
+            var current = ImageUpdater.InstalledTag == release.Tag && ImageUpdater.IsInstalled;
+            <div class="model has-fit">
+                <div class="li-text">
+                    <div class="model-name">stable-diffusion.cpp @release.Tag (@release.Flavor)</div>
+                    <div class="model-meta">Draws pictures · @Sizes.Gb(release.TotalBytes) download, including NVIDIA’s CUDA runtime@(release.Published is { } p ? $" · released {p:d MMM yyyy}" : "")</div>
+                </div>
+                @if (_installing)
+                {
+                    <div class="progress wide">
+                        <div class="meter"><i style="width:@Percent(release)%"></i></div>
+                        <span>@_step</span>
+                    </div>
+                }
+                else if (current)
+                {
+                    <span class="chip">Up to date</span>
+                }
+                else
+                {
+                    <button class="btn primary" id="picture-engine-install" @onclick="InstallAsync">@(ImageUpdater.IsInstalled ? "Update" : "Install")</button>
+                }
+            </div>
+        }
+        else if (_note is not null)
+        {
+            <div class="notice"><span>@_note</span></div>
+        }
+        <div class="row"><button class="btn" disabled="@(_busy || _installing)" @onclick="CheckAsync">@(_busy ? "Checking…" : "Check again")</button></div>
+    }
+    @if (_message is not null)
+    {
+        <div class="notice @(_bad ? "bad" : "ok")"><span>@_message</span></div>
+    }
+    <p class="note">DOG.ai installs stable-diffusion.cpp’s CUDA 12 build and NVIDIA’s runtime for it from the project’s GitHub releases (two files, about 0.9 GB), checks both against their published checksums, and puts them in @Paths.ImageEngineDirectory. It needs an NVIDIA graphics card. Updating it does not unload the chat model.</p>
+</section>
+
+@code {
+    /// <summary>Raised after the engine was installed or updated, so the page can enable drawing.</summary>
+    [Parameter] public EventCallback Installed { get; set; }
+
+    private EngineRelease? _release;
+    private bool _busy, _checked, _bad, _installing;
+    private string? _message, _exe, _step, _note;
+    private long _done;
+
+    private string Percent(EngineRelease release) => release.TotalBytes == 0 ? "0"
+        : (_done * 100.0 / release.TotalBytes).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private string State =>
+        Card.IsBusy ? "Drawing a picture"
+        : Pictures.IsRunning ? "Running; it holds its model in graphics memory from the first picture until it has sat unused for " + Minutes(Pictures.IdleStop)
+        : "Not running; it starts with the next picture";
+
+    private static string Minutes(TimeSpan time) => time.TotalMinutes == 1 ? "a minute" : $"{time.TotalMinutes:0.#} minutes";
+
+    protected override void OnInitialized()
+    {
+        _exe = PictureLocator.Find();
+        Gate.Changed += Refresh;
+        Card.Changed += Refresh;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private async Task CheckAsync()
+    {
+        _busy = true;
+        _message = _note = null;
+        _release = null;
+        try
+        {
+            _release = await ImageUpdater.LatestAsync(Ctx.Hardware.DriverCuda);
+            if (_release is null)
+                _note = "The newest stable-diffusion.cpp release has no Windows CUDA 12 build yet (its files appear a few minutes after a release). Check again later.";
+            _checked = true;
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException or OperationCanceledException)
+        {
+            _note = e switch
+            {
+                HttpRequestException => "Could not reach GitHub: " + e.Message,
+                OperationCanceledException => "The check stopped because DOG.ai went offline.",
+                _ => e.Message,
+            };
+            _checked = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task InstallAsync()
+    {
+        if (_release is not { } release || _installing) return;
+        _installing = true;
+        _message = null;
+        _done = 0;
+        _step = "Downloading…";
+        using var work = Session.BeginWork();
+        // The gate only checks new requests; going offline must also stop a transfer in progress.
+        using var cts = new CancellationTokenSource();
+        Action stop = () => cts.Cancel();
+        Session.Closed += stop;
+        try
+        {
+            await Task.Run(async () =>
+            {
+                // Only the picture engine stops; a loaded chat model stays loaded.
+                await Pictures.StopAsync();
+                await ImageUpdater.InstallAsync(release, n =>
+                {
+                    _done = n;
+                    _step = n >= release.TotalBytes ? "Unpacking…" : $"{n * 100 / Math.Max(1, release.TotalBytes)}%";
+                    _ = InvokeAsync(StateHasChanged);
+                }, cts.Token);
+            });
+            _exe = PictureLocator.Find();
+            Say($"stable-diffusion.cpp {release.Tag} is installed.");
+            await Installed.InvokeAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            Say("The install stopped because DOG.ai went offline. The engine was not changed; it continues from where it stopped next time.", bad: true);
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            Say("The picture engine was not changed: " + e.Message, bad: true);
+        }
+        finally
+        {
+            Session.Closed -= stop;
+            _installing = false;
+        }
+    }
+
+    private void Say(string text, bool bad = false)
+    {
+        _message = text;
+        _bad = bad;
+    }
+
+    public void Dispose()
+    {
+        Gate.Changed -= Refresh;
+        Card.Changed -= Refresh;
+    }
+}

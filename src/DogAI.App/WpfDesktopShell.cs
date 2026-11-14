@@ -69,6 +69,14 @@ public sealed class WpfDesktopShell(ISettingsStore settings, DogAI.Core.Privacy.
         return true;
     }
 
+    public bool OpenFolder(string path)
+    {
+        if (!Directory.Exists(path)) return false;
+        // explorer.exe with the folder as its argument only ever shows the folder; nothing in it is run.
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe") { ArgumentList = { Path.GetFullPath(path) }, UseShellExecute = false })?.Dispose();
+        return true;
+    }
+
     public Task<string?> PickSavePathAsync(string suggestedName, string filter) =>
         Application.Current.Dispatcher.InvokeAsync(() =>
         {

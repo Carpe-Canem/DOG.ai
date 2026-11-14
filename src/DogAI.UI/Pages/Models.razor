@@ -64,6 +64,9 @@
     case "voice":
         <VoiceTab />
         break;
+    case "images":
+        <ImagesTab />
+        break;
     default:
         <div class="hw">@foreach (var chip in HardwareChips) {<span class="chip">@chip</span>}</div>
         <RecommendedTab Installed="_installed" />
@@ -114,7 +117,7 @@
     </div>
     <div class="panel">
         <h4>Connection</h4>
-        <div class="small">This is the only section that goes online, and only to Hugging Face and GitHub. Leaving it goes offline again, unless a download is still running.</div>
+        <div class="small">This is the only section that goes online, and only to Hugging Face and GitHub (never Civitai). Leaving it goes offline again, unless a download is still running.</div>
     </div>
     <div class="panel">
         <h4>Hugging Face token</h4>
@@ -150,7 +153,8 @@
         "browse" => "Search Hugging Face for GGUF models",
         "library" => "Models on this PC",
         "downloads" => "Downloads in progress and finished",
-        "engine" => "The programs that run models and draw pictures",
+        "engine" => "The program that runs chat models",
+        "images" => "Models that draw pictures, and the picture engine",
         "voice" => "Models for listening and speaking",
         _ => "Recommended for your PC",
     };
@@ -161,6 +165,7 @@
         ("browse", "Browse Hugging Face", "Search all GGUF models"),
         ("library", "Library", $"{_libraryCount} installed · {Sizes.Gb(_librarySize)}"),
         ("voice", "Voice", "Listening and speaking"),
+        ("images", "Images", "Checkpoints and LoRAs"),
         ("downloads", "Downloads", DownloadsSub),
         ("engine", "Engine", Updater.InstalledTag is { } tag ? $"llama.cpp {tag}" : "llama.cpp"),
     ];

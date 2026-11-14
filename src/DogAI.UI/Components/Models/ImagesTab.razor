@@ -1,0 +1,561 @@
+@* Models → Images: the image models folder (checkpoints, LoRAs, VAEs), a settings card per checkpoint and LoRA, the
+   checkpoint pictures are drawn with and a test picture, recommended downloads from Hugging Face, and the picture
+   engine. Opening the tab only reads file headers: it never starts the picture engine or loads the chat model. *@
+@using DogAI.Core.Images
+@using DogAI.Engine.Images
+@implements IDisposable
+@inject DownloadManager Downloads
+@inject OnlineGate Gate
+@inject HuggingFaceClient Hf
+@inject ISettingsStore SettingsStore
+@inject ImageModelCatalog Catalog
+@inject IImageEngine Card
+@inject CardCoordinator Coordinator
+@inject SdServerLocator PictureLocator
+@inject IDesktopShell Desktop
+@inject ModelsContext Ctx
+
+<section class="group">
+    <h3 class="group-title">Draw with</h3>
+    @if (Checkpoints.Count == 0)
+    {
+        <div class="notice"><span>No checkpoint yet. Download one below, or put a .safetensors checkpoint from Civitai in the checkpoints folder with <b>Open folder</b>, then <b>Look again</b>.</span></div>
+    }
+    else
+    {
+        <div class="form-grid">
+            <label>
+                Checkpoint
+                <select class="field" id="draw-with" @onchange="ChooseAsync" disabled="@_drawing">
+                    @foreach (var c in Checkpoints)
+                    {
+                        <option value="@c.RelativePath" selected="@(c.RelativePath == _chosen)">@c.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                LoRA for the test picture
+                <select class="field" id="test-lora" @bind="_testLora" disabled="@_drawing">
+                    <option value="">None</option>
+                    @foreach (var l in Loras)
+                    {
+                        <option value="@l.RelativePath">@l.Name</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <p class="note">Pictures in DOG.ai are drawn with this checkpoint and its settings below. The test picture draws a fixed subject (a woman with silver hair in a forest) at 832×1216.</p>
+        <div class="row">
+            @if (_drawing)
+            {
+                <button class="btn" id="test-picture-cancel" @onclick="CancelDrawing">Cancel</button>
+            }
+            else
+            {
+                <button class="btn primary" id="test-picture" disabled="@(_engine is null)" title="@(_engine is null ? "Install the picture engine first (below)" : "")" @onclick="TestPictureAsync">Draw a test picture</button>
+            }
+        </div>
+        @if (_engine is null)
+        {
+            <p class="note">The picture engine is not installed yet: see <b>Picture engine</b> at the end of this page.</p>
+        }
+        @if (_testNote is not null)
+        {
+            <p class="note" id="test-picture-note">@_testNote</p>
+        }
+        @if (_testPicture is not null)
+        {
+            <img class="test-picture" id="test-picture-result" alt="The test picture" src="@_testPicture" />
+        }
+    }
+</section>
+
+<section class="group">
+    <h3 class="group-title">Checkpoints</h3>
+    <p class="note">A checkpoint is the model that draws. Each one has settings for how prompts are written and drawn; DOG.ai fills them in for families it recognises (Illustrious, NoobAI, Pony, SDXL).</p>
+    <div class="models" id="checkpoints">
+        @foreach (var file in Checkpoints)
+        {
+            var c = file;
+            var settings = Catalog.CheckpointFor(c.RelativePath, c.Verdict);
+            <div class="model has-fit image-file" data-file="@c.RelativePath">
+                <div class="li-text">
+                    <div class="model-name">@c.Name@if (c.RelativePath == _chosen) {<span class="rec">Drawing with this</span>}</div>
+                    <div class="model-meta">@c.Verdict.Note · @Sizes.Gb(c.SizeBytes)</div>
+                    <div class="model-meta">@SettingsLine(settings) · @(Catalog.IsChanged(c.RelativePath) ? "your settings" : $"{FamilyNames.Title(settings.Family)} defaults")</div>
+                </div>
+                <div class="actions">
+                    @if (c.RelativePath != _chosen)
+                    {
+                        <button class="btn" disabled="@_drawing" @onclick="() => ChooseAsync(c.RelativePath)">Draw with this</button>
+                    }
+                    <button class="btn" aria-expanded="@(_open == c.FullPath ? "true" : "false")" @onclick="() => Toggle(c, settings)">Settings</button>
+                </div>
+                @if (_open == c.FullPath && _draft is { } d)
+                {
+                    <div class="settings-card">
+                        <CheckpointCard Draft="d" DraftChanged="v => _draft = v" Vaes="Vaes" VPrediction="c.Verdict.VPrediction" />
+                        @if (_cardError is not null)
+                        {
+                            <div class="notice bad"><span>@_cardError</span></div>
+                        }
+                        <div class="row">
+                            <button class="btn primary" @onclick="() => SaveCheckpointAsync(c)">Save</button>
+                            <button class="btn" disabled="@(!Catalog.IsChanged(c.RelativePath))" @onclick="() => ResetCheckpointAsync(c)">Back to the @FamilyNames.Title(c.Verdict.Family ?? ImageFamily.Sdxl) defaults</button>
+                            <button class="btn" @onclick="Close">Close</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+<section class="group">
+    <h3 class="group-title">LoRAs</h3>
+    <p class="note">A LoRA adds a style, a character or more detail on top of a checkpoint. Its trigger words are put in the prompt whenever it is used.</p>
+    @if (Loras.Count == 0)
+    {
+        <p class="note">None yet. LoRAs go in the loras folder.</p>
+    }
+    <div class="models" id="loras">
+        @foreach (var file in Loras)
+        {
+            var l = file;
+            var settings = Catalog.LoraFor(l.RelativePath, l.Verdict.Lora);
+            <div class="model has-fit image-file" data-file="@l.RelativePath">
+                <div class="li-text">
+                    <div class="model-name">@l.Name</div>
+                    <div class="model-meta">@l.Verdict.Note · @Sizes.Gb(l.SizeBytes) · strength @settings.Strength.ToString("0.##")</div>
+                    <div class="model-meta">Trigger words: @(settings.TriggerWords.Length > 0 ? settings.TriggerWords : "none")</div>
+                </div>
+                <div class="actions">
+                    <button class="btn" aria-expanded="@(_open == l.FullPath ? "true" : "false")" @onclick="() => ToggleLora(l, settings)">Settings</button>
+                </div>
+                @if (_open == l.FullPath && _loraDraft is { } ld)
+                {
+                    <div class="settings-card form-grid">
+                        <label class="wide-field">
+                            Trigger words
+                            <input class="field" @bind="ld.TriggerWords" />
+                            <span class="small">@TriggerSource(l)</span>
+                        </label>
+                        <label>
+                            Default strength
+                            <input class="field" type="number" step="0.05" min="-5" max="5" @bind="ld.Strength" />
+                            <span class="small">1 is the LoRA as trained. Detail and style LoRAs often look best between 0.4 and 0.8.</span>
+                        </label>
+                        @if (l.Verdict.Lora is { CommonTags.Count: > 0 } facts)
+                        {
+                            <div class="field-block wide-field">
+                                <span class="field-label">Most common training tags</span>
+                                <div class="chips">@foreach (var tag in facts.CommonTags) {<span class="chip">@tag</span>}</div>
+                            </div>
+                        }
+                        @if (_cardError is not null)
+                        {
+                            <div class="notice bad wide-field"><span>@_cardError</span></div>
+                        }
+                        <div class="row wide-field">
+                            <button class="btn primary" @onclick="() => SaveLoraAsync(l)">Save</button>
+                            <button class="btn" disabled="@(!Catalog.IsLoraChanged(l.RelativePath))" @onclick="() => ResetLoraAsync(l)">Back to what the file says</button>
+                            <button class="btn" @onclick="Close">Close</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+@if (Others.Count > 0)
+{
+    <section class="group">
+        <h3 class="group-title">Other files</h3>
+        <div class="models" id="other-image-files">
+            @foreach (var o in Others)
+            {
+                <div class="model image-file @(o.Usable ? "" : "unusable")" data-file="@o.RelativePath">
+                    <div class="li-text">
+                        <div class="model-name">@Path.GetFileName(o.RelativePath)</div>
+                        <div class="model-meta">@o.Verdict.Note</div>
+                        @if (o.Misplaced is { } home)
+                        {
+                            <div class="model-meta">It is in @(o.Folder.Length == 0 ? "the image folder itself" : $"the {o.Folder} folder"); move it to the <b>@home</b> folder to use it.</div>
+                        }
+                        <div class="model-meta">@Sizes.Gb(o.SizeBytes) · @(o.Folder.Length == 0 ? "image" : o.Folder)</div>
+                    </div>
+                </div>
+            }
+        </div>
+    </section>
+}
+
+<section class="group">
+    <h3 class="group-title">Recommended downloads</h3>
+    <p class="note">From Hugging Face, checked against their published checksums. Checkpoints are about 7 GB each.</p>
+    <div class="models">
+        @foreach (var item in ImageDownloads.All)
+        {
+            var d = item;
+            var installed = Installed(d);
+            <div class="model has-fit">
+                <div class="li-text">
+                    <div class="model-name">@d.Title@if (d.Recommended) {<span class="rec">Best pick</span>}</div>
+                    <div class="model-meta">@d.Blurb</div>
+                    <div class="model-meta">@KindTitle(d.Folder) · @Sizes.Gb(d.Bytes) · @d.Licence · @d.Repo</div>
+                </div>
+                <div class="actions">
+                    @if (JobFor(d) is { } job && job.Status != DownloadStatus.Done)
+                    {
+                        <div class="progress" title="@DownloadButton.StatusText(job)">
+                            <div class="meter"><i style="width:@((job.Fraction * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
+                            <span>@DownloadButton.StatusText(job)</span>
+                        </div>
+                    }
+                    else if (installed)
+                    {
+                        <span class="chip">Installed</span>
+                    }
+                    else
+                    {
+                        <button class="btn @(d.Recommended ? "primary" : "")" disabled="@(!Gate.IsOnline || _starting.Contains(d.SaveAs))"
+                                title="@(Gate.IsOnline ? "" : "Go online to download")" @onclick="() => DownloadAsync(d)">
+                            @(_starting.Contains(d.SaveAs) ? "Starting…" : "Download")
+                        </button>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+    <p class="note">Pony Diffusion V6 comes from its author’s own Hugging Face page. Checkpoints and LoRAs from Civitai are downloaded in your browser and put in the folders below by hand: DOG.ai never goes to Civitai.</p>
+</section>
+
+@if (_error is not null)
+{
+    <div class="notice bad"><span>@_error</span></div>
+}
+
+<section class="group">
+    <h3 class="group-title">Image models folder</h3>
+    <p class="note">
+        <b id="image-folder">@(_root ?? "No models folder is set")</b><br />
+        Checkpoints go in <b>checkpoints</b>, LoRAs in <b>loras</b>, VAEs in <b>vae</b> and upscalers in <b>upscalers</b>.
+        Only .safetensors files are used: the old .ckpt format can carry program code, so DOG.ai refuses it.
+    </p>
+    <div class="row">
+        <button class="btn" id="open-image-folder" disabled="@(_root is null)" @onclick="OpenFolder">Open folder</button>
+        <button class="btn" id="image-look-again" @onclick="ScanAsync">Look again</button>
+    </div>
+</section>
+
+<PictureEngineBox Installed="OnEngineInstalled" />
+
+@code {
+    private string? _root, _chosen, _open, _cardError, _error, _engine;
+    private string _testLora = "";
+    private IReadOnlyList<ImageFile> _files = [];
+    private CheckpointSettings? _draft;
+    private LoraDraft? _loraDraft;
+    private readonly HashSet<string> _starting = new(StringComparer.OrdinalIgnoreCase);
+
+    private bool _drawing;
+    private string? _testNote, _testPicture;
+    private CancellationTokenSource? _drawCts;
+
+    /// <summary>The LoRA settings card's fields while being edited.</summary>
+    private sealed class LoraDraft
+    {
+        public string TriggerWords { get; set; } = "";
+        public double Strength { get; set; } = 1;
+    }
+
+    private IReadOnlyList<ImageFile> Checkpoints => _files.Where(f => f.Usable && f.Kind == ImageFileKind.Checkpoint).ToList();
+    private IReadOnlyList<ImageFile> Loras => _files.Where(f => f.Usable && f.Kind == ImageFileKind.Lora).ToList();
+    private IReadOnlyList<string> Vaes => _files.Where(f => f.Usable && f.Kind == ImageFileKind.Vae).Select(f => f.RelativePath).ToList();
+    private IReadOnlyList<ImageFile> Others => _files.Where(f => !(f.Usable && f.Kind is ImageFileKind.Checkpoint or ImageFileKind.Lora)).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _engine = PictureLocator.Find();
+        Downloads.Changed += Refresh;
+        Downloads.Completed += OnCompleted;
+        Gate.Changed += Refresh;
+        Catalog.Changed += Refresh;
+        await ScanAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private void OnCompleted(DownloadJob job)
+    {
+        if (job.UseCase == ImageDownloads.UseCase) _ = InvokeAsync(ScanAsync);
+    }
+
+    private async Task ScanAsync()
+    {
+        var settings = await SettingsStore.LoadAsync();
+        _root = settings.ImageFolder();
+        var root = _root;
+        _files = await Task.Run(() => ImageLibrary.Scan(root));
+        _chosen = Catalog.ChosenAmong(Checkpoints.Select(c => c.RelativePath).ToList());
+        StateHasChanged();
+    }
+
+    private static string KindTitle(string folder) => folder switch
+    {
+        ImageFolders.Checkpoints => "Checkpoint",
+        ImageFolders.Loras => "LoRA",
+        ImageFolders.Vae => "VAE",
+        _ => folder,
+    };
+
+    private static string SettingsLine(CheckpointSettings s) =>
+        $"{(s.Style == PromptStyle.Tags ? "Tags" : "Sentences")} · {SamplerNames.Title(s.Sampler)}, {s.Steps} steps, guidance {s.Guidance:0.#}" +
+        (s.ClipSkip is { } skip ? $", clip skip {skip}" : "") + (s.Prediction == ImagePrediction.V ? ", v-prediction" : "") +
+        (s.Vae is { } vae ? $", VAE {Path.GetFileNameWithoutExtension(vae)}" : "");
+
+    private static string TriggerSource(ImageFile lora) => lora.Verdict.Lora switch
+    {
+        { Triggers.Count: > 0 } => "Guessed from the file: words in nearly every one of its training pictures. Check them against the LoRA’s page.",
+        _ => "The file names no trigger words. Copy them from the LoRA’s page if it has any.",
+    };
+
+    private async Task ChooseAsync(ChangeEventArgs e)
+    {
+        if (e.Value?.ToString() is { Length: > 0 } value) await ChooseAsync(value);
+    }
+
+    private async Task ChooseAsync(string checkpoint)
+    {
+        await Catalog.ChooseAsync(checkpoint);
+        _chosen = checkpoint;
+    }
+
+    private void Toggle(ImageFile c, CheckpointSettings settings)
+    {
+        _cardError = null;
+        _loraDraft = null;
+        if (_open == c.FullPath) { Close(); return; }
+        _open = c.FullPath;
+        _draft = settings;
+    }
+
+    private void ToggleLora(ImageFile l, LoraSettings settings)
+    {
+        _cardError = null;
+        _draft = null;
+        if (_open == l.FullPath) { Close(); return; }
+        _open = l.FullPath;
+        _loraDraft = new LoraDraft { TriggerWords = settings.TriggerWords, Strength = settings.Strength };
+    }
+
+    private void Close()
+    {
+        _open = null;
+        _draft = null;
+        _loraDraft = null;
+        _cardError = null;
+    }
+
+    private async Task SaveCheckpointAsync(ImageFile c)
+    {
+        if (_draft is null) return;
+        try
+        {
+            await Catalog.SaveCheckpointAsync(c.RelativePath, _draft);
+            Close();
+        }
+        catch (InvalidOperationException e)
+        {
+            _cardError = e.Message;
+        }
+    }
+
+    private async Task ResetCheckpointAsync(ImageFile c)
+    {
+        await Catalog.ResetCheckpointAsync(c.RelativePath);
+        _draft = Catalog.CheckpointFor(c.RelativePath, c.Verdict);
+        _cardError = null;
+    }
+
+    private async Task SaveLoraAsync(ImageFile l)
+    {
+        if (_loraDraft is null) return;
+        try
+        {
+            await Catalog.SaveLoraAsync(l.RelativePath, new LoraSettings(_loraDraft.TriggerWords, _loraDraft.Strength));
+            Close();
+        }
+        catch (InvalidOperationException e)
+        {
+            _cardError = e.Message;
+        }
+    }
+
+    private async Task ResetLoraAsync(ImageFile l)
+    {
+        await Catalog.ResetLoraAsync(l.RelativePath);
+        var settings = Catalog.LoraFor(l.RelativePath, l.Verdict.Lora);
+        _loraDraft = new LoraDraft { TriggerWords = settings.TriggerWords, Strength = settings.Strength };
+        _cardError = null;
+    }
+
+    private void OpenFolder()
+    {
+        if (_root is null) return;
+        _error = null;
+        try
+        {
+            ImageLibrary.Ensure(_root);
+            Desktop.OpenFolder(_root);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _error = "Could not create the image models folder: " + e.Message;
+        }
+    }
+
+    private async Task OnEngineInstalled()
+    {
+        _engine = PictureLocator.Find();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Draws the fixed test picture with the chosen checkpoint's settings, through the graphics-card coordinator.</summary>
+    private async Task TestPictureAsync()
+    {
+        if (_root is null || Checkpoints.FirstOrDefault(c => c.RelativePath == _chosen) is not { } checkpoint) return;
+        _testPicture = null;
+        _testNote = "Starting…";
+        _drawing = true;
+        _drawCts = new CancellationTokenSource();
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            ImageLibrary.Ensure(_root);
+            var settings = Catalog.CheckpointFor(checkpoint.RelativePath, checkpoint.Verdict);
+            var loras = Loras.Where(l => l.RelativePath == _testLora)
+                .Select(l => (l.RelativePath, Catalog.LoraFor(l.RelativePath, l.Verdict.Lora))).ToList();
+            var request = ImagePrompt.Compose(settings, ImagePrompt.TestSubject(settings.Style), loras) with
+            {
+                Format = ImageFormat.Jpeg,
+                Quality = 90,
+                Preview = true,
+                PreviewEvery = 4,
+            };
+            var model = ImageFolders.ModelFor(_root, checkpoint.RelativePath, settings);
+            var progress = new Progress<ImageProgress>(p =>
+            {
+                _testNote = p.Stage switch
+                {
+                    CardCoordinator.Waiting => "Waiting for the graphics card (a reply or another picture is using it)…",
+                    CardCoordinator.MakingRoom => "Setting the chat model aside to make room…",
+                    "sampling" => $"Drawing, step {p.Step} of {p.TotalSteps}…",
+                    "conditioning" or "preparing" => "Reading the prompt (the first picture also loads the checkpoint, a few seconds)…",
+                    _ => "Finishing the picture…",
+                };
+                if (p.Preview is { } preview) _testPicture = "data:image/png;base64," + Convert.ToBase64String(preview);
+                StateHasChanged();
+            });
+            var ct = _drawCts.Token;
+            var result = await Task.Run(async () =>
+            {
+                if (Card.Model != model) await Card.LoadAsync(model, ct);
+                return await Card.DrawAsync(request, progress, ct);
+            });
+            _testPicture = "data:image/jpeg;base64," + Convert.ToBase64String(result.Images[0]);
+            _testNote = $"Drawn in {clock.Elapsed.TotalSeconds:0.0} seconds with {checkpoint.Name}" +
+                        (loras.Count > 0 ? $" and {Path.GetFileNameWithoutExtension(loras[0].RelativePath)}" : "") + ". " +
+                        (Coordinator.LastDecision?.Choice switch
+                        {
+                            CardChoice.KeptBoth => "Both fitted on the graphics card, so the chat model stayed loaded.",
+                            CardChoice.SetChatAside => "The chat model was set aside to make room; it loads again with your next message.",
+                            _ => "",
+                        });
+        }
+        catch (ImageEngineException e)
+        {
+            _testPicture = null;
+            _testNote = e.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            _testPicture = null;
+            _testNote = "The picture was cancelled.";
+        }
+        finally
+        {
+            _drawing = false;
+            _drawCts?.Dispose();
+            _drawCts = null;
+        }
+        // The hardware panel beside this shows what was measured when the page opened; measure again now.
+        await Ctx.RefreshAsync();
+    }
+
+    private void CancelDrawing() => _drawCts?.Cancel();
+
+    private bool Installed(ImageDownload d) =>
+        JobFor(d) is not { Status: not DownloadStatus.Done } &&
+        _files.Any(f => f.Folder == d.Folder && f.RelativePath.Equals(d.SaveAs, StringComparison.OrdinalIgnoreCase));
+
+    private DownloadJob? JobFor(ImageDownload d) => _root is null ? null : Downloads.Jobs.LastOrDefault(j =>
+        j.UseCase == ImageDownloads.UseCase && j.Repo.Equals(d.Repo, StringComparison.OrdinalIgnoreCase) &&
+        j.Parts[0].FileName.Equals(d.SaveAs, StringComparison.OrdinalIgnoreCase));
+
+    private async Task DownloadAsync(ImageDownload d)
+    {
+        _error = null;
+        if (_root is null)
+        {
+            _error = "No models folder is set.";
+            return;
+        }
+        _starting.Add(d.SaveAs);
+        try
+        {
+            var files = await Hf.FilesAsync(d.Repo);
+            if (files.FirstOrDefault(f => f.Path.Equals(d.File, StringComparison.Ordinal)) is not { } file)
+            {
+                _error = $"{d.Title} is no longer on Hugging Face in the expected form.";
+                return;
+            }
+            ImageLibrary.Ensure(_root);
+            await Downloads.EnqueueAsync(new DownloadJob
+            {
+                Repo = d.Repo,
+                Title = d.Title,
+                UseCase = ImageDownloads.UseCase,
+                Folder = Path.Combine(_root, d.Folder),
+                Parts =
+                [
+                    new DownloadPart
+                    {
+                        Url = HuggingFaceClient.ResolveUrl(d.Repo, file.Path),
+                        FileName = d.SaveAs,
+                        Size = file.Size,
+                        Sha256 = file.Sha256,
+                    },
+                ],
+            });
+        }
+        catch (Exception e) when (e is DownloadRefusedException or HubException or HttpRequestException or OfflineException or IOException or UnauthorizedAccessException)
+        {
+            _error = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
+        }
+        finally
+        {
+            _starting.Remove(d.SaveAs);
+        }
+    }
+
+    public void Dispose()
+    {
+        _drawCts?.Cancel();
+        Downloads.Changed -= Refresh;
+        Downloads.Completed -= OnCompleted;
+        Gate.Changed -= Refresh;
+        Catalog.Changed -= Refresh;
+    }
+}

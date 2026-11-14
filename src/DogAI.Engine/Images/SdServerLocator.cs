@@ -4,7 +4,7 @@ namespace DogAI.Engine.Images;
 
 /// <summary>
 /// Finds the picture engine (stable-diffusion.cpp's sd-server). Only two places count: an explicit override for tests,
-/// then DOG.ai's own copy in the engine folder, installed from Models → Engine. Nothing on PATH or from winget is used,
+/// then DOG.ai's own copy in the engine folder, installed from Models → Images. Nothing on PATH or from winget is used,
 /// so the program that sees picture prompts is always one DOG.ai installed and checked.
 /// </summary>
 public sealed class SdServerLocator(AppPaths paths)
@@ -14,7 +14,7 @@ public sealed class SdServerLocator(AppPaths paths)
 
     public string? Find() => Candidates().FirstOrDefault(File.Exists);
 
-    public const string MissingMessage = "The picture engine (stable-diffusion.cpp) is not installed yet. Get it in Models → Engine.";
+    public const string MissingMessage = "The picture engine (stable-diffusion.cpp) is not installed yet. Get it in Models → Images.";
 
     private IEnumerable<string> Candidates()
     {

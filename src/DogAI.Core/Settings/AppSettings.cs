@@ -105,6 +105,9 @@ public sealed record AppSettings
 
     /// <summary>Where voice models are kept: a "voice" folder inside the models folder.</summary>
     public string? VoiceFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, "voice");
+
+    /// <summary>Where image models are kept: an "image" folder inside the models folder, with checkpoints, loras, vae and upscalers in it.</summary>
+    public string? ImageFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, DogAI.Core.Images.ImageFolders.Name);
 }
 
 /// <summary>The few things the UI needs from Windows itself. Implemented by the WPF host.</summary>
@@ -142,6 +145,9 @@ public interface IDesktopShell
 
     /// <summary>Opens a file on this PC in the program Windows uses for it. False if it is not there any more.</summary>
     bool OpenFile(string path);
+
+    /// <summary>Shows a folder on this PC in File Explorer. False if it is not there.</summary>
+    bool OpenFolder(string path);
 
     /// <summary>Shows the "save file" dialog and returns the chosen path without writing anything (for files too big to hold in memory). Null if cancelled.</summary>
     Task<string?> PickSavePathAsync(string suggestedName, string filter);

@@ -1,0 +1,127 @@
+@* The fields of one checkpoint's settings card. Works on a copy (Draft); the tab saves it. Choosing another family fills
+   in that family's starting settings. *@
+@using DogAI.Core.Images
+
+<div class="form-grid checkpoint-card">
+    <label>
+        Family
+        <select class="field" name="family" @onchange="FamilyChanged">
+            @foreach (var f in Enum.GetValues<ImageFamily>())
+            {
+                <option value="@f" selected="@(f == Draft.Family)">@FamilyNames.Title(f)</option>
+            }
+        </select>
+        <span class="small">Changing it fills in that family’s starting settings below.</span>
+    </label>
+    <label>
+        Prompt style
+        <select class="field" name="style" @onchange="e => Set(Draft with { Style = Enum.Parse<PromptStyle>(e.Value!.ToString()!) })">
+            <option value="@PromptStyle.Tags" selected="@(Draft.Style == PromptStyle.Tags)">Tags (1girl, silver hair, forest)</option>
+            <option value="@PromptStyle.Sentences" selected="@(Draft.Style == PromptStyle.Sentences)">Sentences</option>
+        </select>
+    </label>
+    <label class="wide-field">
+        Quality words before the prompt
+        <textarea class="field" rows="2" name="quality-before" value="@Draft.QualityBefore" @onchange="e => Set(Draft with { QualityBefore = Text(e) })"></textarea>
+    </label>
+    <label class="wide-field">
+        Quality words after the prompt
+        <input class="field" name="quality-after" value="@Draft.QualityAfter" @onchange="e => Set(Draft with { QualityAfter = Text(e) })" />
+    </label>
+    <label class="wide-field">
+        Negative prompt
+        <textarea class="field" rows="2" name="negative" value="@Draft.Negative" @onchange="e => Set(Draft with { Negative = Text(e) })"></textarea>
+        <span class="small">What pictures should avoid.</span>
+    </label>
+    <label>
+        Sampler
+        <select class="field" name="sampler" @onchange="e => Set(Draft with { Sampler = Text(e) })">
+            @foreach (var (id, title) in SamplerNames.Samplers)
+            {
+                <option value="@id" selected="@(id == Draft.Sampler)">@title</option>
+            }
+            @if (SamplerNames.Samplers.All(s => s.Id != Draft.Sampler))
+            {
+                <option value="@Draft.Sampler" selected>@Draft.Sampler</option>
+            }
+        </select>
+    </label>
+    <label>
+        Scheduler
+        <select class="field" name="scheduler" @onchange="e => Set(Draft with { Scheduler = Text(e) is { Length: > 0 } s ? s : null })">
+            @foreach (var (id, title) in SamplerNames.Schedulers)
+            {
+                <option value="@(id ?? "")" selected="@(id == Draft.Scheduler)">@title</option>
+            }
+        </select>
+    </label>
+    <label>
+        Steps
+        <input class="field" type="number" name="steps" min="@CheckpointSettings.MinSteps" max="@CheckpointSettings.MaxSteps" value="@Draft.Steps"
+               @onchange="e => { if (int.TryParse(Text(e), out var n)) Set(Draft with { Steps = n }); }" />
+        <span class="small">More steps take longer; 25 to 30 is usual.</span>
+    </label>
+    <label>
+        Guidance
+        <input class="field" type="number" name="guidance" step="0.5" min="0" max="30" value="@Draft.Guidance.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+               @onchange="e => { if (double.TryParse(Text(e), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var g)) Set(Draft with { Guidance = g }); }" />
+        <span class="small">How closely the picture follows the prompt.</span>
+    </label>
+    <label>
+        Clip skip
+        <select class="field" name="clip-skip" @onchange="e => Set(Draft with { ClipSkip = int.TryParse(Text(e), out var n) ? n : null })">
+            <option value="" selected="@(Draft.ClipSkip is null)">Engine default</option>
+            @for (var i = 1; i <= 4; i++)
+            {
+                var n = i;
+                <option value="@n" selected="@(Draft.ClipSkip == n)">@n</option>
+            }
+        </select>
+        <span class="small">2 for most anime-style checkpoints.</span>
+    </label>
+    <label>
+        Prediction
+        <select class="field" name="prediction" @onchange="e => Set(Draft with { Prediction = Enum.Parse<ImagePrediction>(Text(e)) })">
+            <option value="@ImagePrediction.Auto" selected="@(Draft.Prediction == ImagePrediction.Auto)">Normal</option>
+            <option value="@ImagePrediction.V" selected="@(Draft.Prediction == ImagePrediction.V)">V-prediction</option>
+        </select>
+        <span class="small">@(VPrediction ? "The file says it is v-prediction." : "Almost every checkpoint is normal; only some NoobAI versions are v-prediction.")</span>
+    </label>
+    <label class="wide-field">
+        VAE
+        <select class="field" name="vae" @onchange="e => Set(Draft with { Vae = Text(e) is { Length: > 0 } v ? v : null })">
+            <option value="" selected="@(Draft.Vae is null)">The checkpoint’s own</option>
+            @foreach (var vae in Vaes)
+            {
+                <option value="@vae" selected="@(vae == Draft.Vae)">@Path.GetFileNameWithoutExtension(vae)</option>
+            }
+            @if (Draft.Vae is { } missing && !Vaes.Contains(missing))
+            {
+                <option value="@missing" selected>@Path.GetFileNameWithoutExtension(missing) (not found)</option>
+            }
+        </select>
+        <span class="small">Only needed when pictures come out black or washed out. VAE files go in the vae folder.</span>
+    </label>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public CheckpointSettings Draft { get; set; } = default!;
+    [Parameter] public EventCallback<CheckpointSettings> DraftChanged { get; set; }
+    [Parameter] public IReadOnlyList<string> Vaes { get; set; } = [];
+    [Parameter] public bool VPrediction { get; set; }
+
+    private static string Text(ChangeEventArgs e) => e.Value?.ToString() ?? "";
+
+    private Task Set(CheckpointSettings next)
+    {
+        Draft = next;
+        return DraftChanged.InvokeAsync(next);
+    }
+
+    private Task FamilyChanged(ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<ImageFamily>(Text(e), out var family)) return Task.CompletedTask;
+        // A VAE chosen by the owner is about the file, not the family: keep it.
+        return Set(CheckpointSettings.ForFamily(family, VPrediction) with { Vae = Draft.Vae });
+    }
+}
