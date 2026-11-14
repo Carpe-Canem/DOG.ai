@@ -324,7 +324,26 @@ public sealed class ImageServer : IImageEngine, IDisposable
     private void StopIfIdle()
     {
         if (_api is null || IsBusy || DateTime.UtcNow - _lastUse < IdleStop) return;
-        _ = StopAsync();
+        _ = StopIfStillIdleAsync();
+    }
+
+    /// <summary>
+    /// Checks again while holding the start lock: a picture counts as busy before it takes the lock, so one that began
+    /// after the timer looked is never cut off. If it takes the lock after this, it starts the program again.
+    /// </summary>
+    private async Task StopIfStillIdleAsync()
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_api is null || IsBusy || DateTime.UtcNow - _lastUse < IdleStop) return;
+            StopProcess();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+        Changed?.Invoke();
     }
 
     private void StopProcess()
