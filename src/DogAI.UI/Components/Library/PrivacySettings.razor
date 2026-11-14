@@ -13,9 +13,7 @@
     {
         case LockStatus.Off:
             <p class="small">
-                Lock DOG.ai with a password and everything it keeps (chats, characters, stories, documents, settings) is stored encrypted.
-                Without the password nobody can read it: not on this PC, not from a copy of the data folder, not from a backup.
-                Models are not encrypted; they are public downloads.
+                With a password, everything DOG.ai keeps is stored encrypted, and nobody can read it without the password.<InfoButton About="the lock">Chats, characters, stories, documents and settings: not on this PC, not from a copy of the data folder, not from a backup. Models are not encrypted; they are public downloads.</InfoButton>
             </p>
             <p class="small"><b>@LostSentence</b></p>
             <div class="row"><button class="btn primary" @onclick="StartTurnOn">Lock DOG.ai with a password…</button></div>
@@ -55,7 +53,7 @@
                         <option value="@minutes" selected="@(minutes == _idleMinutes)">@(minutes == 0 ? "Never" : minutes == 60 ? "1 hour" : $"{minutes} minutes")</option>
                     }
                 </select>
-                <span class="small">Counted from the last key press or mouse move anywhere on the PC. While a reply is being written or read aloud, or a model is downloading, it waits up to the same time again. A download cut by the lock is paused and carries on with Resume in Models. Locking unloads the model; it loads again after you unlock.</span>
+                <span class="small">Counted from the last key press or mouse move anywhere on the PC.<InfoButton About="the idle lock">While a reply is being written or read aloud, or a model is downloading, it waits up to the same time again. A download cut by the lock is paused and carries on with Resume in Models. Locking unloads the model; it loads again after you unlock.</InfoButton></span>
             </label>
             @if (_helloAvailable)
             {

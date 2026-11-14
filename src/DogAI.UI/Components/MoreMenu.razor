@@ -1,0 +1,29 @@
+@* A "⋯" button that opens a small menu of the less used actions. A click on an item, outside the menu, or Escape
+   closes it. Items are buttons with class "menu-item" ("menu-item danger" for Delete); a "menu-note" is plain text. *@
+
+<div class="more-menu @(_open ? "open" : "")" @onkeydown="OnKey">
+    <button type="button" class="btn more-btn" id="@Id" aria-label="@Label" title="@Label" aria-haspopup="menu" aria-expanded="@(_open ? "true" : "false")" @onclick="Toggle">
+        <Icon Name="more" Size="18" />
+    </button>
+    @if (_open)
+    {
+        <div class="menu-back" @onclick="Close"></div>
+        <div class="menu-pop" role="menu" aria-label="@Label" @onclick="Close">@ChildContent</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string Label { get; set; } = "More";
+    [Parameter] public string? Id { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool _open;
+
+    private void Toggle() => _open = !_open;
+    private void Close() => _open = false;
+
+    private void OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") _open = false;
+    }
+}

@@ -1,0 +1,30 @@
+@* A row of tabs at the top of a page. Each tab is a link (Href) or a button (Selected); the current one is marked. *@
+
+<nav class="page-tabs @Class" aria-label="@Label">
+    @foreach (var (id, title) in Items)
+    {
+        var tab = id;
+        var current = tab == Current;
+        if (Href is not null)
+        {
+            <a class="page-tab @(current ? "active" : "")" href="@Href(tab)" aria-current="@(current ? "page" : null)" data-tab="@tab">@title</a>
+        }
+        else
+        {
+            <button type="button" class="page-tab @(current ? "active" : "")" aria-pressed="@(current ? "true" : "false")" data-tab="@tab" @onclick="() => Selected.InvokeAsync(tab)">@title</button>
+        }
+    }
+</nav>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<(string Id, string Title)> Items { get; set; } = [];
+    [Parameter] public string? Current { get; set; }
+    [Parameter] public string Label { get; set; } = "Sections";
+    [Parameter] public string Class { get; set; } = "";
+
+    /// <summary>When set, each tab is a link to this address.</summary>
+    [Parameter] public Func<string, string>? Href { get; set; }
+
+    /// <summary>When there is no <see cref="Href"/>: a tab was clicked.</summary>
+    [Parameter] public EventCallback<string> Selected { get; set; }
+}

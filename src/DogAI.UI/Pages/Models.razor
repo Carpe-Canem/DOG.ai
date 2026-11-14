@@ -104,16 +104,7 @@
     }
     <div class="panel">
         <h4>How fit is judged</h4>
-        <label class="inline">
-            <span>Context</span>
-            <select class="field" value="@Ctx.Context" @onchange="SetContextAsync">
-                @foreach (var size in ModelsContext.ContextSizes)
-                {
-                    <option value="@size">@int.Parse(size).ToString("N0") tokens</option>
-                }
-            </select>
-        </label>
-        <div class="small">File size plus the memory a @Ctx.Context.ToString("N0")-token conversation needs, compared with free graphics memory. Bigger contexts need more. This is also the context models load with.</div>
+        <div class="small" id="fit-context-note">For a @Ctx.Context.ToString("N0")-token conversation, the context size models load with. Change it in <a href="models/library">Library › Default models</a>.</div>
     </div>
     <div class="panel">
         <h4>Connection</h4>
@@ -220,11 +211,6 @@
         _libraryCount = files.Count;
         _librarySize = files.Sum(f => f.SizeBytes);
         StateHasChanged();
-    }
-
-    private async Task SetContextAsync(ChangeEventArgs e)
-    {
-        if (int.TryParse(e.Value?.ToString(), out var size)) await Ctx.SetContextAsync(size);
     }
 
     private async Task SaveTokenAsync(string? token)

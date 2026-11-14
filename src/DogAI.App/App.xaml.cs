@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using System.Windows;
 using DogAI.Core;
 using DogAI.Core.Appearance;
@@ -122,6 +122,7 @@ public partial class App : Application
             await _services.GetRequiredService<PresetCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Library.LibraryCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Images.ImageModelCatalog>().LoadAsync();
+            await _services.GetRequiredService<InterfaceMemory>().LoadAsync();
 
             var window = new MainWindow(_services);
             // WPF takes the first window it ever shows as the main one; after a lock screen that would be a closed window.
@@ -251,6 +252,7 @@ public partial class App : Application
         services.AddSingleton<PresetCatalog>();
         services.AddSingleton(sp => new DogAI.Core.Library.LibraryCatalog(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton(sp => new DogAI.Core.Images.ImageModelCatalog(sp.GetRequiredService<IDocumentStore>()));
+        services.AddSingleton(sp => new InterfaceMemory(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton<ChatService>();
         services.AddSingleton<DogAI.Core.Characters.CardBuilder>();
         services.AddSingleton<DogAI.Core.Images.PictureWriter>();

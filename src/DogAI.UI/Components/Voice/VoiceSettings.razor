@@ -10,18 +10,18 @@
 {
     <div class="voice-settings">
         <div class="two">
-            <div class="label-like">
+            <div class="label-like" id="set-voice">
                 Default voice <span class="small">for General chats, and characters and stories without a voice of their own</span>
                 <VoicePicker Value="@s.Voice" ValueChanged="v => SaveAsync(s with { Voice = v })" DefaultLabel="Pick one automatically" />
             </div>
-            <label>
+            <label id="set-voice-speed">
                 <span>Speed <span class="small">@s.VoiceSpeed.ToString("0.0#")×</span></span>
                 <input type="range" min="0.5" max="2" step="0.05" value="@s.VoiceSpeed.ToString(System.Globalization.CultureInfo.InvariantCulture)"
                        @onchange="e => SaveAsync(s with { VoiceSpeed = Parse(e.Value, 1) })" aria-label="Speaking speed" />
             </label>
         </div>
         <div class="two">
-            <label>
+            <label id="set-speakers">
                 Speakers
                 <select class="field" value="@(s.Speakers ?? "")" @onchange="e => SaveAsync(s with { Speakers = Empty(e.Value) })">
                     <option value="" selected="@(s.Speakers is null)">Windows default</option>
@@ -31,7 +31,7 @@
                     }
                 </select>
             </label>
-            <label>
+            <label id="set-microphone">
                 Microphone
                 <select class="field" value="@(s.Microphone ?? "")" @onchange="e => SaveAsync(s with { Microphone = Empty(e.Value) })">
                     <option value="" selected="@(s.Microphone is null)">Windows default</option>
@@ -42,12 +42,12 @@
                 </select>
             </label>
         </div>
-        <label class="check">
+        <label class="check" id="set-auto-read">
             <input type="checkbox" checked="@Voice.AutoRead" @onchange="e => Voice.SetAutoReadAsync(e.Value is true)" />
             <span>Read replies aloud as they are written <span class="small">The speaker button under the message box does the same.</span></span>
         </label>
         <div class="two">
-            <label>
+            <label id="set-speech-language">
                 Language you speak
                 <select class="field" value="@s.SpeechLanguage" @onchange="e => SaveAsync(s with { SpeechLanguage = Empty(e.Value) ?? Auto })">
                     @foreach (var (lang, name) in Languages)
@@ -56,7 +56,7 @@
                     }
                 </select>
             </label>
-            <label>
+            <label id="set-hands-free">
                 Hands-free listening
                 <select class="field" value="@s.HandsFreeSensitivity" @onchange="e => SaveAsync(s with { HandsFreeSensitivity = (int)Parse(e.Value, 1) })">
                     <option value="0">Noisy room: only clear, loud speech</option>
@@ -65,7 +65,7 @@
                 </select>
             </label>
         </div>
-        <div class="label-like">
+        <div class="label-like" id="set-speech-model">
             Speech recognition
             @if (_speechModel is null)
             {

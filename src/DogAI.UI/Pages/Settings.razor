@@ -1,4 +1,5 @@
 @page "/settings"
+@page "/settings/{Category}"
 @implements IDisposable
 @inject AppearanceState Appearance
 @inject AppPaths Paths
@@ -6,13 +7,58 @@
 @inject NetworkAudit Audit
 @inject ISettingsStore SettingsStore
 @inject DogAI.Core.Stories.StoryOptions StoryOptions
+@inject InterfaceMemory Memory
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@* One category is shown at a time, but every category stays on the page (hidden), so the ids that walkthroughs and
+   checks use keep working whichever category is open. The categories and the search entries are SettingsCatalog (Core). *@
 
 <SectionContent SectionName="title">
     <h2>Settings</h2>
-    <p>Changes apply immediately</p>
+    <p>@Current.Title · changes apply immediately</p>
 </SectionContent>
 
-<div class="settings">
+<SectionContent SectionName="list">
+    <div class="list-head"><h3>Settings</h3></div>
+    <input class="field list-search" id="settings-search" type="search" placeholder="Find a setting…" aria-label="Find a setting" autocomplete="off"
+           @bind="_query" @bind:event="oninput" @onkeydown="SearchKeyAsync" />
+    @if (!string.IsNullOrWhiteSpace(_query))
+    {
+        var hits = SettingsCatalog.Search(_query);
+        @if (hits.Count == 0)
+        {
+            <p class="list-note" id="settings-no-hits">No setting matches “@_query.Trim()”.</p>
+        }
+        @foreach (var hit in hits)
+        {
+            var h = hit;
+            <button type="button" class="li settings-hit" data-anchor="@h.Anchor" @onclick="() => OpenAsync(h)">
+                <span class="li-text">
+                    <span class="li-title">@h.Title</span>
+                    <span class="li-sub">@SettingsCatalog.Find(h.Category).Title</span>
+                </span>
+            </button>
+        }
+    }
+    else
+    {
+        @foreach (var c in SettingsCatalog.Categories)
+        {
+            <a class="li @(c.Id == Current.Id ? "active" : "")" href="@($"settings/{c.Id}")" data-category="@c.Id" aria-current="@(c.Id == Current.Id ? "page" : null)">
+                <span class="li-text">
+                    <span class="li-title">@c.Title</span>
+                    <span class="li-sub">@c.About</span>
+                </span>
+            </a>
+        }
+    }
+</SectionContent>
+
+<PageTabs Class="narrow-only settings-tabs" Label="Settings categories" Current="@Current.Id"
+          Items="@(SettingsCatalog.Categories.Select(c => (c.Id, c.Title)).ToList())" Href="@(id => $"settings/{id}")" />
+
+<div class="settings" data-category="appearance" hidden="@Hidden(SettingsCatalog.Appearance)">
     <section>
         <h3 id="look-label">Look</h3>
         <div class="choice-grid" role="radiogroup" aria-labelledby="look-label">
@@ -41,47 +87,72 @@
             }
         </div>
     </section>
+</div>
 
+<div class="settings" data-category="chats" hidden="@Hidden(SettingsCatalog.Chats)">
     <section>
         <h3>Reading</h3>
-        <label class="check">
-            <input type="checkbox" name="speech-colours" checked="@Appearance.SpeechColours" @onchange="e => Appearance.SetSpeechColoursAsync(e.Value is true)" />
-            Colour spoken lines and actions
-        </label>
-        <p class="small">In character chats, group chats and stories, "quoted speech" takes a colour and *actions* are toned down. In a group chat each member speaks in their own colour.</p>
-        <label class="check">
-            <input type="checkbox" name="story-thinking" checked="@StoryOptions.Thinking" @onchange="e => StoryOptions.SetThinkingAsync(e.Value is true)" />
-            Let the model think in stories
-        </label>
-        <p class="small">Some models think silently before they write. Off, they start a story passage at once and cannot use up the room meant for the story; on, they may plan more carefully but are slower, and can run out of room. Models that do not think, or cannot be told, are not affected. Chats are not affected either.</p>
+        <div class="voice-settings">
+            <div id="set-speech-colours">
+                <label class="check">
+                    <input type="checkbox" name="speech-colours" checked="@Appearance.SpeechColours" @onchange="e => Appearance.SetSpeechColoursAsync(e.Value is true)" />
+                    Colour spoken lines and actions
+                </label>
+                <p class="small">In character chats, group chats and stories.<InfoButton About="speech colours">"Quoted speech" takes a colour and *actions* are toned down. In a group chat each member speaks in their own colour. General chats are never coloured.</InfoButton></p>
+            </div>
+        </div>
     </section>
+    <section>
+        <h3>Stories</h3>
+        <div class="voice-settings">
+            <div id="set-story-thinking">
+                <label class="check">
+                    <input type="checkbox" name="story-thinking" checked="@StoryOptions.Thinking" @onchange="e => StoryOptions.SetThinkingAsync(e.Value is true)" />
+                    Let the model think in stories
+                </label>
+                <p class="small">Off, models that think start a passage at once. Chats are not affected.<InfoButton About="thinking in stories">Some models think silently before they write. Off, they start a story passage at once and cannot use up the room meant for the story; on, they may plan more carefully but are slower, and can run out of room. Models that do not think, or cannot be told, are not affected.</InfoButton></p>
+            </div>
+        </div>
+    </section>
+</div>
 
+<div class="settings" data-category="voice" hidden="@Hidden(SettingsCatalog.Voice)">
     <section>
         <h3>Voice</h3>
         <VoiceSettings />
     </section>
+</div>
 
+<div class="settings" data-category="pictures" hidden="@Hidden(SettingsCatalog.Pictures)">
     <section>
         <h3>Pictures</h3>
         <PictureSettings />
     </section>
+</div>
 
-    <section>
+<div class="settings" data-category="privacy" hidden="@Hidden(SettingsCatalog.Privacy)">
+    <section id="set-lock">
         <h3>Privacy</h3>
         <PrivacySettings />
     </section>
+</div>
 
+<div class="settings" data-category="windows" hidden="@Hidden(SettingsCatalog.Windows)">
     <section>
         <h3>Windows</h3>
         <WindowsSettings />
     </section>
+</div>
 
-    <section>
+<div class="settings" data-category="backup" hidden="@Hidden(SettingsCatalog.Backup)">
+    <section id="set-backup">
         <h3>Backup and restore</h3>
         <BackupSettings />
     </section>
+</div>
 
-    <section>
+<div class="settings" data-category="about" hidden="@Hidden(SettingsCatalog.About)">
+    <section id="set-about">
         <h3>About this install</h3>
         <div class="about">
             <div class="kv"><span>Version</span><span>@Version</span></div>
@@ -98,7 +169,17 @@
 </div>
 
 @code {
+    [Parameter] public string? Category { get; set; }
+
     private AppSettings? _settings;
+    private string _query = "";
+    private string? _scrollTo;
+    private IJSObjectReference? _module;
+
+    /// <summary>The category in the address; with none, the one shown last (Appearance the first time).</summary>
+    private SettingsCategory Current => SettingsCatalog.Find(Category ?? Memory.SettingsCategory);
+
+    private bool Hidden(string category) => Current.Id != category;
 
     private static readonly (string Id, string Label)[] ThemeChoices =
         [(Themes.System, "Match Windows"), (Themes.Dark, "Dark"), (Themes.Light, "Light")];
@@ -120,6 +201,40 @@
         _settings = await SettingsStore.LoadAsync();
     }
 
+    protected override async Task OnParametersSetAsync()
+    {
+        // A category opened by its address is the one shown next time Settings opens.
+        if (Category is { } asked && SettingsCatalog.Category(asked) == asked) await Memory.SetSettingsCategoryAsync(asked);
+    }
+
+    private async Task OpenAsync(SettingsEntry entry)
+    {
+        _query = "";
+        _scrollTo = entry.Anchor;
+        if (entry.Category == Current.Id) StateHasChanged();
+        else Nav.NavigateTo($"settings/{entry.Category}");
+        await ScrollAsync();
+    }
+
+    private async Task SearchKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") _query = "";
+        else if (e.Key == "Enter" && SettingsCatalog.Search(_query) is [var first, ..]) await OpenAsync(first);
+    }
+
+    private async Task ScrollAsync()
+    {
+        if (_scrollTo is not { } id) return;
+        _scrollTo = null;
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
+        await _module.InvokeVoidAsync("scrollToSetting", id);
+    }
+
     private void Refresh() => InvokeAsync(StateHasChanged);
-    public void Dispose() => Appearance.Changed -= Refresh;
+
+    public void Dispose()
+    {
+        Appearance.Changed -= Refresh;
+        _ = _module?.DisposeAsync();
+    }
 }

@@ -1,0 +1,16 @@
+@* A small "i" button for help text that is too long to show under a control: the one-line help stays visible and the
+   rest opens below it on a click. The text is always on the page (hidden while closed), so an id inside it keeps
+   working. Warnings must not go behind it: they stay visible. Put it outside a <label> where the layout allows. *@
+
+<button type="button" class="info-btn" aria-label="@($"More about {About}")" title="@($"More about {About}")" aria-expanded="@(_open ? "true" : "false")" @onclick="() => _open = !_open" @onclick:preventDefault="true" @onclick:stopPropagation="true">
+    <Icon Name="info" Size="15" />
+</button>
+<span class="info-text" hidden="@(!_open)">@ChildContent</span>
+
+@code {
+    /// <summary>What the text is about, for the button's name ("More about …").</summary>
+    [Parameter, EditorRequired] public string About { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool _open;
+}

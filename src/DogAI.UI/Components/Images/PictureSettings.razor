@@ -43,7 +43,7 @@
                 </label>
             }
         </div>
-        <span class="small" id="rating-blurb">@PictureRatings.Blurb(P.Rating) The rating’s word goes into the prompt and the ratings above it into the negative prompt; the chat model is told the rating when it plans a picture. Checkpoints do not always obey.</span>
+        <span class="small" id="rating-blurb">@PictureRatings.Blurb(P.Rating) Checkpoints do not always obey.<InfoButton About="the rating">The rating’s words go into the prompt and the words of the ratings above it into the negative prompt; the chat model is told the rating when it plans a picture. The words per rating are on each checkpoint’s card in Models › Images.</InfoButton></span>
         @if (!Extra.IsOn)
         {
             <span class="small" id="rating-tags-note">@TagsNote</span>
@@ -53,7 +53,7 @@
         <input type="checkbox" id="pictures-show-prompt" checked="@P.ShowPromptFirst" @onchange="e => SaveAsync(P with { ShowPromptFirst = e.Value is true })" />
         Show me the prompt before drawing
     </label>
-    <p class="small wide-field">Off, a picture is drawn as soon as the chat model has planned it. On, you see what it planned, the prompt and what the tag check corrected or left out, and can change the prompt first.</p>
+    <p class="small wide-field">Off, a picture is drawn as soon as the chat model has planned it.<InfoButton About="showing the prompt first">On, you see what the chat model planned, the prompt, and what the tag check corrected or left out, and can change the prompt before it is drawn.</InfoButton></p>
 </div>
 
 @code {

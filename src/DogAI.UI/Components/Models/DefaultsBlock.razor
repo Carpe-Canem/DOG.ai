@@ -1,0 +1,176 @@
+@* Models → Library: the default model per job in one place (owner's decision, 2026-11-14), and the context size models
+   load with. Chat modes and document search write AppSettings.DefaultModels through ModelDefaults (Core); Pictures writes
+   ImageModelCatalog.Chosen, the same choice as Settings → Pictures and "Draw with" on Models → Images. Opening it only
+   reads file headers: it starts and creates nothing. *@
+@using DogAI.Engine.Images
+@implements IDisposable
+@inject ISettingsStore SettingsStore
+@inject ModelsContext Ctx
+@inject EmbeddingServer Search
+@inject DocumentLibrary Documents
+@inject ImageModelCatalog Catalog
+
+<Fold Id="library-defaults" Title="Default models" Summary="@Summary" Class="defaults">
+    <div class="form-grid defaults-grid">
+        @foreach (var mode in ModelDefaults.ChatModes)
+        {
+            var m = mode;
+            var current = ModelDefaults.For(Settings, m);
+            <label>
+                @CuratedPicks.Label(m)
+                <select class="field" id="@($"default-{m}")" @onchange="e => SetAsync(m, e.Value?.ToString())">
+                    <option value="" selected="@(current is null)">No default</option>
+                    @foreach (var model in ChatModels)
+                    {
+                        <option value="@model.Path" selected="@Same(model.Path, current)">@model.Name</option>
+                    }
+                    @if (current is not null && !ChatModels.Any(x => Same(x.Path, current)))
+                    {
+                        <option value="@current" selected>@Path.GetFileNameWithoutExtension(current) (not found)</option>
+                    }
+                </select>
+            </label>
+        }
+        @{ var chosenSearch = ModelDefaults.For(Settings, ModelDefaults.DocumentSearch); }
+        <label>
+            Document search
+            <select class="field" id="default-embedding" @onchange="e => SetAsync(ModelDefaults.DocumentSearch, e.Value?.ToString())">
+                <option value="" selected="@(chosenSearch is null)">Pick automatically@(chosenSearch is null && SearchModel is { } auto ? $" ({NameOf(auto)})" : "")</option>
+                @foreach (var model in SearchModels)
+                {
+                    <option value="@model.Path" selected="@Same(model.Path, chosenSearch)">@model.Name</option>
+                }
+                @if (chosenSearch is not null && !SearchModels.Any(x => Same(x.Path, chosenSearch)))
+                {
+                    <option value="@chosenSearch" selected>@Path.GetFileNameWithoutExtension(chosenSearch) (not found)</option>
+                }
+            </select>
+        </label>
+        @{ var chosenPicture = Catalog.Chosen; }
+        <label>
+            Pictures
+            <select class="field" id="default-pictures" @onchange="SetPicturesAsync">
+                <option value="" selected="@(chosenPicture is null)">Pick automatically@(chosenPicture is null && _checkpoints.Count > 0 ? $" ({_checkpoints[0].Name})" : "")</option>
+                @foreach (var c in _checkpoints)
+                {
+                    <option value="@c.RelativePath" selected="@SamePicture(c.RelativePath, chosenPicture)">@c.Name</option>
+                }
+                @if (chosenPicture is not null && _scanned && !_checkpoints.Any(c => SamePicture(c.RelativePath, chosenPicture)))
+                {
+                    <option value="@chosenPicture" selected>@Path.GetFileNameWithoutExtension(chosenPicture) (not found)</option>
+                }
+            </select>
+        </label>
+        <label class="wide-field">
+            <span>Context size <InfoButton About="context size">The memory a conversation of this length needs is added to each model's file size and compared with free graphics memory; that is how the fit badges on every Models tab are judged. Bigger sizes need more memory. A model that is loaded already keeps its size until it loads again.</InfoButton></span>
+            <select class="field narrow" id="default-context" value="@Ctx.Context" @onchange="SetContextAsync">
+                @foreach (var size in ModelsContext.ContextSizes)
+                {
+                    <option value="@size" selected="@(size == Ctx.Context.ToString())">@int.Parse(size).ToString("N0") tokens</option>
+                }
+            </select>
+            <span class="small">How much of a conversation a model sees at once. Models load with it.</span>
+        </label>
+    </div>
+    <p class="small">A mode with no default loads nothing when it opens, until you pick a model there.</p>
+</Fold>
+
+@code {
+    /// <summary>A model file in the library, as the block lists it.</summary>
+    public sealed record Choice(string Path, string Name, bool Search);
+
+    [Parameter, EditorRequired] public IReadOnlyList<Choice> Models { get; set; } = [];
+    [Parameter, EditorRequired] public AppSettings Settings { get; set; } = new();
+
+    /// <summary>The model document search uses now (chosen, or found automatically).</summary>
+    [Parameter] public string? SearchModel { get; set; }
+
+    /// <summary>A default changed: what to tell the owner. The library reads the settings again.</summary>
+    [Parameter] public EventCallback<string> Changed { get; set; }
+
+    private IReadOnlyList<ImageFile> _checkpoints = [];
+    private bool _scanned;
+
+    private IEnumerable<Choice> ChatModels => Models.Where(m => !m.Search);
+    private IEnumerable<Choice> SearchModels => Models.Where(m => m.Search);
+
+    private string Summary
+    {
+        get
+        {
+            var set = ModelDefaults.ChatModes.Where(m => ModelDefaults.For(Settings, m) is not null).Select(CuratedPicks.Label).ToList();
+            return (set.Count == 0 ? "No chat defaults" : "Set for " + string.Join(", ", set)) + $" · context {Ctx.Context:N0}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Catalog.Changed += Refresh;
+        Ctx.Changed += Refresh;
+        var root = (await SettingsStore.LoadAsync()).ImageFolder();
+        var files = await Task.Run(() => ImageLibrary.Scan(root));
+        _checkpoints = files.Where(f => f.Usable && f.Kind == ImageFileKind.Checkpoint).ToList();
+        _scanned = true;
+    }
+
+    private async Task SetAsync(string mode, string? path)
+    {
+        var outcome = ModelDefaults.Set(await SettingsStore.LoadAsync(), mode, path);
+        if (!outcome.Changed) return;
+        await SettingsStore.SaveAsync(outcome.Settings);
+        var label = CuratedPicks.Label(mode);
+        string message;
+        if (outcome.SearchChanged)
+        {
+            // Documents indexed with another model are indexed again with the one now in use, in the background.
+            Search.ChoiceChanged();
+            var now = await Search.ModelPathAsync();
+            Documents.StartIndexing();
+            message = string.IsNullOrEmpty(path)
+                ? $"Document search picks its model automatically{(now is null ? "" : $" ({NameOf(now)})")}. Documents are indexed again with it if needed."
+                : $"{NameOf(path)} is now used for document search. Documents are indexed again with it in the background.";
+        }
+        else message = string.IsNullOrEmpty(path)
+            ? $"{label} has no default model now. Opening it loads nothing until you pick a model."
+            : $"{NameOf(path)} is now the default model for {label}.";
+        await Changed.InvokeAsync(message);
+    }
+
+    private async Task SetPicturesAsync(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        if (string.IsNullOrEmpty(value))
+        {
+            if (Catalog.Chosen is null) return;
+            await Catalog.ChooseAsync(null);
+            await Changed.InvokeAsync(_checkpoints.Count > 0
+                ? $"Pictures use the first checkpoint found ({_checkpoints[0].Name})."
+                : "Pictures use the first checkpoint found.");
+            return;
+        }
+        if (_checkpoints.FirstOrDefault(c => c.RelativePath == value) is not { } chosen) return;
+        await Catalog.ChooseAsync(value);
+        await Changed.InvokeAsync($"Pictures are drawn with {chosen.Name}.");
+    }
+
+    private async Task SetContextAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var size) && size != Ctx.Context) await Ctx.SetContextAsync(size);
+    }
+
+    private string NameOf(string path) =>
+        Models.FirstOrDefault(m => Same(m.Path, path))?.Name ?? Path.GetFileNameWithoutExtension(path);
+
+    private static bool Same(string? a, string? b) => a is not null && b is not null && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    private static bool SamePicture(string a, string? chosen) =>
+        chosen is not null && string.Equals(ImageModelCatalog.Normalise(a), chosen, StringComparison.OrdinalIgnoreCase);
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Catalog.Changed -= Refresh;
+        Ctx.Changed -= Refresh;
+    }
+}

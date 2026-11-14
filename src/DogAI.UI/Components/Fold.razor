@@ -1,0 +1,39 @@
+@* A section that opens and closes with a click on its heading, and remembers which (InterfaceMemory, by Id). Closed,
+   its content stays on the page, only hidden, so typing and ids inside it survive. Summary is one line shown beside
+   the heading, so a closed section still says what is in it. *@
+@implements IDisposable
+@inject InterfaceMemory Memory
+
+<section class="fold @(Open ? "open" : "closed") @Class" data-fold="@Id">
+    <h3 class="fold-title">
+        <button type="button" class="fold-head" id="@($"fold-{Id}")" aria-expanded="@(Open ? "true" : "false")" aria-controls="@($"fold-{Id}-body")" @onclick="ToggleAsync">
+            <span class="fold-chevron"><Icon Name="chevron" Size="14" /></span>
+            <span class="fold-name">@Title</span>
+            @if (!string.IsNullOrEmpty(Summary))
+            {
+                <span class="fold-sum">@Summary</span>
+            }
+        </button>
+    </h3>
+    <div class="fold-body" id="@($"fold-{Id}-body")" hidden="@(!Open)">@ChildContent</div>
+</section>
+
+@code {
+    /// <summary>Short, unique on the app: lower case letters, digits and dashes (it is what is remembered).</summary>
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Summary { get; set; }
+    [Parameter] public bool OpenByDefault { get; set; } = true;
+    [Parameter] public string Class { get; set; } = "";
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    private bool Open => Memory.IsOpen(Id, OpenByDefault);
+
+    protected override void OnInitialized() => Memory.Changed += Refresh;
+
+    private Task ToggleAsync() => Memory.SetOpenAsync(Id, !Open, OpenByDefault);
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Memory.Changed -= Refresh;
+}

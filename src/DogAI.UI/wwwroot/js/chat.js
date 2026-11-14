@@ -95,6 +95,23 @@ export function scrollToMessage(id) {
   look();
 }
 
+// Settings search: bring the chosen setting into view and flash it. Its category is shown a moment after the click.
+export function scrollToSetting(id) {
+  const started = Date.now();
+  const look = () => {
+    const el = document.getElementById(id);
+    if (el && el.offsetParent !== null) {
+      const box = el.closest('label, .field-block, .label-like, section') ?? el;
+      box.scrollIntoView({ block: 'center' });
+      box.classList.add('found-flash');
+      setTimeout(() => box.classList.remove('found-flash'), 2200);
+      return;
+    }
+    if (Date.now() - started < 3000) setTimeout(look, 100);
+  };
+  look();
+}
+
 // Web links in replies and model cards never open on their own: one listener on the page hands the click to the
 // confirmation prompt (LinkGuard), which asks before opening the user's browser.
 let linkTarget = null;
