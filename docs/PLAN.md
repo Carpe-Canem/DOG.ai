@@ -3,7 +3,7 @@
 ## Status (updated 2026-11-14)
 
 - **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 (characters, lore, memory, group chat), M4 (Story), M5 (Documents), M6 (Voice), M7 (Polish), M8 (Locked data), **M9 (Pictures)**.
-- **Next:** nothing is planned as a milestone. Candidates, for the owner to choose from: M9's "Left for later" list (a picture button in General chats, a standalone Images screen with a gallery, newer model families, changing an existing picture), the roadmap's "Possible later additions" (local API, image understanding), and the "still owed" and "Not checked" lists in the entries below, including what M8 left untried.
+- **Next:** **M10 to M13, a tidier interface** (planned 2026-11-14, not started; see "M10 to M13: A tidier interface" below). Two questions in that section are still the owner's to answer. Other candidates, for the owner to choose from: M9's "Left for later" list (a picture button in General chats, a standalone Images screen with a gallery, newer model families, changing an existing picture), the roadmap's "Possible later additions" (local API, image understanding), and the "still owed" and "Not checked" lists in the entries below, including what M8 left untried.
 - **Pictures in character chats and group chats (2026-11-14, after M9).** A reply in a character chat or a group chat can now be illustrated, the same way a story passage can.
   - *What changed for the owner.* Every reply has **Illustrate** beside Copy and Edit (hidden while a reply is being written). It opens the picture maker; **Use this picture** keeps the picture above the reply. Clicking it opens it large, with **Redraw** and **Remove**. A reply keeps one picture. Regenerate and the swipe arrows make a new version with no picture; the earlier version keeps its own. Deleting the chat deletes its pictures. General chats have no button.
   - *What the picture is planned from.* The reply under its writer's name, with up to six messages before it as background (cut to fit; the newest are kept). Who may be in it: the character (or the group's members), then your persona, each with their own Looks; at most two people. Default shape Wide.
@@ -517,8 +517,84 @@ Each ends with a runnable app, passing tests, and a git commit.
 | M7 ✅ | Polish | Assistants, prompt library, search, backup/restore, self-contained publish profile; also tray and global key, link prompt, code colours and maths, pinned chats, markdown export |
 | M8 ✅ | Locked data | Database encrypted with a key from the owner's password; Windows Hello to unlock day to day; printed recovery key; lock on idle; backups stay encrypted (details below) |
 | M9 ✅ | Pictures | Local image generation with stable-diffusion.cpp (SDXL family: Illustrious, NoobAI, Pony, base SDXL): character and persona portraits, story illustrations, an Images tab in Models (details below) |
+| M10 | Defaults and Settings | Shared tidy-up pieces; a default model per job in one place; simpler model cards; Settings in categories with search and shorter help text (details below) |
+| M11 | Models section | Side panel per tab; seven tabs regrouped into three; downloads tray; Images split up (details below) |
+| M12 | Chats and editors | Collapsible chat side panels; voice buttons only when they can work; character and story editors in tabs (details below) |
+| M13 | Quick-jump and final pass | Ctrl+K to jump anywhere; help text trimmed on the remaining screens; whole-app check (details below) |
 
 Possible later additions, not planned: local OpenAI-compatible API for other tools, image understanding.
+
+## M10 to M13: A tidier interface (planned 2026-11-14; not started)
+
+**Why.** Every milestone added controls and none took any away. A review of the running app (Workbench dark, an empty data folder, window 1400 × 860; the other looks and chats with content were read in code only) found:
+
+| Screen | Height against the window | Controls on the page |
+|---|---|---|
+| Settings | 2.5 screens | 30 |
+| Models, Images | 2.5 screens | 28 |
+| New character | 2.3 screens | 30 |
+| New story | 1.6 screens | 22 |
+
+Also: the Models side panel shows the same five panels on all seven tabs; hardware is shown twice on Recommended; a character chat stacks about seven always-open side panels; nearly every setting carries a two- or three-line paragraph; the picture checkpoint is chosen in two places (Settings and Models, Images).
+
+**The ten ideas**, numbered as they were put to the owner:
+
+1. A default model per job: one block of dropdowns (General, Characters, Story, Document search, Pictures), each with "No default" ("Pick automatically" for document search), in place of the "Default for…" menu on every model.
+2. Settings in categories (Appearance, Chats and stories, Voice, Pictures, Privacy, Windows, Backup, About) with a side list and a search box.
+3. The Models side panel shows only what fits the tab; hardware once; one Connection spot for the online note and the Hugging Face token.
+4. Shorter help text: one line under a control, the rest behind an info button.
+5. Model cards with one main button (Load); Benchmark, Delete and the file path in a "⋯" menu.
+6. Collapsible chat side panels with a one-line summary each ("Style · Balanced"), remembered, and a button to hide the whole panel.
+7. Character and story editors in tabs (Basics, Personality and scenario, Messages, Looks and voice, Advanced) with a Save bar that stays visible.
+8. Models, Images split up: Checkpoints, LoRAs, Tags, and the test picture folded away as a diagnostic.
+9. Hide what cannot work yet: the composer's microphone, hands-free and read-aloud buttons appear once a voice model exists.
+10. Models regrouped (Get models; On this PC; Engines) with downloads as a tray button in the header; and Ctrl+K to jump to any chat, character, story or setting.
+
+### M10: Defaults and Settings (ideas 1, 2, 4 for Settings, 5)
+
+1. **Shared pieces first.** A collapsible section that remembers open or closed, a "⋯" menu, an info button for long help text, and page tabs. Built once and checked in every look, so later steps only reuse them. What is remembered (which sections are closed, the last Settings category) is kept in the settings store, with its logic in Core so it can be tested.
+2. **Default model per job.** The block at the top of Models, Library. It writes the same `AppSettings.DefaultModels` the menus write today; the Pictures row writes `ImageModelCatalog.Chosen`. Each model keeps a chip saying what it is the default for.
+3. **Model cards.** Load stays; the rest moves into "⋯".
+4. **Settings in categories**, with search and trimmed help text. The ids the walkthroughs use must keep working.
+
+### M11: Models section (ideas 3, 8, and the regrouping and tray of 10)
+
+1. Side panel per tab; hardware once; the Connection spot.
+2. Three groups in place of seven tabs. Old addresses (`models/images` and the rest) keep working.
+3. Downloads tray in the header.
+4. Images split into sub-tabs.
+
+The riskiest milestone: about 49 messages and links in 35 files name a place such as "Models › Images", some of them error messages in Core and Engine. Each is reworded when its target moves, and `CLAUDE.md` with them.
+
+### M12: Chats and editors (ideas 6, 7, 9)
+
+1. Collapsible side panels and the hide button, in General, Characters, group chats and Story.
+2. Voice buttons only when a voice model exists.
+3. Editors in tabs with a Save bar. All tabs stay in one form (hidden, not removed), so switching tabs never loses typing; a problem found on saving opens the tab it is on.
+
+### M13: Quick-jump and final pass (Ctrl+K of idea 10, the rest of 4)
+
+1. Ctrl+K, built on the existing Search: an index in Core with tests; the box sits inside `.shell`; the key is caught in the page and in `MainWindow`, as Ctrl+L is.
+2. Help text trimmed on the screens not yet touched.
+3. Every screen looked at in three looks, dark and light; the portable build; `CLAUDE.md` brought up to date.
+
+### Sessions, and which model to use for each
+
+One milestone per session. Each ends in a build, passing tests, a look at the app in three looks (dark and light), this plan's Status updated, and a commit. Then the session stops and hands over (owner's instruction, 2026-11-14; the rule is in `CLAUDE.md`): it tells the owner to start a new session, names the model and effort from this table, and gives the prompt to paste into it. "Effort" is the session's effort setting.
+
+| # | Milestone | Model / effort |
+|---|---|---|
+| M10 | Defaults and Settings | Opus 5.5, high |
+| M11 | Models section | Fable 5.2, high |
+| M12 | Chats and editors | Opus 5.5, high |
+| M13 | Quick-jump and final pass | Fable 5.2, high |
+
+Why this split: M11 moves things that about 49 messages and links point at, next to the only code that goes online, and M13 is the last look at everything, so a wrong judgement costs most there. M10 and M12 mostly repeat patterns the code already has (the Models side list, `Modal`, the existing panels and editors), so Opus 5.5 is enough and cheaper.
+
+### For the owner to decide (asked 2026-11-14, not answered yet)
+
+- **Where the picture engine's install lives.** Today only on Models, Images. M11 would move it beside the chat engine under Engines. Recommended: move it.
+- **Where the context size is set.** Today in the Models side panel under "How fit is judged", though it is also the size models load with. Recommended: move it into the defaults block in M10.
 
 ## M9: Pictures (planned 2026-11-13; built 2026-11-13 and 14, all nine steps done)
 

@@ -4,6 +4,14 @@ Private, almost fully offline Windows desktop app for running local LLMs. WPF ho
 
 **Read `docs/PLAN.md` first.** It has the full feature plan, the milestone table, and a Status section saying what is done and what is next. Update that Status section when a milestone finishes.
 
+**Hand over after every milestone.** One milestone per session. When a milestone is 100% complete (build and tests pass, the app was looked at, the plan's Status is updated, the work is committed), do not start the next one. End with a hand-over to the owner, in this order:
+
+1. Tell the owner to start a new session.
+2. Name the model and effort to use for the next milestone (from the plan's "Model / effort" column when it has one; otherwise choose and say why in one line).
+3. Give the prompt to paste into the new session, in one fenced block the owner can copy whole. It must stand on its own: the milestone to build and where the plan describes it, the owner's decisions that bear on it, anything this session learned that the plan and `CLAUDE.md` do not already say, and what was left unchecked.
+
+If the milestone is not 100% complete, say what is missing and give no hand-over.
+
 ## Commands
 
 ```
@@ -229,3 +237,8 @@ Check every new screen in all three skins, dark and light. Say plainly what was 
 ## Machine
 
 RTX 4090 (24 GB VRAM), Core Ultra 9 285K, 32 GB RAM. Models go in `D:\DOG.ai\Models`. `llama-server` (winget) and Ollama are already installed.
+
+<!-- claude-reflect: learned rules (saved from the band; edit freely) -->
+## Learned rules
+- After each milestone is fully complete, tell the user to start a new session, state which model and effort to use, and provide the carry-over prompt.
+<!-- end claude-reflect -->
