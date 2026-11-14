@@ -155,6 +155,15 @@ public sealed class AppPaths
     /// <summary>Where DOG.ai's own copy of the model engine goes once the Models section installs one.</summary>
     public string EngineDirectory => Path.Combine(Root, "engine");
 
+    /// <summary>
+    /// DOG.ai's copy of the picture engine (stable-diffusion.cpp's sd-server). A subfolder of the engine folder because
+    /// the two engines ship DLLs with the same names in different versions; updating llama.cpp carries it across.
+    /// </summary>
+    public string ImageEngineDirectory => Path.Combine(EngineDirectory, ImageEngineFolderName);
+
+    /// <summary>Name of <see cref="ImageEngineDirectory"/> inside the engine folder.</summary>
+    public const string ImageEngineFolderName = "images";
+
     /// <summary>The models folder a portable install always uses.</summary>
     public string? PortableModelsDirectory => PortableHome is null ? null : Path.Combine(PortableHome, "models");
 

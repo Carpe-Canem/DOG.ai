@@ -110,28 +110,7 @@ public sealed partial class EngineUpdater(HttpClient http, AppPaths paths)
         Directory.CreateDirectory(work);
         DeleteFolder(staged);
 
-        long before = 0;
-        var zips = new List<string>();
-        foreach (var asset in new[] { release.Program, release.Runtime }.OfType<ReleaseAsset>())
-        {
-            var zip = Path.Combine(work, asset.Name);
-            var part = zip + ".part";
-            if (!File.Exists(zip))
-            {
-                var offset = before;
-                await FileTransfer.DownloadAsync(http, asset.Url, part, asset.Size, bearer: null, n => progress(offset + n), ct).ConfigureAwait(false);
-                var hash = await FileTransfer.Sha256Async(part, _ => { }, ct).ConfigureAwait(false);
-                if (!FileTransfer.HashMatches(hash, asset.Sha256))
-                {
-                    File.Delete(part);
-                    throw new HubException($"{asset.Name} arrived damaged (its checksum did not match). Try again.");
-                }
-                File.Move(part, zip, overwrite: true);
-            }
-            before += asset.Size;
-            progress(before);
-            zips.Add(zip);
-        }
+        var zips = await DownloadCheckedAsync(http, [release.Program, release.Runtime], work, progress, ct).ConfigureAwait(false);
 
         Directory.CreateDirectory(staged);
         foreach (var zip in zips)
@@ -159,9 +138,58 @@ public sealed partial class EngineUpdater(HttpClient http, AppPaths paths)
             if (hadEngine) Directory.Move(previous, paths.EngineDirectory);
             throw;
         }
+        // The picture engine lives in a subfolder of the engine folder; it comes across to the new one.
+        var images = Path.Combine(previous, AppPaths.ImageEngineFolderName);
+        if (Directory.Exists(images))
+        {
+            try
+            {
+                Directory.Move(images, paths.ImageEngineDirectory);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                throw new HubException($"llama.cpp {release.Tag} is installed, but the picture engine could not be moved into the new engine folder ({e.Message}). It was left in {previous}.");
+            }
+        }
         DeleteFolder(previous);
         DeleteFolder(staged);
         DeleteFolder(work);
+    }
+
+    /// <summary>
+    /// Downloads release files into <paramref name="work"/> one after another, checks each against its published
+    /// checksum, and returns the finished files. A file already there from an earlier, interrupted install is reused.
+    /// </summary>
+    /// <param name="progress">Bytes done so far across all the files.</param>
+    /// <param name="requireChecksum">Refuse a file whose release published no checksum.</param>
+    internal static async Task<List<string>> DownloadCheckedAsync(HttpClient http, IEnumerable<ReleaseAsset?> assets, string work,
+        Action<long> progress, CancellationToken ct, bool requireChecksum = false)
+    {
+        long before = 0;
+        var zips = new List<string>();
+        foreach (var asset in assets.OfType<ReleaseAsset>())
+        {
+            if (requireChecksum && string.IsNullOrEmpty(asset.Sha256))
+                throw new HubException($"{asset.Name} has no published checksum, so DOG.ai cannot tell it arrived intact. It was not downloaded.");
+            var zip = Path.Combine(work, asset.Name);
+            var part = zip + ".part";
+            if (!File.Exists(zip))
+            {
+                var offset = before;
+                await FileTransfer.DownloadAsync(http, asset.Url, part, asset.Size, bearer: null, n => progress(offset + n), ct).ConfigureAwait(false);
+                var hash = await FileTransfer.Sha256Async(part, _ => { }, ct).ConfigureAwait(false);
+                if (!FileTransfer.HashMatches(hash, asset.Sha256))
+                {
+                    File.Delete(part);
+                    throw new HubException($"{asset.Name} arrived damaged (its checksum did not match). Try again.");
+                }
+                File.Move(part, zip, overwrite: true);
+            }
+            before += asset.Size;
+            progress(before);
+            zips.Add(zip);
+        }
+        return zips;
     }
 
     /// <summary>Unpacks an archive, refusing entries that would land outside the target folder.</summary>
@@ -190,15 +218,18 @@ public sealed partial class EngineUpdater(HttpClient http, AppPaths paths)
             .Select(Path.GetDirectoryName)
             .FirstOrDefault();
 
-    private static void DeleteFolder(string folder)
+    internal static void DeleteFolder(string folder)
     {
         if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
     }
 
-    private static ReleaseAsset ToAsset(ApiAsset a) =>
+    internal static ReleaseAsset ToAsset(ApiAsset a) =>
         new(a.Name, a.BrowserDownloadUrl, a.Size, a.Digest is { } d && d.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? d[7..] : null);
 
-    private async Task<T?> GetAsync<T>(string url, CancellationToken ct)
+    private Task<T?> GetAsync<T>(string url, CancellationToken ct) => GetGitHubAsync<T>(http, url, ct);
+
+    /// <summary>Reads a GitHub API answer, saying plainly when GitHub refuses.</summary>
+    internal static async Task<T?> GetGitHubAsync<T>(HttpClient http, string url, CancellationToken ct)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Accept.ParseAdd("application/vnd.github+json");

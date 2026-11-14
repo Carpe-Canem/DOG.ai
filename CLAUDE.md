@@ -30,7 +30,7 @@ Target is .NET 9 because VS 2022 cannot target .NET 10 (the app itself is `net9.
 
 ## Names
 
-The brand is **DOG.ai** (never "DOG AI"). Code names stay `DogAI.*` (namespaces, project folders); the programs are `DOG.ai.exe` (app and launcher). On disk: data folder `%LOCALAPPDATA%\DOG.ai`, database `DOG.ai.db`, logs `DOG.ai-<date>.log`. Old names are migrated at start (`AppPaths.AdoptLegacyFolder`, `RenameLegacyDatabase`). Do not rename: `DOGAI_*` environment variables, the backup label `"DOG AI"` and the `dogai.db` entry inside backup zips (old backups must restore), the Hugging Face token key `"DOG-AI/hf-token"`, `dogai-engine.txt`.
+The brand is **DOG.ai** (never "DOG AI"). Code names stay `DogAI.*` (namespaces, project folders); the programs are `DOG.ai.exe` (app and launcher). On disk: data folder `%LOCALAPPDATA%\DOG.ai`, database `DOG.ai.db`, logs `DOG.ai-<date>.log`. Old names are migrated at start (`AppPaths.AdoptLegacyFolder`, `RenameLegacyDatabase`). Do not rename: `DOGAI_*` environment variables, the backup label `"DOG AI"` and the `dogai.db` entry inside backup zips (old backups must restore), the Hugging Face token key `"DOG-AI/hf-token"`, `dogai-engine.txt`, `dogai-image-engine.txt`. The picture engine lives in `engine\images`; a llama.cpp update carries that folder across.
 
 ## Rules that must hold
 
@@ -64,7 +64,7 @@ pwsh tools/walkthrough.ps1 -Steps @(
 
 A step `@{ dialog = '<path>'; title = '<dialog title>' }` fills in a Windows open or save dialog that the previous step opened (for card import and export). Run the script with `&` inside PowerShell, not `pwsh -File`, so the step list arrives intact.
 
-To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.gguf` before running the script; a fresh data folder then uses it as the models folder. The Ollama blobs under `~\.ollama\models\blobs` are GGUF files and can be hard-linked there with a `.gguf` name. `dotnet test` runs the real-engine smoke test only when `$env:DOGAI_TEST_MODEL` points at a model file. Wait for conditions in `eval` steps with a promise (model loads and replies take seconds).
+To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.gguf` before running the script; a fresh data folder then uses it as the models folder. The Ollama blobs under `~\.ollama\models\blobs` are GGUF files and can be hard-linked there with a `.gguf` name. `dotnet test` runs the real-engine smoke test only when `$env:DOGAI_TEST_MODEL` points at a model file. The picture engine's smoke test runs only when `$env:DOGAI_SD_SERVER` points at sd-server.exe and `$env:DOGAI_TEST_IMAGE_MODEL` at an SDXL checkpoint (`$env:DOGAI_TEST_IMAGE_LORAS` optional); check graphics memory is free first. Wait for conditions in `eval` steps with a promise (model loads and replies take seconds).
 
 ## How chat works
 

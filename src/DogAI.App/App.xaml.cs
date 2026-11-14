@@ -100,6 +100,16 @@ public partial class App : Application
                 if (search.Error is { } error) log.LogWarning("Document search model problem: {Error}", error);
             };
 
+            var pictures = _services.GetRequiredService<DogAI.Engine.Images.ImageServer>();
+            // Its output lines are deliberately not logged: M9 step 5 adds a filter first. Start errors come only from
+            // lines printed before any prompt was sent, so they are safe to log.
+            var lastPictureError = (string?)null;
+            pictures.Changed += () =>
+            {
+                if (pictures.Error is { } error && error != lastPictureError) log.LogWarning("Picture engine problem: {Error}", error);
+                lastPictureError = pictures.Error;
+            };
+
             await _services.MigrateDogDatabaseAsync();
             await EnsureFirstRunDefaultsAsync(_services, paths);
             await StartModelServicesAsync(_services, log);
@@ -207,6 +217,7 @@ public partial class App : Application
         services.AddSingleton(sp => new HuggingFaceClient(sp.GetRequiredService<HubHttp>().Client, sp.GetRequiredService<HfToken>()));
         services.AddSingleton<DownloadManager>();
         services.AddSingleton(sp => new EngineUpdater(sp.GetRequiredService<HubHttp>().Client, sp.GetRequiredService<AppPaths>()));
+        services.AddSingleton(sp => new ImageEngineUpdater(sp.GetRequiredService<HubHttp>().Client, sp.GetRequiredService<AppPaths>()));
         services.AddSingleton<HardwareProbe>();
         services.AddSingleton<ModelLauncher>();
         services.AddSingleton<ModelBenchmark>();
@@ -220,6 +231,9 @@ public partial class App : Application
         services.AddSingleton<IChatEngine>(sp => sp.GetRequiredService<EngineManager>());
         services.AddSingleton<EmbeddingServer>();
         services.AddSingleton<DogAI.Core.Documents.IEmbedder>(sp => sp.GetRequiredService<EmbeddingServer>());
+        services.AddSingleton<DogAI.Engine.Images.SdServerLocator>();
+        services.AddSingleton<DogAI.Engine.Images.ImageServer>();
+        services.AddSingleton<DogAI.Core.Images.IImageEngine>(sp => sp.GetRequiredService<DogAI.Engine.Images.ImageServer>());
         services.AddSingleton<DogAI.Core.Documents.DocumentLibrary>();
         services.AddSingleton<WindowsIntegration>();
         services.AddSingleton<IWindowsIntegration>(sp => sp.GetRequiredService<WindowsIntegration>());
