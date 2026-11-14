@@ -3,6 +3,8 @@ using DogAI.Core;
 using DogAI.Core.Images;
 using DogAI.Engine;
 using DogAI.Engine.Images;
+using DogAI.Data;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit.Abstractions;
 
 namespace DogAI.Tests;
@@ -31,12 +33,15 @@ public class ImageSmokeTests(ITestOutputHelper output)
         var engineFolder = Path.GetDirectoryName(exe)!;
         var engineFilesBefore = Directory.GetFiles(engineFolder, "*", SearchOption.AllDirectories).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var lines = new List<string>();
+        var logged = new List<string>();
+        var kept = Path.Combine(Path.GetTempPath(), "dogai-sdsmoke-kept-" + Guid.NewGuid().ToString("N"));
         try
         {
             var paths = new AppPaths(root);
             using var http = new LoopbackHttp();
             using var server = new ImageServer(http, new SdServerLocator(paths), paths);
             server.Output += line => { lock (lines) lines.Add(line); };
+            server.Logged += line => { lock (logged) logged.Add(line); };
 
             var clock = Stopwatch.StartNew();
             await server.LoadAsync(new ImageModel(checkpoint, loras));
@@ -95,6 +100,29 @@ public class ImageSmokeTests(ITestOutputHelper output)
             Assert.True(IsWebp(Assert.Single(webp.Images)));
             output.WriteLine($"webp with lora {lora.Path ?? "(none)"}: {webp.Images[0].Length} bytes, seed {webp.Seed}");
 
+            // 4b. Keeping a picture (M9 step 5): drawn as WebP at the kept quality, with nothing written inside it; kept
+            // in a database; read back; and drawn again from what was saved with it, which gives the same bytes.
+            var settings = CheckpointSettings.ForFamily(ImageFamily.Illustrious);
+            var keepRequest = (draft with { Seed = -1, Preview = false, Loras = lora.Path is { } p ? [new LoraUse(p, 0.8)] : null }).ForKeeping();
+            var drawn = await server.DrawAsync(keepRequest);
+            var info = WebpInfo.Read(drawn.Images[0]);
+            Assert.Equal(new WebpInfo(832, 1216, Lossless: false, HasMetadata: false), info);
+            var keptPaths = new AppPaths(kept);
+            keptPaths.EnsureCreated();
+            await using (var services = new ServiceCollection().AddSingleton(keptPaths).AddDogData().BuildServiceProvider())
+            {
+                await services.MigrateDogDatabaseAsync();
+                var store = services.GetRequiredService<IPictureStore>();
+                var saved = await store.AddAsync(Picture.Of(PictureOwners.Test, 0, Path.GetFileName(checkpoint), settings, keepRequest, drawn));
+                var read = (await store.GetAsync(saved.Id))!;
+                Assert.Equal(drawn.Images[0], read.Image);
+                Assert.Equal(drawn.Seed, read.Seed);
+                var redrawn = await server.DrawAsync(read.ToRequest());
+                Assert.True(redrawn.Images[0].AsSpan().SequenceEqual(read.Image), "drawing a kept picture again from its saved settings gave a different picture");
+                output.WriteLine($"kept picture: {read.ImageBytes} bytes, seed {read.Seed}; drawn again: identical");
+            }
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
             // 5. Hires fix doubles nothing it should not: 768×768 at 1.5 gives 1152×1152.
             var hires = await server.DrawAsync(new ImageRequest("1girl, portrait", Width: 768, Height: 768, Seed: 5, Steps: 8, ClipSkip: 2,
                 Hires: new HiresFix(1.5, 4, 0.5)));
@@ -114,6 +142,19 @@ public class ImageSmokeTests(ITestOutputHelper output)
                 // The prompt never shows up in what the engine prints at its normal level.
                 Assert.DoesNotContain(lines, line => line.Contains(Marker, StringComparison.OrdinalIgnoreCase));
             }
+            lock (logged)
+            {
+                // What DOG.ai would write to its log: the engine's status lines, and never a word of the prompts.
+                output.WriteLine($"{logged.Count} lines let through to the log");
+                foreach (var line in logged.TakeLast(40)) output.WriteLine("  log: " + line);
+                Assert.Contains(logged, line => line.Contains("loading model from"));
+                Assert.Contains(logged, line => line.Contains("sampling completed"));
+                Assert.Contains(logged, line => line.Contains("generate_image completed"));
+                var promptWords = new[] { Marker, "1girl", "silver", "forest", "lowres", "anatomy" };
+                Assert.DoesNotContain(logged, line => promptWords.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase)));
+                Assert.DoesNotContain(logged, line => line.Contains("it/s"));
+            }
+            try { Directory.Delete(kept, true); } catch (IOException) { }
             // It wrote nothing beside itself except DOG.ai's blank page (when it runs from DOG.ai's own engine folder).
             var added = Directory.GetFiles(engineFolder, "*", SearchOption.AllDirectories).Where(f => !engineFilesBefore.Contains(f)).ToList();
             Assert.Empty(added);

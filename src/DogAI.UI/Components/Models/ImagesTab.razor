@@ -14,6 +14,7 @@
 @inject SdServerLocator PictureLocator
 @inject IDesktopShell Desktop
 @inject ModelsContext Ctx
+@inject IPictureStore Pictures
 
 <section class="group">
     <h3 class="group-title">Draw with</h3>
@@ -66,6 +67,36 @@
         @if (_testPicture is not null)
         {
             <img class="test-picture" id="test-picture-result" alt="The test picture" src="@_testPicture" />
+        }
+        @if (_keepWords is not null)
+        {
+            @* Only for checking that pictures are kept safely (M9 step 5): shown when DOGAI_TEST_PICTURE_WORDS is set.
+               Portraits and story illustrations are the real places pictures are kept. *@
+            <div class="row">
+                <button class="btn" id="keep-picture" disabled="@(_last is null || _drawing)" @onclick="KeepAsync">Keep this picture</button>
+            </div>
+            @if (_keepNote is not null)
+            {
+                <p class="note" id="keep-note">@_keepNote</p>
+            }
+            <div class="models" id="kept-pictures">
+                @foreach (var kept in _kept)
+                {
+                    var k = kept;
+                    <div class="model has-fit" data-picture="@k.Info.Id">
+                        <div class="li-text">
+                            <img class="test-picture kept-picture" alt="Kept picture @k.Info.Id" src="@k.Src" />
+                            <div class="model-name">Kept picture @k.Info.Id</div>
+                            <div class="model-meta">@k.Info.ImageWidth×@k.Info.ImageHeight · @(k.Info.ImageBytes / 1024) KB · seed @k.Info.Seed · @k.Info.Checkpoint</div>
+                            <div class="model-meta">@KeptLine(k.Info)</div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn" data-act="again" disabled="@_drawing" @onclick="() => DrawAgainAsync(k.Info.Id)">Draw again and compare</button>
+                            <button class="btn" data-act="remove" disabled="@_drawing" @onclick="() => RemoveKeptAsync(k.Info.Id)">Remove</button>
+                        </div>
+                    </div>
+                }
+            </div>
         }
     }
 </section>
@@ -263,6 +294,12 @@
     private string? _testNote, _testPicture;
     private CancellationTokenSource? _drawCts;
 
+    // Keeping test pictures, for checks only (see the markup).
+    private readonly string? _keepWords = Environment.GetEnvironmentVariable(ImagePrompt.TestWordsVariable) is { Length: > 0 } words ? words : null;
+    private (string Checkpoint, CheckpointSettings Settings, ImageRequest Request, ImageResult Result)? _last;
+    private List<(Picture Info, string Src)> _kept = [];
+    private string? _keepNote;
+
     /// <summary>The LoRA settings card's fields while being edited.</summary>
     private sealed class LoraDraft
     {
@@ -283,6 +320,72 @@
         Gate.Changed += Refresh;
         Catalog.Changed += Refresh;
         await ScanAsync();
+        if (_keepWords is not null) await LoadKeptAsync();
+    }
+
+    private static string KeptLine(Picture p) =>
+        $"{p.Steps} steps, {SamplerNames.Title(p.Sampler)}, guidance {p.Guidance:0.#}" +
+        string.Concat(p.Loras.Select(l => $", {Path.GetFileNameWithoutExtension(l.Path)} at {l.Strength:0.##}"));
+
+    private async Task LoadKeptAsync()
+    {
+        var kept = new List<(Picture, string)>();
+        foreach (var info in await Pictures.ListAsync(PictureOwners.Test, 0))
+            if (await Pictures.ImageAsync(info.Id) is { } image)
+                kept.Add((info, "data:image/webp;base64," + Convert.ToBase64String(image)));
+        _kept = kept;
+    }
+
+    private async Task KeepAsync()
+    {
+        if (_last is not { } last) return;
+        try
+        {
+            var kept = await Pictures.AddAsync(Picture.Of(PictureOwners.Test, 0, last.Checkpoint, last.Settings, last.Request, last.Result));
+            _keepNote = $"Kept as picture {kept.Id}.";
+            _last = null;
+        }
+        catch (InvalidOperationException e)
+        {
+            _keepNote = e.Message;
+        }
+        await LoadKeptAsync();
+    }
+
+    private async Task RemoveKeptAsync(long id)
+    {
+        await Pictures.DeleteAsync(id);
+        _keepNote = $"Removed picture {id}.";
+        await LoadKeptAsync();
+    }
+
+    /// <summary>Draws a kept picture again from what was saved with it and says whether it came out the same.</summary>
+    private async Task DrawAgainAsync(long id)
+    {
+        if (_root is null || await Pictures.GetAsync(id) is not { Image: { } image } picture) return;
+        _drawing = true;
+        _keepNote = $"Drawing picture {id} again…";
+        StateHasChanged();
+        try
+        {
+            var model = picture.ModelIn(_root);
+            var result = await Task.Run(async () =>
+            {
+                if (Card.Model != model) await Card.LoadAsync(model);
+                return await Card.DrawAsync(picture.ToRequest());
+            });
+            _keepNote = result.Images[0].AsSpan().SequenceEqual(image)
+                ? $"Picture {id} drawn again from its saved settings: identical to the kept one."
+                : $"Picture {id} drawn again from its saved settings: NOT the same as the kept one.";
+        }
+        catch (Exception e) when (e is ImageEngineException or OperationCanceledException)
+        {
+            _keepNote = e.Message;
+        }
+        finally
+        {
+            _drawing = false;
+        }
     }
 
     private void Refresh() => InvokeAsync(StateHasChanged);
@@ -437,13 +540,14 @@
             var settings = Catalog.CheckpointFor(checkpoint.RelativePath, checkpoint.Verdict);
             var loras = Loras.Where(l => l.RelativePath == _testLora)
                 .Select(l => (l.RelativePath, Catalog.LoraFor(l.RelativePath, l.Verdict.Lora))).ToList();
-            var request = ImagePrompt.Compose(settings, ImagePrompt.TestSubject(settings.Style), loras) with
+            var subject = ImagePrompt.TestSubject(settings.Style) + (_keepWords is null ? "" : ", " + _keepWords);
+            // Drawn the way pictures are kept (WebP), so what is shown is exactly what Keep would save.
+            var request = ImagePrompt.Compose(settings, subject, loras).ForKeeping() with
             {
-                Format = ImageFormat.Jpeg,
-                Quality = 90,
                 Preview = true,
                 PreviewEvery = 4,
             };
+            _last = null;
             var model = ImageFolders.ModelFor(_root, checkpoint.RelativePath, settings);
             var progress = new Progress<ImageProgress>(p =>
             {
@@ -464,7 +568,8 @@
                 if (Card.Model != model) await Card.LoadAsync(model, ct);
                 return await Card.DrawAsync(request, progress, ct);
             });
-            _testPicture = "data:image/jpeg;base64," + Convert.ToBase64String(result.Images[0]);
+            _testPicture = "data:image/webp;base64," + Convert.ToBase64String(result.Images[0]);
+            _last = (checkpoint.RelativePath, settings, request, result);
             _testNote = $"Drawn in {clock.Elapsed.TotalSeconds:0.0} seconds with {checkpoint.Name}" +
                         (loras.Count > 0 ? $" and {Path.GetFileNameWithoutExtension(loras[0].RelativePath)}" : "") + ". " +
                         (Coordinator.LastDecision?.Choice switch

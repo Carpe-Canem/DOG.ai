@@ -146,6 +146,12 @@ public sealed class ImageModelCatalog(IDocumentStore? documents = null)
 /// <summary>Puts a picture request together from a checkpoint's card, the LoRAs chosen and what to draw.</summary>
 public static class ImagePrompt
 {
+    /// <summary>
+    /// For walkthroughs only: words added to the test picture's subject on Models → Images (a marker word to search the
+    /// disk for). Setting it also shows Keep, the kept test pictures and Remove under the test picture.
+    /// </summary>
+    public const string TestWordsVariable = "DOGAI_TEST_PICTURE_WORDS";
+
     /// <summary>The fixed subject of the test picture on Models → Images, in each prompt style.</summary>
     public static string TestSubject(PromptStyle style) => style == PromptStyle.Tags
         ? "1girl, solo, silver hair, green eyes, leather armor, green cloak, forest, dappled sunlight, upper body"

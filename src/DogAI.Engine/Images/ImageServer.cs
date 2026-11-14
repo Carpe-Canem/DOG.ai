@@ -16,8 +16,8 @@ namespace DogAI.Engine.Images;
 /// <para>
 /// Privacy: never started with verbose logging (at its normal level it prints no prompt), never told to save files, its
 /// built-in web page is replaced by a blank one, finished jobs are dropped from its memory after a minute, and pictures
-/// carry no prompt inside them. Its output lines are raised through <see cref="Output"/> but must not be logged
-/// unfiltered (M9 step 5 adds the filter).
+/// carry no prompt inside them. Its output lines reach the log only through <see cref="Logged"/>, which a
+/// <see cref="PictureLogFilter"/> guards; <see cref="Output"/> is everything it prints and must never be logged.
 /// </para>
 /// </summary>
 public sealed class ImageServer : IImageEngine, IDisposable
@@ -31,6 +31,7 @@ public sealed class ImageServer : IImageEngine, IDisposable
     private readonly SemaphoreSlim _drawing = new(1, 1);
     private readonly ProcessJob _job = new();
     private readonly Queue<string> _recentOutput = new();
+    private readonly PictureLogFilter _filter = new();
     private readonly Timer _idleTimer;
     private Process? _process;
     private SdApi? _api;
@@ -85,8 +86,14 @@ public sealed class ImageServer : IImageEngine, IDisposable
 
     public event Action? Changed;
 
-    /// <summary>Lines the engine prints. Not for the app log until M9 step 5 filters them.</summary>
+    /// <summary>Every line the engine prints, unfiltered. For tests; never write these to a log.</summary>
     public event Action<string>? Output;
+
+    /// <summary>
+    /// The lines that are safe to log: the engine's status lines, with anything that could carry a prompt held back
+    /// (see <see cref="PictureLogFilter"/>). After each picture a line says how many were held back, if any.
+    /// </summary>
+    public event Action<string>? Logged;
 
     public async Task LoadAsync(ImageModel model, CancellationToken ct = default)
     {
@@ -162,6 +169,8 @@ public sealed class ImageServer : IImageEngine, IDisposable
             }
 
             var seed = request.Seed >= 0 ? request.Seed : Random.Shared.NextInt64(0, uint.MaxValue);
+            // Before the request leaves: from here on no line that shares a word with its prompts reaches the log.
+            _filter.Sending(request);
             try
             {
                 return await api.DrawAsync(request, seed, progress, cancel.Token).ConfigureAwait(false);
@@ -184,6 +193,8 @@ public sealed class ImageServer : IImageEngine, IDisposable
             _lastUse = DateTime.UtcNow;
             Interlocked.Decrement(ref _busy);
             _drawing.Release();
+            if (_filter.TakeHeldBack() is > 0 and var held)
+                Logged?.Invoke($"({held} of the engine's status lines were not logged because they share a word with a prompt)");
             Changed?.Invoke();
         }
     }
@@ -399,6 +410,7 @@ public sealed class ImageServer : IImageEngine, IDisposable
             while (_recentOutput.Count > 60) _recentOutput.Dequeue();
         }
         Output?.Invoke(line);
+        if (_filter.Allows(line)) Logged?.Invoke(line);
     }
 
     /// <summary>

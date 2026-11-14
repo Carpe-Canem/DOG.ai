@@ -660,3 +660,4 @@ div.math[data-math] { margin: .6em 0; text-align: center; }
 .model .settings-card label { align-content: start; }
 .model.image-file.unusable .model-name { color: var(--muted); }
 .test-picture { display: block; max-width: min(320px, 100%); border-radius: min(var(--r), 12px); border: 1px solid var(--line); margin-top: 8px; }
+.test-picture.kept-picture { max-width: 72px; margin: 0 12px 0 0; float: left; }

@@ -25,6 +25,7 @@ public static class DataServices
         services.AddSingleton<DogAI.Core.Stories.IStoryStore, SqliteStoryStore>();
         services.AddSingleton<IModelRecordStore, SqliteModelRecordStore>();
         services.AddSingleton<DogAI.Core.Documents.ICollectionStore, SqliteCollectionStore>();
+        services.AddSingleton<DogAI.Core.Images.IPictureStore, SqlitePictureStore>();
         services.AddSingleton<IDocumentStore>(sp => (SqliteSettingsStore)sp.GetRequiredService<ISettingsStore>());
         return services;
     }

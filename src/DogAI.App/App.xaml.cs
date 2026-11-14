@@ -101,8 +101,9 @@ public partial class App : Application
             };
 
             var pictures = _services.GetRequiredService<DogAI.Engine.Images.ImageServer>();
-            // Its output lines are deliberately not logged: M9 step 5 adds a filter first. Start errors come only from
-            // lines printed before any prompt was sent, so they are safe to log.
+            // Only the lines its filter lets through: status lines, never one that could carry a prompt. Start errors
+            // come only from lines printed before any prompt was sent, so they are safe to log.
+            pictures.Logged += line => log.LogInformation("picture engine: {Line}", line);
             var lastPictureError = (string?)null;
             pictures.Changed += () =>
             {

@@ -123,6 +123,15 @@ To test with a real model, set `$env:DOGAI_MODELS_DIR` to a folder holding a `.g
 - Settings: `ImageModelCatalog` (Core) is one JSON document (key `image-models`) in the settings store. Files are named by their path inside their own folder, never a full path, so `PortableMove` needs nothing new. A card is saved only when the owner changes it; untouched ones follow `CheckpointSettings.ForFamily`. `ImagePrompt.Compose` turns a card plus LoRAs into an `ImageRequest`; `ImageFolders.ModelFor` gives the `ImageModel`.
 - UI: `Components/Models/ImagesTab.razor` (+ `CheckpointCard`, `PictureEngineBox`). The picture engine's install and update live only there; the Engine tab links to it. Image downloads carry `ImageDownloads.UseCase` and never become chat-model records.
 
+## How kept pictures work (M9 step 5)
+
+- A kept picture is a row in the `Pictures` table: `Picture` and `IPictureStore` (Core/Images), `SqlitePictureStore` (Data). `IPictureStore.AddAsync` is the only way a picture reaches the disk: pictures that are tried and not kept stay in memory. Never write a picture, thumbnail or preview to a file or cache; show them from memory (`data:` address).
+- Draw anything that may be kept with `request.ForKeeping()` (WebP at `PictureFormat.Quality`, 90, chosen by eye; the engine encodes it). `Picture.Of(...)` makes the row from a request and its result; `ToRequest()` and `ModelIn(imageRoot)` draw it again (same seed and settings give the same bytes).
+- The owner is `OwnerKind` + `OwnerId` (`PictureOwners`: character, persona, message, test), with no foreign key. Triggers in the `Pictures` migration delete a message's, character's or persona's pictures with it; a new kind with its own table needs a trigger in a new migration.
+- Files are named by their path inside their own folder; the store refuses full paths and anything that is not WebP (`WebpInfo`). Never add a column holding a full path, so `PortableMove` keeps needing nothing.
+- Log: only `ImageServer.Logged` is written to the log (`picture engine: …`). It passes through `PictureLogFilter` (Core): status lines only, and none sharing a word with a prompt sent in the last ten minutes. `ImageServer.Output` is everything the engine prints and must never be logged. Anything new that sends text to the picture engine must tell the filter first (`Sending`).
+- For checks: `$env:DOGAI_TEST_PICTURE_WORDS` adds its words to the test picture's prompt and shows `#keep-picture`, `#keep-note` and `#kept-pictures` (rows `[data-picture]` with `[data-act=again]` and `[data-act=remove]`) under the test picture.
+
 ## How locked data works (M8)
 
 - **SQLite build:** `SQLite3MC.PCLRaw.bundle` (SQLite3 Multiple Ciphers, ChaCha20-Poly1305) with `Microsoft.EntityFrameworkCore.Sqlite.Core`; never add the plain `Microsoft.EntityFrameworkCore.Sqlite` or `Microsoft.Data.Sqlite` package (it would bring a second, plain SQLite). A plain database works on it exactly as before.

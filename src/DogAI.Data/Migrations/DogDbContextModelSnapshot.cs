@@ -514,6 +514,97 @@ namespace DogAI.Data.Migrations
                     b.ToTable("Documents");
                 });
 
+            modelBuilder.Entity("DogAI.Core.Images.Picture", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Checkpoint")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ClipSkip")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("Guidance")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Hires")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Image")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("ImageBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ImageHeight")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ImageWidth")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Loras")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NegativePrompt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("OwnerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OwnerKind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Prediction")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Prompt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sampler")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Scheduler")
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Seed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Steps")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Vae")
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerKind", "OwnerId");
+
+                    b.ToTable("Pictures");
+                });
+
             modelBuilder.Entity("DogAI.Core.Models.ModelRecord", b =>
                 {
                     b.Property<long>("Id")

@@ -2,6 +2,7 @@ using System.Text.Json;
 using DogAI.Core.Characters;
 using DogAI.Core.Chat;
 using DogAI.Core.Documents;
+using DogAI.Core.Images;
 using DogAI.Core.Models;
 using DogAI.Core.Stories;
 using Microsoft.EntityFrameworkCore;
@@ -28,6 +29,7 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
     public DbSet<DocumentChunk> Chunks => Set<DocumentChunk>();
     public DbSet<ChatCollection> ChatCollections => Set<ChatCollection>();
     public DbSet<MessageVector> MessageVectors => Set<MessageVector>();
+    public DbSet<Picture> Pictures => Set<Picture>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -99,6 +101,20 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
             e.HasIndex(v => v.ConversationId);
             e.HasOne<ChatMessage>().WithMany().HasForeignKey(v => v.MessageId).OnDelete(DeleteBehavior.Cascade);
         });
+        // Kept pictures (M9). The owner is a kind plus an id, so there is no foreign key; the migration's triggers remove
+        // the pictures of a deleted message, character or persona. File names are paths inside their own folders.
+        model.Entity<Picture>(e =>
+        {
+            e.Property(p => p.OwnerKind).HasMaxLength(PictureOwners.MaxKindLength);
+            e.HasIndex(p => new { p.OwnerKind, p.OwnerId });
+            e.Property(p => p.Image).IsRequired();
+            e.Property(p => p.Checkpoint).HasMaxLength(400);
+            e.Property(p => p.Vae).HasMaxLength(400);
+            e.Property(p => p.Sampler).HasMaxLength(40);
+            e.Property(p => p.Scheduler).HasMaxLength(40);
+            e.Property(p => p.Loras).HasConversion(Json<List<LoraUse>>(), JsonComparer<List<LoraUse>>());
+            e.Property(p => p.Hires).HasConversion(HiresJson);
+        });
         model.Entity<Character>(e =>
         {
             e.Property(c => c.Name).HasMaxLength(200);
@@ -156,6 +172,23 @@ public sealed partial class DogDbContext
         catch (JsonException)
         {
             return new T();
+        }
+    }
+
+    /// <summary>A picture's hires fix, or NULL when it had none. Text that cannot be read counts as none.</summary>
+    private static readonly ValueConverter<HiresFix?, string?> HiresJson = new(
+        v => v == null ? null : JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+        v => v == null ? null : ReadHires(v));
+
+    private static HiresFix? ReadHires(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<HiresFix>(json, (JsonSerializerOptions?)null);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 
