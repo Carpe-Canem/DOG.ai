@@ -18,7 +18,7 @@ public sealed class LlamaServerLocator(AppPaths paths)
     public string MissingMessage => MissingText(paths.IsPortable);
 
     public static string MissingText(bool portable) => portable
-        ? "The model engine (llama-server) is not in DOG.ai's folder yet. Get it in Models › Engine."
+        ? "The model engine (llama-server) is not in DOG.ai's folder yet. Get it in " + DogAI.Core.Models.ModelsPlaces.EnginesName + "."
         : "The model engine (llama-server) was not found on this PC. Install it with: winget install llama.cpp";
 
     private IEnumerable<string> Candidates()

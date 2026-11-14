@@ -16,7 +16,7 @@ public static class PictureOwners
     /// <summary>A message: a story passage, or later a chat reply. Goes when the message or its whole chat is deleted.</summary>
     public const string Message = "message";
 
-    /// <summary>Pictures kept from the test picture on Models → Images while checking (owner id 0).</summary>
+    /// <summary>Pictures kept from the test picture in Models › On this PC › Pictures while checking (owner id 0).</summary>
     public const string Test = "test";
 
     public const int MaxKindLength = 20;

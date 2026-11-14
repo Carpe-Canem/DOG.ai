@@ -1,0 +1,48 @@
+@* The one Connection spot of the Models side panel (M11): whether DOG.ai is online, where it may go, and, on the
+   tabs that download from Hugging Face, the token for gated models. *@
+@implements IDisposable
+@inject OnlineGate Gate
+@inject HfToken Token
+@inject ISettingsStore SettingsStore
+
+<div class="panel" id="connection">
+    <h4>Connection</h4>
+    <div class="small"><b id="connection-state">@(Gate.IsOnline ? "Online." : "Offline.")</b> Only Models goes online, and only to Hugging Face and GitHub (never Civitai). Leaving Models goes offline again, unless a download is still running.</div>
+    @if (WithToken)
+    {
+        <div class="small" id="hf-token">
+            <b>Hugging Face token:</b> @(Token.IsSet ? "saved" : "none")<InfoButton About="the Hugging Face token">Only needed for gated models. Accept the model’s terms on huggingface.co, create a read token there, and paste it here. It is kept encrypted for your Windows account and sent only to Hugging Face.</InfoButton>
+        </div>
+        @if (Token.IsSet)
+        {
+            <div class="row"><button class="btn" id="hf-token-remove" @onclick="() => SaveTokenAsync(null)">Remove token</button></div>
+        }
+        else
+        {
+            <form class="row" @onsubmit="() => SaveTokenAsync(_tokenInput)">
+                <input class="field" type="password" autocomplete="off" placeholder="hf_…" @bind="_tokenInput" aria-label="Hugging Face token" />
+                <button class="btn" type="submit" disabled="@string.IsNullOrWhiteSpace(_tokenInput)">Save</button>
+            </form>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>Show the Hugging Face token too (the tabs that download from Hugging Face).</summary>
+    [Parameter] public bool WithToken { get; set; }
+
+    private string? _tokenInput;
+
+    protected override void OnInitialized() => Gate.Changed += Refresh;
+
+    private async Task SaveTokenAsync(string? token)
+    {
+        var protectedToken = Token.Set(token);
+        await SettingsStore.SaveAsync(await SettingsStore.LoadAsync() with { HfTokenProtected = protectedToken });
+        _tokenInput = null;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Gate.Changed -= Refresh;
+}

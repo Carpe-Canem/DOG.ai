@@ -1,12 +1,12 @@
-@* Models → Images: the image models folder (checkpoints, LoRAs, VAEs), a settings card per checkpoint and LoRA, the
-   checkpoint pictures are drawn with and a test picture, recommended downloads from Hugging Face, and the picture
-   engine. Opening the tab only reads file headers: it never starts the picture engine or loads the chat model. *@
+@* Models › On this PC › Pictures, in three parts (M11): Checkpoints (a settings card each, and the test picture folded
+   away as a diagnostic), LoRAs, and Tags (the extra tag list). Every part stays on the page, the inactive ones hidden,
+   so ids keep working whichever part is open. Downloads are Get models › Pictures (PictureDownloads); the picture
+   engine is installed in Engines. Opening the tab only reads file headers: it never starts the picture engine or
+   loads the chat model. *@
 @using DogAI.Core.Images
 @using DogAI.Engine.Images
 @implements IDisposable
 @inject DownloadManager Downloads
-@inject OnlineGate Gate
-@inject HuggingFaceClient Hf
 @inject ISettingsStore SettingsStore
 @inject ImageModelCatalog Catalog
 @inject IImageEngine Card
@@ -16,113 +16,22 @@
 @inject ModelsContext Ctx
 @inject IPictureStore Pictures
 
-<section class="group">
-    <h3 class="group-title">Draw with</h3>
-    @if (Checkpoints.Count == 0)
-    {
-        <div class="notice"><span>No checkpoint yet. Download one below, or put a .safetensors checkpoint from Civitai in the checkpoints folder with <b>Open folder</b>, then <b>Look again</b>.</span></div>
-    }
-    else
-    {
-        <div class="form-grid draw-with">
-            <label>
-                Checkpoint
-                <select class="field" id="draw-with" @onchange="ChooseAsync" disabled="@_drawing">
-                    @foreach (var c in Checkpoints)
-                    {
-                        <option value="@c.RelativePath" selected="@(c.RelativePath == _chosen)">@c.Name</option>
-                    }
-                </select>
-            </label>
-            <label>
-                LoRA for the test picture
-                <select class="field" id="test-lora" @bind="_testLora" disabled="@_drawing">
-                    <option value="">None</option>
-                    @foreach (var l in Loras)
-                    {
-                        <option value="@l.RelativePath">@l.Name</option>
-                    }
-                </select>
-            </label>
-            <label>
-                Quality of the test picture
-                <select class="field" id="test-quality" @bind="_quality" disabled="@_drawing">
-                    @foreach (var q in Enum.GetValues<PictureQuality>())
-                    {
-                        <option value="@q">@PictureLevels.Title(q)</option>
-                    }
-                </select>
-                <span class="small">@PictureLevels.Blurb(_quality)</span>
-            </label>
-            <label>
-                Shape
-                <select class="field" id="test-shape" @bind="_shape" disabled="@_drawing">
-                    @foreach (var s in Enum.GetValues<PictureShape>())
-                    {
-                        <option value="@s">@PictureLevels.Title(s)</option>
-                    }
-                </select>
-            </label>
-        </div>
-        <p class="note">Pictures in DOG.ai are drawn with this checkpoint, its settings and its style LoRAs below. The test picture draws a fixed subject (a woman with silver hair in a forest).</p>
-        <div class="row">
-            @if (_drawing)
-            {
-                <button class="btn" id="test-picture-cancel" @onclick="CancelDrawing">Cancel</button>
-            }
-            else
-            {
-                <button class="btn primary" id="test-picture" disabled="@(_engine is null)" title="@(_engine is null ? "Install the picture engine first (below)" : "")" @onclick="TestPictureAsync">Draw a test picture</button>
-            }
-        </div>
-        @if (_engine is null)
-        {
-            <p class="note">The picture engine is not installed yet: see <b>Picture engine</b> at the end of this page.</p>
-        }
-        @if (_testNote is not null)
-        {
-            <p class="note" id="test-picture-note">@_testNote</p>
-        }
-        @if (_testPicture is not null)
-        {
-            <img class="test-picture" id="test-picture-result" alt="The test picture" src="@_testPicture" />
-        }
-        @if (_keepWords is not null)
-        {
-            @* Only for checking that pictures are kept safely (M9 step 5): shown when DOGAI_TEST_PICTURE_WORDS is set.
-               Portraits and story illustrations are the real places pictures are kept. *@
-            <div class="row">
-                <button class="btn" id="keep-picture" disabled="@(_last is null || _drawing)" @onclick="KeepAsync">Keep this picture</button>
-            </div>
-            @if (_keepNote is not null)
-            {
-                <p class="note" id="keep-note">@_keepNote</p>
-            }
-            <div class="models" id="kept-pictures">
-                @foreach (var kept in _kept)
-                {
-                    var k = kept;
-                    <div class="model has-fit" data-picture="@k.Info.Id">
-                        <div class="li-text">
-                            <img class="test-picture kept-picture" alt="Kept picture @k.Info.Id" src="@k.Src" />
-                            <div class="model-name">Kept picture @k.Info.Id</div>
-                            <div class="model-meta">@k.Info.ImageWidth×@k.Info.ImageHeight · @(k.Info.ImageBytes / 1024) KB · seed @k.Info.Seed · @k.Info.Checkpoint</div>
-                            <div class="model-meta">@KeptLine(k.Info)</div>
-                        </div>
-                        <div class="actions">
-                            <button class="btn" data-act="again" disabled="@_drawing" @onclick="() => DrawAgainAsync(k.Info.Id)">Draw again and compare</button>
-                            <button class="btn" data-act="remove" disabled="@_drawing" @onclick="() => RemoveKeptAsync(k.Info.Id)">Remove</button>
-                        </div>
-                    </div>
-                }
-            </div>
-        }
-    }
-</section>
+<PageTabs Class="sub" Label="Pictures on this PC" Current="@Part" Items="ModelsPlaces.PictureParts"
+          Href="@(id => ModelsPlaces.Address(ModelsPlaces.Pictures, id))" />
 
+@if (_engine is null && Part != ModelsPlaces.Tags)
+{
+    <div class="notice" id="picture-engine-missing"><span>The picture engine is not installed yet. Install it in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.Engines)">@ModelsPlaces.Name(ModelsPlaces.Engines)</a>.</span></div>
+}
+
+<div class="pictures-part" data-part="@ModelsPlaces.Checkpoints" hidden="@(Part != ModelsPlaces.Checkpoints)">
 <section class="group">
     <h3 class="group-title">Checkpoints</h3>
     <p class="note">A checkpoint is the model that draws. Each one has settings for how prompts are written and drawn; DOG.ai fills them in for families it recognises (Illustrious, NoobAI, Pony, SDXL).</p>
+    @if (_scanned && Checkpoints.Count == 0)
+    {
+        <div class="notice" id="no-checkpoint"><span>No checkpoint yet. Download one in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.GetPictures)">Get models › Pictures</a>, or put a .safetensors checkpoint from Civitai in the checkpoints folder with <b>Open folder</b>, then <b>Look again</b>.</span></div>
+    }
     <div class="models" id="checkpoints">
         @foreach (var file in Checkpoints)
         {
@@ -179,12 +88,109 @@
     </div>
 </section>
 
+@if (Checkpoints.Count > 0)
+{
+    <Fold Id="pictures-test" Title="Test picture" Summary="A check that drawing works, with a fixed subject" OpenByDefault="false">
+        <div class="form-grid draw-with">
+            <label>
+                Draw with
+                <select class="field" id="draw-with" @onchange="ChooseAsync" disabled="@_drawing">
+                    @foreach (var c in Checkpoints)
+                    {
+                        <option value="@c.RelativePath" selected="@(c.RelativePath == _chosen)">@c.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                LoRA for the test picture
+                <select class="field" id="test-lora" @bind="_testLora" disabled="@_drawing">
+                    <option value="">None</option>
+                    @foreach (var l in Loras)
+                    {
+                        <option value="@l.RelativePath">@l.Name</option>
+                    }
+                </select>
+            </label>
+            <label>
+                Quality of the test picture
+                <select class="field" id="test-quality" @bind="_quality" disabled="@_drawing">
+                    @foreach (var q in Enum.GetValues<PictureQuality>())
+                    {
+                        <option value="@q">@PictureLevels.Title(q)</option>
+                    }
+                </select>
+                <span class="small">@PictureLevels.Blurb(_quality)</span>
+            </label>
+            <label>
+                Shape
+                <select class="field" id="test-shape" @bind="_shape" disabled="@_drawing">
+                    @foreach (var s in Enum.GetValues<PictureShape>())
+                    {
+                        <option value="@s">@PictureLevels.Title(s)</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <p class="note">Pictures in DOG.ai are drawn with this checkpoint, its settings and its style LoRAs. The test picture draws a fixed subject (a woman with silver hair in a forest).</p>
+        <div class="row">
+            @if (_drawing)
+            {
+                <button class="btn" id="test-picture-cancel" @onclick="CancelDrawing">Cancel</button>
+            }
+            else
+            {
+                <button class="btn primary" id="test-picture" disabled="@(_engine is null)" title="@(_engine is null ? "Install the picture engine first" : "")" @onclick="TestPictureAsync">Draw a test picture</button>
+            }
+        </div>
+        @if (_testNote is not null)
+        {
+            <p class="note" id="test-picture-note">@_testNote</p>
+        }
+        @if (_testPicture is not null)
+        {
+            <img class="test-picture" id="test-picture-result" alt="The test picture" src="@_testPicture" />
+        }
+        @if (_keepWords is not null)
+        {
+            @* Only for checking that pictures are kept safely (M9 step 5): shown when DOGAI_TEST_PICTURE_WORDS is set.
+               Portraits and story illustrations are the real places pictures are kept. *@
+            <div class="row">
+                <button class="btn" id="keep-picture" disabled="@(_last is null || _drawing)" @onclick="KeepAsync">Keep this picture</button>
+            </div>
+            @if (_keepNote is not null)
+            {
+                <p class="note" id="keep-note">@_keepNote</p>
+            }
+            <div class="models" id="kept-pictures">
+                @foreach (var kept in _kept)
+                {
+                    var k = kept;
+                    <div class="model has-fit" data-picture="@k.Info.Id">
+                        <div class="li-text">
+                            <img class="test-picture kept-picture" alt="Kept picture @k.Info.Id" src="@k.Src" />
+                            <div class="model-name">Kept picture @k.Info.Id</div>
+                            <div class="model-meta">@k.Info.ImageWidth×@k.Info.ImageHeight · @(k.Info.ImageBytes / 1024) KB · seed @k.Info.Seed · @k.Info.Checkpoint</div>
+                            <div class="model-meta">@KeptLine(k.Info)</div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn" data-act="again" disabled="@_drawing" @onclick="() => DrawAgainAsync(k.Info.Id)">Draw again and compare</button>
+                            <button class="btn" data-act="remove" disabled="@_drawing" @onclick="() => RemoveKeptAsync(k.Info.Id)">Remove</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </Fold>
+}
+</div>
+
+<div class="pictures-part" data-part="@ModelsPlaces.Loras" hidden="@(Part != ModelsPlaces.Loras)">
 <section class="group">
     <h3 class="group-title">LoRAs</h3>
     <p class="note">A LoRA adds a style, a character or more detail on top of a checkpoint. Its trigger words are put in the prompt whenever it is used.</p>
     @if (Loras.Count == 0)
     {
-        <p class="note">None yet. LoRAs go in the loras folder.</p>
+        <p class="note" id="no-lora">None yet. LoRAs go in the loras folder: <b>Open folder</b> below, then <b>Look again</b>.</p>
     }
     <div class="models" id="loras">
         @foreach (var file in Loras)
@@ -236,99 +242,63 @@
     </div>
 </section>
 
-@if (Others.Count > 0)
-{
-    <section class="group">
-        <h3 class="group-title">Other files</h3>
-        <div class="models" id="other-image-files">
-            @foreach (var o in Others)
-            {
-                <div class="model image-file @(o.Usable ? "" : "unusable")" data-file="@o.RelativePath">
-                    <div class="li-text">
-                        <div class="model-name">@Path.GetFileName(o.RelativePath)</div>
-                        <div class="model-meta">@o.Verdict.Note</div>
-                        @if (o.Misplaced is { } home)
-                        {
-                            <div class="model-meta">It is in @(o.Folder.Length == 0 ? "the image folder itself" : $"the {o.Folder} folder"); move it to the <b>@home</b> folder to use it.</div>
-                        }
-                        <div class="model-meta">@Sizes.Gb(o.SizeBytes) · @(o.Folder.Length == 0 ? "image" : o.Folder)</div>
+</div>
+
+<div class="pictures-part" data-part="@ModelsPlaces.Tags" hidden="@(Part != ModelsPlaces.Tags)">
+    <ExtraTagsBox Root="@_root" />
+</div>
+
+<div class="pictures-files" hidden="@(Part == ModelsPlaces.Tags)">
+    @if (Others.Count > 0)
+    {
+        @* Open until closed by hand when a file needs a look: a warning must not sit behind a closed heading. *@
+        <Fold Id="pictures-other" Title="Other files" Summary="@OthersSummary" OpenByDefault="@Others.Any(o => !o.Usable || o.Misplaced is not null)">
+            <div class="models" id="other-image-files">
+                @foreach (var o in Others)
+                {
+                    <div class="model image-file @(o.Usable ? "" : "unusable")" data-file="@o.RelativePath">
+                        <div class="li-text">
+                            <div class="model-name">@Path.GetFileName(o.RelativePath)</div>
+                            <div class="model-meta">@o.Verdict.Note</div>
+                            @if (o.Misplaced is { } home)
+                            {
+                                <div class="model-meta">It is in @(o.Folder.Length == 0 ? "the image folder itself" : $"the {o.Folder} folder"); move it to the <b>@home</b> folder to use it.</div>
+                            }
+                            <div class="model-meta">@Sizes.Gb(o.SizeBytes) · @(o.Folder.Length == 0 ? "image" : o.Folder)</div>
+                        </div>
                     </div>
-                </div>
-            }
+                }
+            </div>
+        </Fold>
+    }
+
+    @if (_error is not null)
+    {
+        <div class="notice bad"><span>@_error</span></div>
+    }
+
+    <section class="group">
+        <h3 class="group-title">Image models folder</h3>
+        <p class="note">
+            <b id="image-folder">@(_root ?? "No models folder is set")</b><InfoButton About="the image models folder">Checkpoints go in <b>checkpoints</b>, LoRAs in <b>loras</b>, VAEs in <b>vae</b> and upscalers in <b>upscalers</b>. Only .safetensors files are used: the old .ckpt format can carry program code, so DOG.ai refuses it.</InfoButton>
+        </p>
+        <div class="row">
+            <button class="btn" id="open-image-folder" disabled="@(_root is null)" @onclick="OpenFolder">Open folder</button>
+            <button class="btn" id="image-look-again" @onclick="ScanAsync">Look again</button>
         </div>
     </section>
-}
-
-<section class="group">
-    <h3 class="group-title">Recommended downloads</h3>
-    <p class="note">From Hugging Face, checked against their published checksums. Checkpoints are about 7 GB each.</p>
-    <div class="models">
-        @foreach (var item in ImageDownloads.All)
-        {
-            var d = item;
-            var installed = Installed(d);
-            <div class="model has-fit">
-                <div class="li-text">
-                    <div class="model-name">@d.Title@if (d.Recommended) {<span class="rec">Best pick</span>}</div>
-                    <div class="model-meta">@d.Blurb</div>
-                    <div class="model-meta">@KindTitle(d.Folder) · @Sizes.Gb(d.Bytes) · @d.Licence · @d.Repo</div>
-                </div>
-                <div class="actions">
-                    @if (JobFor(d) is { } job && job.Status != DownloadStatus.Done)
-                    {
-                        <div class="progress" title="@DownloadButton.StatusText(job)">
-                            <div class="meter"><i style="width:@((job.Fraction * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
-                            <span>@DownloadButton.StatusText(job)</span>
-                        </div>
-                    }
-                    else if (installed)
-                    {
-                        <span class="chip">Installed</span>
-                    }
-                    else
-                    {
-                        <button class="btn @(d.Recommended ? "primary" : "")" disabled="@(!Gate.IsOnline || _starting.Contains(d.SaveAs))"
-                                title="@(Gate.IsOnline ? "" : "Go online to download")" @onclick="() => DownloadAsync(d)">
-                            @(_starting.Contains(d.SaveAs) ? "Starting…" : "Download")
-                        </button>
-                    }
-                </div>
-            </div>
-        }
-    </div>
-    <p class="note">Pony Diffusion V6 comes from its author’s own Hugging Face page. Checkpoints and LoRAs from Civitai are downloaded in your browser and put in the folders below by hand: DOG.ai never goes to Civitai.</p>
-</section>
-
-@if (_error is not null)
-{
-    <div class="notice bad"><span>@_error</span></div>
-}
-
-<ExtraTagsBox Root="@_root" />
-
-<section class="group">
-    <h3 class="group-title">Image models folder</h3>
-    <p class="note">
-        <b id="image-folder">@(_root ?? "No models folder is set")</b><br />
-        Checkpoints go in <b>checkpoints</b>, LoRAs in <b>loras</b>, VAEs in <b>vae</b> and upscalers in <b>upscalers</b>.
-        Only .safetensors files are used: the old .ckpt format can carry program code, so DOG.ai refuses it.
-    </p>
-    <div class="row">
-        <button class="btn" id="open-image-folder" disabled="@(_root is null)" @onclick="OpenFolder">Open folder</button>
-        <button class="btn" id="image-look-again" @onclick="ScanAsync">Look again</button>
-    </div>
-</section>
-
-<PictureEngineBox Installed="OnEngineInstalled" />
+</div>
 
 @code {
+    /// <summary>The part shown: checkpoints, loras or tags (ModelsPlaces).</summary>
+    [Parameter] public string Part { get; set; } = ModelsPlaces.Checkpoints;
+
+    private bool _scanned;
     private string? _root, _chosen, _open, _cardError, _error, _engine;
     private string _testLora = "";
     private IReadOnlyList<ImageFile> _files = [];
     private CheckpointSettings? _draft;
     private LoraDraft? _loraDraft;
-    private readonly HashSet<string> _starting = new(StringComparer.OrdinalIgnoreCase);
-
     private bool _drawing;
     private PictureQuality _quality = PictureQuality.Standard;
     private PictureShape _shape = PictureShape.Tall;
@@ -353,12 +323,15 @@
     private IReadOnlyList<string> Vaes => _files.Where(f => f.Usable && f.Kind == ImageFileKind.Vae).Select(f => f.RelativePath).ToList();
     private IReadOnlyList<ImageFile> Others => _files.Where(f => !(f.Usable && f.Kind is ImageFileKind.Checkpoint or ImageFileKind.Lora)).ToList();
 
+    private string OthersSummary => Others.Count(o => !o.Usable) is var bad && bad > 0
+        ? $"{Others.Count} files, {bad} not usable"
+        : Others.Count == 1 ? "1 file" : $"{Others.Count} files";
+
     protected override async Task OnInitializedAsync()
     {
         _engine = PictureLocator.Find();
         Downloads.Changed += Refresh;
         Downloads.Completed += OnCompleted;
-        Gate.Changed += Refresh;
         Catalog.Changed += Refresh;
         await ScanAsync();
         if (_keepWords is not null) await LoadKeptAsync();
@@ -443,16 +416,9 @@
         var root = _root;
         _files = await Task.Run(() => ImageLibrary.Scan(root));
         _chosen = Catalog.ChosenAmong(Checkpoints.Select(c => c.RelativePath).ToList());
+        _scanned = true;
         StateHasChanged();
     }
-
-    private static string KindTitle(string folder) => folder switch
-    {
-        ImageFolders.Checkpoints => "Checkpoint",
-        ImageFolders.Loras => "LoRA",
-        ImageFolders.Vae => "VAE",
-        _ => folder,
-    };
 
     private static string SettingsLine(CheckpointSettings s) =>
         $"{(s.Style == PromptStyle.Tags ? "Tags" : "Sentences")} · {SamplerNames.Title(s.Sampler)}, {s.Steps} steps, guidance {s.Guidance:0.#}" +
@@ -572,12 +538,6 @@
         }
     }
 
-    private async Task OnEngineInstalled()
-    {
-        _engine = PictureLocator.Find();
-        await InvokeAsync(StateHasChanged);
-    }
-
     /// <summary>Draws the fixed test picture with the chosen checkpoint's settings, through the graphics-card coordinator.</summary>
     private async Task TestPictureAsync()
     {
@@ -651,66 +611,11 @@
 
     private void CancelDrawing() => _drawCts?.Cancel();
 
-    private bool Installed(ImageDownload d) =>
-        JobFor(d) is not { Status: not DownloadStatus.Done } &&
-        _files.Any(f => f.Folder == d.Folder && f.RelativePath.Equals(d.SaveAs, StringComparison.OrdinalIgnoreCase));
-
-    private DownloadJob? JobFor(ImageDownload d) => _root is null ? null : Downloads.Jobs.LastOrDefault(j =>
-        j.UseCase == ImageDownloads.UseCase && j.Repo.Equals(d.Repo, StringComparison.OrdinalIgnoreCase) &&
-        j.Parts[0].FileName.Equals(d.SaveAs, StringComparison.OrdinalIgnoreCase));
-
-    private async Task DownloadAsync(ImageDownload d)
-    {
-        _error = null;
-        if (_root is null)
-        {
-            _error = "No models folder is set.";
-            return;
-        }
-        _starting.Add(d.SaveAs);
-        try
-        {
-            var files = await Hf.FilesAsync(d.Repo);
-            if (files.FirstOrDefault(f => f.Path.Equals(d.File, StringComparison.Ordinal)) is not { } file)
-            {
-                _error = $"{d.Title} is no longer on Hugging Face in the expected form.";
-                return;
-            }
-            ImageLibrary.Ensure(_root);
-            await Downloads.EnqueueAsync(new DownloadJob
-            {
-                Repo = d.Repo,
-                Title = d.Title,
-                UseCase = ImageDownloads.UseCase,
-                Folder = Path.Combine(_root, d.Folder),
-                Parts =
-                [
-                    new DownloadPart
-                    {
-                        Url = HuggingFaceClient.ResolveUrl(d.Repo, file.Path),
-                        FileName = d.SaveAs,
-                        Size = file.Size,
-                        Sha256 = file.Sha256,
-                    },
-                ],
-            });
-        }
-        catch (Exception e) when (e is DownloadRefusedException or HubException or HttpRequestException or OfflineException or IOException or UnauthorizedAccessException)
-        {
-            _error = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
-        }
-        finally
-        {
-            _starting.Remove(d.SaveAs);
-        }
-    }
-
     public void Dispose()
     {
         _drawCts?.Cancel();
         Downloads.Changed -= Refresh;
         Downloads.Completed -= OnCompleted;
-        Gate.Changed -= Refresh;
         Catalog.Changed -= Refresh;
     }
 }

@@ -167,7 +167,7 @@ public sealed class DocumentLibrary(ICollectionStore store, IEmbedder embedder)
                 var waiting = await store.NeedingIndexAsync(model);
                 if (waiting.Count > 0 && model is null)
                 {
-                    Problem = "There is no document search model yet, so documents cannot be searched. Get one in Models → Recommended → Document search.";
+                    Problem = "There is no document search model yet, so documents cannot be searched. Get one in " + DogAI.Core.Models.ModelsPlaces.RecommendedName + ", under Document search.";
                 }
                 else
                 {

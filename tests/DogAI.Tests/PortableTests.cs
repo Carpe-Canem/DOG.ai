@@ -86,7 +86,7 @@ public sealed class PortableTests : IDisposable
         var locator = new LlamaServerLocator(paths);
         // Not winget's copy, not one on PATH, even when this PC has them.
         Assert.Null(locator.Find());
-        Assert.Contains("Models › Engine", locator.MissingMessage);
+        Assert.Contains("Models › Engines", locator.MissingMessage);
 
         Directory.CreateDirectory(paths.EngineDirectory);
         var own = Path.Combine(paths.EngineDirectory, "llama-server.exe");

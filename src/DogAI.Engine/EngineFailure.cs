@@ -16,10 +16,10 @@ public static partial class EngineFailure
         {
             if (UnknownArchitecture().Match(line) is { Success: true } arch)
                 return $"{lead} This model uses a newer design (\"{arch.Groups[1].Value}\") than your copy of llama-server knows. " +
-                       "Update the engine in Models → Engine, then load the model again.";
+                       "Update the engine in " + DogAI.Core.Models.ModelsPlaces.EnginesName + ", then load the model again.";
             if (UnknownTokenizer().IsMatch(line))
                 return $"{lead} This model is newer than your copy of llama-server. " +
-                       "Update the engine in Models → Engine, then load the model again.";
+                       "Update the engine in " + DogAI.Core.Models.ModelsPlaces.EnginesName + ", then load the model again.";
         }
 
         // Otherwise the first error is usually the cause; the lines after it only say that loading stopped.

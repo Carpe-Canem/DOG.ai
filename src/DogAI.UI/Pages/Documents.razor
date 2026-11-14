@@ -274,7 +274,7 @@ else
         {
             if (await Library.ModelIdAsync() is null)
             {
-                _searchProblem = "There is no document search model yet. Get one in Models → Recommended → Document search.";
+                _searchProblem = "There is no document search model yet. Get one in " + ModelsPlaces.RecommendedName + ", under Document search.";
                 _results = null;
                 return;
             }

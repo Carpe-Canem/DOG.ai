@@ -1,0 +1,58 @@
+@* The Downloads button in the Models header (M11): it says how many downloads are running and opens the list below it.
+   A click outside or Escape closes it. It took the place of the Downloads tab; the old address opens it. *@
+@implements IDisposable
+@inject DownloadManager Downloads
+
+<div class="tray @(Open ? "open" : "")" @onkeydown="OnKey">
+    <button type="button" class="btn tray-btn" id="downloads-tray" aria-haspopup="dialog" aria-expanded="@(Open ? "true" : "false")" title="@Title" @onclick="() => SetAsync(!Open)">
+        <Icon Name="download" Size="16" /><span class="tray-word">Downloads</span>@if (Count is { } count) {<span class="tray-count @(Running ? "" : "idle")" id="downloads-count">@count</span>}
+    </button>
+    @if (Open)
+    {
+        <div class="menu-back" @onclick="() => SetAsync(false)"></div>
+        <div class="tray-pop" id="downloads-panel" role="dialog" aria-label="Downloads"><DownloadsList /></div>
+    }
+</div>
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter] public EventCallback<bool> OpenChanged { get; set; }
+
+    private IReadOnlyList<DownloadJob> Active => Downloads.Jobs.Where(j => j.IsActive || j.Status == DownloadStatus.Queued).ToList();
+
+    private bool Running => Active.Count > 0;
+
+    /// <summary>Beside the word: how many are running and how far along; else what needs a look (paused, failed).</summary>
+    private string? Count
+    {
+        get
+        {
+            var active = Active;
+            if (active.Count > 0)
+            {
+                var total = active.Sum(j => j.TotalBytes);
+                var done = active.Sum(j => j.BytesDone);
+                return total > 0 ? $"{active.Count} · {done * 100 / total}%" : active.Count.ToString();
+            }
+            var jobs = Downloads.Jobs;
+            return jobs.Any(j => j.Status == DownloadStatus.Failed) ? "Failed"
+                : jobs.Any(j => j.Status == DownloadStatus.Paused) ? "Paused"
+                : null;
+        }
+    }
+
+    private string Title => Running ? $"Downloads: {Active.Count} running" : "Downloads";
+
+    protected override void OnInitialized() => Downloads.Changed += Refresh;
+
+    private Task SetAsync(bool open) => OpenChanged.InvokeAsync(open);
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && Open) await SetAsync(false);
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Downloads.Changed -= Refresh;
+}

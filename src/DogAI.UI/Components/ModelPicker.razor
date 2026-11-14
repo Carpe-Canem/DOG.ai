@@ -52,7 +52,7 @@
         {
             @if (Paths.IsPortable)
             {
-                <div class="notice bad"><span>The model engine (llama-server) is not in DOG.ai's folder yet. Get it in <a class="link-text" href="models/engine" @onclick="() => _open = false">Models › Engine</a>, then try again.</span></div>
+                <div class="notice bad"><span>The model engine (llama-server) is not in DOG.ai's folder yet. Get it in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.Engines)" @onclick="() => _open = false">@ModelsPlaces.EnginesName</a>, then try again.</span></div>
             }
             else
             {

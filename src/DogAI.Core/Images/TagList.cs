@@ -24,7 +24,7 @@ public sealed record TagNotes(IReadOnlyList<(string Written, string Used)> Corre
 /// <para>
 /// Some tags are left out of the bundled list by the owner's choice (2026-11-14), and known only by fingerprint
 /// (<see cref="TagFingerprints"/>): such a tag, and anything written that contains one, is dropped, never corrected into
-/// a tag nearby. The owner may add the full list on Models → Images (<see cref="With"/>); with it, every tag in it
+/// a tag nearby. The owner may add the full list in Models › On this PC › Pictures › Tags (<see cref="With"/>); with it, every tag in it
 /// is real again and nothing is dropped for its fingerprint.
 /// </para>
 /// </summary>
@@ -142,7 +142,7 @@ public sealed class TagList
     }
 
     /// <summary>
-    /// This list with the tags of a full tag file added (Models → Images → Extra tags). The result drops nothing for its
+    /// This list with the tags of a full tag file added (Models › On this PC › Pictures › Tags). The result drops nothing for its
     /// fingerprint: the owner chose the full list.
     /// </summary>
     public TagList With(IEnumerable<TagRow> rows)

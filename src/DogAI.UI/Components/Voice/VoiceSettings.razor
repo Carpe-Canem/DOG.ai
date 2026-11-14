@@ -69,11 +69,11 @@
             Speech recognition
             @if (_speechModel is null)
             {
-                <span class="small">No model is downloaded yet, so the microphone cannot be used. Get one in <a href="models/voice">Models → Voice</a>.</span>
+                <span class="small">No model is downloaded yet, so the microphone cannot be used. Get one in <a href="@ModelsPlaces.Address(ModelsPlaces.GetVoice)">@ModelsPlaces.GetVoiceName</a>.</span>
             }
             else
             {
-                <span class="small">@VoiceCatalog.Title(_speechModel)@(Recognizer.RunsOn is { } where ? $", running on the {where}" : ""). Change it in <a href="models/voice">Models → Voice</a>.</span>
+                <span class="small">@VoiceCatalog.Title(_speechModel)@(Recognizer.RunsOn is { } where ? $", running on the {where}" : ""). Change it in <a href="@ModelsPlaces.Address(ModelsPlaces.Voice)">@ModelsPlaces.VoiceName</a>.</span>
                 <span class="row">
                     <button class="btn" @onclick="TryListeningAsync">@(Dict.IsOn && !Dict.HandsFree ? "Done: write it down" : Dict.State == DictationState.Writing ? "Writing…" : "Try listening")</button>
                     @if (Dict.IsOn)

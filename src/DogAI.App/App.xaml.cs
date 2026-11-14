@@ -314,9 +314,9 @@ public partial class App : Application
             log.LogInformation("Downloaded {Repo} {Title} to {Path}", job.Repo, job.Title, job.MainPath);
             // Voice models are not chat models: they get no library record.
             if (job.UseCase == DogAI.UI.Components.Models.VoiceTab.VoiceUse) voices.Refresh();
-            // Image models are not chat models either; the Images tab finds them by looking in the image folder.
+            // Image models are not chat models either; the Pictures tabs find them by looking in the image folder.
             else if (job.UseCase == DogAI.Core.Images.ImageDownloads.UseCase) { }
-            // The full tag list (Models → Images → Extra tags), checked against its pinned SHA-256 by the download itself.
+            // The full tag list (Models › On this PC › Pictures › Tags), checked against its pinned SHA-256 by the download itself.
             else if (job.UseCase == DogAI.Engine.Images.ExtraTags.UseCase) _ = extraTags.LoadAsync(Path.GetDirectoryName(Path.GetDirectoryName(job.MainPath)));
             else _ = records.SaveAsync(new ModelRecord { Path = job.MainPath, Repo = job.Repo, Quant = job.Quant, UseCase = job.UseCase });
         };

@@ -10,7 +10,7 @@ writes for a picture against it; nothing is looked up online.
   commit `40ad070a02` (2025-01-04), with tags as of 2024-12-22 and a 25-post cutoff.
   Downloaded 2026-11-14 with the owner's approval; 6,024,803 bytes,
   SHA-256 `AA9EAB8435562F86D7AC0D81F2F7BEDCBA9F6B93A806010708702406BBA85E18`.
-- **In the app:** Models → Images → Extra tags can download this same file (from that commit, checked against this
+- **In the app:** Models › On this PC › Pictures › Tags can download this same file (from that commit, checked against this
   SHA-256) or take a copy chosen on the PC, kept as `<models>\image\tags\full-tag-list.csv` and read with the same rules.
 - **Licence:** that project is MIT-licensed; its licence text is `LICENSE-tagcomplete.txt` in this folder. The tag
   names, other spellings and post counts in the file are the public tag data of Danbooru and e621.
@@ -26,7 +26,7 @@ Left out on purpose:
 
 - **tags the owner chose to leave out (2026-11-14):** they are listed only as SHA-256 fingerprints in
   `excluded-tags.txt`, never as words. The tag check drops a written tag that is, or contains, one of them, instead
-  of correcting it into a tag nearby. The owner can add the full list in the app (Models → Images → Extra tags),
+  of correcting it into a tag nearby. The owner can add the full list in the app (Models › On this PC › Pictures › Tags),
   which brings them back;
 - **character and series tags:** one of these makes a checkpoint draw an existing character, over the card's own Looks;
 - **artist tags:** one of these changes the whole style to imitate that artist, and many look like ordinary words, so

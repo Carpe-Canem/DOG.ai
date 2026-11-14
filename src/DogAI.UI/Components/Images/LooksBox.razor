@@ -70,7 +70,7 @@
                 <input class="field" id="looks-strength" type="number" step="0.05" min="@Looks.MinStrength" max="@Looks.MaxStrength" disabled="@(Value.Lora is null)"
                        placeholder="The LoRA’s own" value="@(Value.LoraStrength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "")"
                        @onchange="StrengthChanged" />
-                <span class="small">Leave empty to use the strength set for the LoRA in Models › Images.</span>
+                <span class="small">Leave empty to use the strength set for the LoRA in @ModelsPlaces.LorasName.</span>
             </label>
         </div>
     }

@@ -544,6 +544,27 @@ button.cite:hover { border-color: var(--accent); }
 .page-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .page-tabs.narrow-only { display: none; }
 @media (max-width: 760px) { .page-tabs.narrow-only { display: flex; } }
+/* Tabs inside a tab (Models, Pictures: Checkpoints, LoRAs, Tags): small outlined pills, so two rows never look alike. */
+.page-tabs.sub { gap: 6px; margin-bottom: 14px; border: 0; }
+.page-tabs.sub .page-tab { margin: 0; padding: 3px 12px; font-size: .88em; border: 1px solid var(--line); border-radius: 999px; background: transparent; }
+.page-tabs.sub .page-tab.active { color: var(--accent); border-color: var(--accent); background: transparent; }
+.page-tabs + .notice, .notice + .pictures-part { margin-bottom: 14px; }
+.notice + .pictures-part { margin-top: 14px; }
+.pictures-files { margin-top: 18px; }
+/* Shown only while the side panel is hidden (below 1050 px), for facts the side panel otherwise has. */
+.when-no-aside { display: none; }
+@media (max-width: 1050px) { .hw.when-no-aside { display: flex; } }
+/* The Downloads button in the Models header and the list it opens. */
+.tray { position: relative; display: inline-flex; }
+.tray-btn { display: inline-flex; align-items: center; gap: 6px; }
+.tray-count { padding: 0 7px; font-size: .78em; font-weight: 700; border-radius: 999px; color: var(--ink); background: var(--accent); }
+.tray-count.idle { color: var(--muted); background: var(--surface2); }
+.tray-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 16; width: min(480px, 92vw); max-height: min(70vh, 640px); overflow: auto; padding: 12px; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: min(var(--r), 12px); box-shadow: 0 10px 30px rgb(0 0 0 / .3); }
+.tray-pop .model.has-fit { grid-template-columns: 1fr; gap: 8px; }
+.tray-pop .model .actions { justify-content: flex-start; }
+.tray-pop .progress.wide { width: 100%; }
+.tray-pop .note:first-child { margin-top: 0; }
+@media (max-width: 760px) { .tray-word { display: none; } }
 .about { border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); padding: 8px 14px; }
 
 @media (max-width: 1050px) { .shell .aside { display: none; } }
@@ -584,6 +605,8 @@ button.cite:hover { border-color: var(--accent); }
 .skin-fireside .panel { border-top: 1px solid var(--line); padding-top: 10px; }
 .skin-fireside .panel h4, .skin-fireside .settings h3, .skin-fireside .fold-name { font: italic 1.15em var(--read); text-transform: none; letter-spacing: 0; }
 .skin-fireside .head-row { flex-direction: column; gap: 10px; }
+/* The header is centred here, so the downloads list opens centred under its button: it stays on the page at any width. */
+.skin-fireside .tray-pop { right: auto; left: 50%; transform: translateX(-50%); }
 .skin-fireside .li.active { background: none; box-shadow: inset 3px 0 0 var(--accent); border-radius: 0; }
 .skin-fireside .thread { max-width: 680px; gap: 26px; }
 .skin-fireside .msg .avatar { display: none; }
@@ -695,7 +718,7 @@ div.math[data-math] { margin: .6em 0; text-align: center; }
 .katex { font-size: 1.08em; }
 .word .ai { color: var(--accent); }
 
-/* Models → Images */
+/* Models › On this PC › Pictures */
 .model .settings-card { grid-column: 1 / -1; display: grid; gap: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
 .model .settings-card.form-grid { display: grid; }
 .model .settings-card label { align-content: start; }

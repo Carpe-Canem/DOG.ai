@@ -1,0 +1,163 @@
+@* Models › Get models › Pictures: the recommended image models, downloaded from Hugging Face into the image models
+   folder. What is on this PC, and its settings, is On this PC › Pictures (ImagesTab). Opening this only reads file
+   headers: it never starts the picture engine. *@
+@using DogAI.Engine.Images
+@implements IDisposable
+@inject DownloadManager Downloads
+@inject OnlineGate Gate
+@inject HuggingFaceClient Hf
+@inject ISettingsStore SettingsStore
+@inject SdServerLocator PictureLocator
+
+@if (PictureLocator.Find() is null)
+{
+    <div class="notice" id="picture-engine-missing"><span>The picture engine is not installed yet. Install it in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.Engines)">@ModelsPlaces.Name(ModelsPlaces.Engines)</a>.</span></div>
+}
+
+<section class="group">
+    <h3 class="group-title">Recommended downloads</h3>
+    <p class="note">From Hugging Face, checked against their published checksums. Checkpoints are about 7 GB each.</p>
+    <div class="models" id="picture-downloads">
+        @foreach (var item in ImageDownloads.All)
+        {
+            var d = item;
+            var installed = Installed(d);
+            <div class="model has-fit" data-download="@d.SaveAs">
+                <div class="li-text">
+                    <div class="model-name">@d.Title@if (d.Recommended) {<span class="rec">Best pick</span>}</div>
+                    <div class="model-meta">@d.Blurb</div>
+                    <div class="model-meta">@KindTitle(d.Folder) · @Sizes.Gb(d.Bytes) · @d.Licence · @d.Repo</div>
+                </div>
+                <div class="actions">
+                    @if (JobFor(d) is { } job && job.Status != DownloadStatus.Done)
+                    {
+                        <div class="progress" title="@DownloadButton.StatusText(job)">
+                            <div class="meter"><i style="width:@((job.Fraction * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
+                            <span>@DownloadButton.StatusText(job)</span>
+                        </div>
+                    }
+                    else if (installed)
+                    {
+                        <span class="chip">Installed</span>
+                    }
+                    else
+                    {
+                        <button class="btn @(d.Recommended ? "primary" : "")" disabled="@(!Gate.IsOnline || _starting.Contains(d.SaveAs))"
+                                title="@(Gate.IsOnline ? "" : "Go online to download")" @onclick="() => DownloadAsync(d)">
+                            @(_starting.Contains(d.SaveAs) ? "Starting…" : "Download")
+                        </button>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</section>
+
+@if (_error is not null)
+{
+    <div class="notice bad"><span>@_error</span></div>
+}
+
+<p class="note">
+    Pony Diffusion V6 comes from its author’s own Hugging Face page. Checkpoints and LoRAs from Civitai are downloaded in your browser and put in the image models folder by hand
+    (<a href="@ModelsPlaces.Address(ModelsPlaces.Pictures)">On this PC › Pictures</a> opens it): DOG.ai never goes to Civitai. Settings for each checkpoint and LoRA are there too.
+</p>
+
+@code {
+    private string? _root, _error;
+    private IReadOnlyList<ImageFile> _files = [];
+    private readonly HashSet<string> _starting = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Downloads.Changed += Refresh;
+        Downloads.Completed += OnCompleted;
+        Gate.Changed += Refresh;
+        await ScanAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private void OnCompleted(DownloadJob job)
+    {
+        if (job.UseCase == ImageDownloads.UseCase) _ = InvokeAsync(ScanAsync);
+    }
+
+    private async Task ScanAsync()
+    {
+        var settings = await SettingsStore.LoadAsync();
+        _root = settings.ImageFolder();
+        var root = _root;
+        _files = await Task.Run(() => ImageLibrary.Scan(root));
+        StateHasChanged();
+    }
+
+    private static string KindTitle(string folder) => folder switch
+    {
+        ImageFolders.Checkpoints => "Checkpoint",
+        ImageFolders.Loras => "LoRA",
+        ImageFolders.Vae => "VAE",
+        _ => folder,
+    };
+
+    private bool Installed(ImageDownload d) =>
+        JobFor(d) is not { Status: not DownloadStatus.Done } &&
+        _files.Any(f => f.Folder == d.Folder && f.RelativePath.Equals(d.SaveAs, StringComparison.OrdinalIgnoreCase));
+
+    private DownloadJob? JobFor(ImageDownload d) => _root is null ? null : Downloads.Jobs.LastOrDefault(j =>
+        j.UseCase == ImageDownloads.UseCase && j.Repo.Equals(d.Repo, StringComparison.OrdinalIgnoreCase) &&
+        j.Parts[0].FileName.Equals(d.SaveAs, StringComparison.OrdinalIgnoreCase));
+
+    private async Task DownloadAsync(ImageDownload d)
+    {
+        _error = null;
+        if (_root is null)
+        {
+            _error = "No models folder is set.";
+            return;
+        }
+        _starting.Add(d.SaveAs);
+        try
+        {
+            var files = await Hf.FilesAsync(d.Repo);
+            if (files.FirstOrDefault(f => f.Path.Equals(d.File, StringComparison.Ordinal)) is not { } file)
+            {
+                _error = $"{d.Title} is no longer on Hugging Face in the expected form.";
+                return;
+            }
+            ImageLibrary.Ensure(_root);
+            await Downloads.EnqueueAsync(new DownloadJob
+            {
+                Repo = d.Repo,
+                Title = d.Title,
+                UseCase = ImageDownloads.UseCase,
+                Folder = Path.Combine(_root, d.Folder),
+                Parts =
+                [
+                    new DownloadPart
+                    {
+                        Url = HuggingFaceClient.ResolveUrl(d.Repo, file.Path),
+                        FileName = d.SaveAs,
+                        Size = file.Size,
+                        Sha256 = file.Sha256,
+                    },
+                ],
+            });
+        }
+        catch (Exception e) when (e is DownloadRefusedException or HubException or HttpRequestException or OfflineException or IOException or UnauthorizedAccessException)
+        {
+            _error = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
+        }
+        finally
+        {
+            _starting.Remove(d.SaveAs);
+        }
+    }
+
+    public void Dispose()
+    {
+        Downloads.Changed -= Refresh;
+        Downloads.Completed -= OnCompleted;
+        Gate.Changed -= Refresh;
+    }
+}

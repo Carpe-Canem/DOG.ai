@@ -3,7 +3,7 @@ using DogAI.Core.Images;
 namespace DogAI.Engine.Images;
 
 /// <summary>
-/// The full tag list the owner may add on Models → Images → Extra tags (off by default; the owner's decision,
+/// The full tag list the owner may add in Models › On this PC › Pictures › Tags (off by default; the owner's decision,
 /// 2026-11-14). DOG.ai's bundled list leaves some tags out; this file brings back every tag the build rules keep
 /// (<see cref="TagCsv"/>), merged into <see cref="TagList.Current"/> in memory. The file lives in
 /// <c>&lt;models&gt;\image\tags</c> under a fixed name, so no path is saved anywhere and a portable move needs nothing.

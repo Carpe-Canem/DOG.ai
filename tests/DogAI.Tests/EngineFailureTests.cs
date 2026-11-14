@@ -22,14 +22,14 @@ public class EngineFailureTests
         var message = EngineFailure.Explain(Lead, lines);
         Assert.StartsWith(Lead, message);
         Assert.Contains("\"qwen35\"", message);
-        Assert.Contains("Models → Engine", message);
+        Assert.Contains("Models › Engines", message);
     }
 
     [Fact]
     public void Unknown_tokenizer_also_says_to_update()
     {
         string[] lines = ["llama_model_load: error loading model: error loading model vocabulary: unknown pre-tokenizer type: 'newtok'"];
-        Assert.Contains("Models → Engine", EngineFailure.Explain(Lead, lines));
+        Assert.Contains("Models › Engines", EngineFailure.Explain(Lead, lines));
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public class EngineFailureTests
         Assert.Contains(expected, EngineFailure.StartProblem(unchecked((int)code)));
         var message = DogAI.Engine.Images.ImageServer.StartFailure(unchecked((int)code));
         Assert.StartsWith("The picture engine could not start: ", message);
-        Assert.Contains("Install it again in Models › Images", message);
+        Assert.Contains("Install it again in Models › Engines", message);
     }
 
     [Theory]

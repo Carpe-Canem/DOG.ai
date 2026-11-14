@@ -1,4 +1,4 @@
-@* Settings → Pictures: the checkpoint pictures are drawn with (the same choice as "Draw with" on Models → Images), the
+@* Settings → Pictures: the checkpoint pictures are drawn with (the same choice as the Pictures default in Models › On this PC), the
    quality pictures start at, whether the prompt is shown before drawing, and the rating pictures aim for. Saved as chosen.
    Opening it only reads file headers: it starts nothing. *@
 @using DogAI.Engine.Images
@@ -20,7 +20,7 @@
                 <option value="@c.RelativePath" selected="@(c.RelativePath == _chosen)">@c.Name</option>
             }
         </select>
-        <span class="small">@(_checkpoints.Count == 0 ? "Add one in Models › Images." : "Its settings, rating words and style LoRAs are in Models › Images.")</span>
+        <span class="small">@(_checkpoints.Count == 0 ? $"Get one in {ModelsPlaces.GetPicturesName}." : $"Its settings, rating words and style LoRAs are in {ModelsPlaces.PicturesName}.")</span>
     </label>
     <label>
         Quality to start at
@@ -43,7 +43,7 @@
                 </label>
             }
         </div>
-        <span class="small" id="rating-blurb">@PictureRatings.Blurb(P.Rating) Checkpoints do not always obey.<InfoButton About="the rating">The rating’s words go into the prompt and the words of the ratings above it into the negative prompt; the chat model is told the rating when it plans a picture. The words per rating are on each checkpoint’s card in Models › Images.</InfoButton></span>
+        <span class="small" id="rating-blurb">@PictureRatings.Blurb(P.Rating) Checkpoints do not always obey.<InfoButton About="the rating">The rating’s words go into the prompt and the words of the ratings above it into the negative prompt; the chat model is told the rating when it plans a picture. The words per rating are on each checkpoint’s card in @ModelsPlaces.PicturesName.</InfoButton></span>
         @if (!Extra.IsOn)
         {
             <span class="small" id="rating-tags-note">@TagsNote</span>
@@ -63,7 +63,7 @@
     private PicturePreferences P => Catalog.Preferences;
 
     /// <summary>Said beside the two highest ratings while the full tag list is not added.</summary>
-    private const string TagsNote = "The two highest ratings: DOG.ai’s own tag list leaves some tags out, so some of the planner’s tags for these levels are dropped. The full list can be added in Models › Images › Extra tags.";
+    private const string TagsNote = "The two highest ratings: DOG.ai’s own tag list leaves some tags out, so some of the planner’s tags for these levels are dropped. The full list can be added in " + ModelsPlaces.TagsName + ".";
 
     protected override async Task OnInitializedAsync()
     {

@@ -56,7 +56,7 @@ public sealed partial class ChatService
         if (query.Length == 0) return instruction;
         if (await documents.ModelIdAsync(ct) is null)
         {
-            sources.Note = "Documents were not searched: there is no document search model yet. Get one in Models → Recommended → Document search.";
+            sources.Note = "Documents were not searched: there is no document search model yet. Get one in " + DogAI.Core.Models.ModelsPlaces.RecommendedName + ", under Document search.";
             return instruction;
         }
 

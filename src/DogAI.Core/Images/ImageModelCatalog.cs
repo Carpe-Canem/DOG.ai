@@ -67,7 +67,7 @@ public sealed class ImageModelDocument
 /// <summary>
 /// Settings → Pictures: the quality pictures start at, whether the prompt is shown before drawing (off by default, the
 /// owner's decision 2026-11-13), and the rating pictures aim for. The checkpoint is <see cref="ImageModelCatalog.Chosen"/>,
-/// the same choice as "Draw with" on Models → Images.
+/// the same choice as the Pictures default in Models › On this PC and "Draw with" in the test picture there.
 /// </summary>
 public sealed record PicturePreferences(
     PictureQuality Quality = PictureQuality.Standard,
@@ -204,12 +204,12 @@ public sealed class ImageModelCatalog(IDocumentStore? documents = null)
 public static class ImagePrompt
 {
     /// <summary>
-    /// For walkthroughs only: words added to the test picture's subject on Models → Images (a marker word to search the
+    /// For walkthroughs only: words added to the test picture's subject in Models › On this PC › Pictures (a marker word to search the
     /// disk for). Setting it also shows Keep, the kept test pictures and Remove under the test picture.
     /// </summary>
     public const string TestWordsVariable = "DOGAI_TEST_PICTURE_WORDS";
 
-    /// <summary>The fixed subject of the test picture on Models → Images, in each prompt style.</summary>
+    /// <summary>The fixed subject of the test picture in Models › On this PC › Pictures, in each prompt style.</summary>
     public static string TestSubject(PromptStyle style) => style == PromptStyle.Tags
         ? "1girl, solo, silver hair, green eyes, leather armor, green cloak, forest, dappled sunlight, upper body"
         : "A woman with silver hair and green eyes, wearing leather armor and a green cloak, standing in a forest in dappled sunlight";

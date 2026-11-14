@@ -2,7 +2,7 @@ using DogAI.Core.Images;
 
 namespace DogAI.UI;
 
-/// <summary>What a picture is doing, in words, for every screen that draws one (the picture maker, Models → Images).</summary>
+/// <summary>What a picture is doing, in words, for every screen that draws one (the picture maker, the test picture in Models).</summary>
 public static class PictureWords
 {
     /// <summary>The line shown while a picture waits, makes room or is drawn.</summary>

@@ -1,6 +1,7 @@
 @* The picture engine (stable-diffusion.cpp's sd-server): what is installed, what it is doing, and its install and update.
-   Lives on Models → Images; the Engine tab only links here, so there is one install button and two installs can never
-   race on the engine\images folder. *@
+   Lives on Models › Engines, under the chat engine (owner's decision, 2026-11-14). A llama.cpp update moves the
+   engine\images folder, so the two installs must never run together: the page passes Blocked while the chat engine
+   installs and hears Working while this one does. *@
 @implements IDisposable
 @inject ImageEngineUpdater ImageUpdater
 @inject DogAI.Engine.Images.ImageServer Pictures
@@ -56,11 +57,11 @@
                 else if (current)
                 {
                     <span class="chip">Up to date</span>
-                    <button class="btn" id="picture-engine-again" title="Downloads the same version again and replaces DOG.ai’s copy, for when its files are damaged or incomplete" @onclick="InstallAsync">Install again</button>
+                    <button class="btn" id="picture-engine-again" disabled="@Blocked" title="Downloads the same version again and replaces DOG.ai’s copy, for when its files are damaged or incomplete" @onclick="InstallAsync">Install again</button>
                 }
                 else
                 {
-                    <button class="btn primary" id="picture-engine-install" @onclick="InstallAsync">@(ImageUpdater.IsInstalled ? "Update" : "Install")</button>
+                    <button class="btn primary" id="picture-engine-install" disabled="@Blocked" @onclick="InstallAsync">@(ImageUpdater.IsInstalled ? "Update" : "Install")</button>
                 }
             </div>
         }
@@ -80,6 +81,12 @@
 @code {
     /// <summary>Raised after the engine was installed or updated, so the page can enable drawing.</summary>
     [Parameter] public EventCallback Installed { get; set; }
+
+    /// <summary>The chat engine is being installed: this one must wait (the install moves this engine's folder).</summary>
+    [Parameter] public bool Blocked { get; set; }
+
+    /// <summary>Raised when an install here starts (true) and ends (false).</summary>
+    [Parameter] public EventCallback<bool> Working { get; set; }
 
     private EngineRelease? _release;
     private bool _busy, _checked, _bad, _installing;
@@ -135,8 +142,9 @@
 
     private async Task InstallAsync()
     {
-        if (_release is not { } release || _installing) return;
+        if (_release is not { } release || _installing || Blocked) return;
         _installing = true;
+        await Working.InvokeAsync(true);
         _message = null;
         _done = 0;
         _step = "Downloading…";
@@ -174,6 +182,7 @@
         {
             Session.Closed -= stop;
             _installing = false;
+            await Working.InvokeAsync(false);
         }
     }
 

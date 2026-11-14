@@ -7,8 +7,10 @@
 @inject OnlineSession Session
 @inject AppPaths Paths
 
-<section class="group">
-    <h3 class="group-title">Engine in use</h3>
+@* Models › Engines: the chat engine (llama.cpp) and, under it, the picture engine (stable-diffusion.cpp), each with
+   its own check and install. Only one install runs at a time. *@
+<section class="group" id="chat-engine">
+    <h3 class="group-title">Chat engine</h3>
     <div class="about">
         <div class="kv"><span>Program</span><span>@(_exe ?? "Not found")</span></div>
         <div class="kv"><span>Source</span><span>@Source</span></div>
@@ -21,20 +23,14 @@
 </section>
 
 <section class="group">
-    <h3 class="group-title">Picture engine</h3>
-    <p class="note">The picture engine (stable-diffusion.cpp) is installed and updated in Models → Images, beside the image models it draws with.</p>
-    <div class="row"><a class="btn" id="go-images" href="models/images">Open Images</a></div>
-</section>
-
-<section class="group">
-    <h3 class="group-title">Updates</h3>
+    <h3 class="group-title">Chat engine updates</h3>
     @if (!Gate.IsOnline)
     {
         <div class="notice"><span>Go online at the top of this page to check for newer engines.</span></div>
     }
     else if (!_checked)
     {
-        <div class="row"><button class="btn primary" disabled="@_busy" @onclick="CheckAsync">@(_busy ? "Checking…" : "Check for updates")</button></div>
+        <div class="row"><button class="btn primary" id="chat-engine-check" disabled="@_busy" @onclick="CheckAsync">@(_busy ? "Checking…" : "Check for updates")</button></div>
     }
     else
     {
@@ -59,7 +55,7 @@
                 }
                 else
                 {
-                    <button class="btn primary" disabled="@(_installing is not null)" @onclick="InstallChatAsync">@(Updater.IsInstalled ? "Update" : "Install")</button>
+                    <button class="btn primary" id="chat-engine-install" disabled="@(_installing is not null || _pictureInstalling)" @onclick="InstallChatAsync">@(Updater.IsInstalled ? "Update" : "Install")</button>
                 }
             </div>
             @if (Engine.State is EngineState.Ready or EngineState.Loading && !current && _installing is null)
@@ -82,11 +78,13 @@
 
 <p class="note">DOG.ai installs the CUDA build of llama.cpp that matches your graphics driver (Vulkan on other cards) from the project’s GitHub releases, checks every file against its published checksum, and only replaces the engine once the new one is complete. It goes in @Paths.EngineDirectory.</p>
 
+<PictureEngineBox Blocked="@(_installing is not null)" Working="on => _pictureInstalling = on" />
+
 @code {
     private enum Which { Chat }
 
     private EngineRelease? _release;
-    private bool _busy, _checked, _bad;
+    private bool _busy, _checked, _bad, _pictureInstalling;
     private Which? _installing;
     private string? _message, _exe, _step, _chatNote;
     private long _done;
@@ -160,7 +158,7 @@
 
     private async Task InstallAsync(Which which, EngineRelease? release, Func<EngineRelease, Action<long>, CancellationToken, Task<string>> install)
     {
-        if (release is null || _installing is not null) return;
+        if (release is null || _installing is not null || _pictureInstalling) return;
         _installing = which;
         _message = null;
         _done = 0;

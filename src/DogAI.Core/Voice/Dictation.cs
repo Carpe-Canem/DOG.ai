@@ -95,7 +95,7 @@ public sealed class Dictation : IDisposable
         var settings = await _settings.LoadAsync().ConfigureAwait(false);
         if (await _recognizer.ModelPathAsync().ConfigureAwait(false) is null)
         {
-            Fail("No speech recognition model is downloaded. Get one in Models → Voice.");
+            Fail("No speech recognition model is downloaded. Get one in " + DogAI.Core.Models.ModelsPlaces.GetVoiceName + ".");
             return;
         }
         _ = _recognizer.WarmUpAsync();

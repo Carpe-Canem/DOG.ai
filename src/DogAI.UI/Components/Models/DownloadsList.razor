@@ -2,19 +2,18 @@
 @inject DownloadManager Downloads
 @inject OnlineGate Gate
 
+@* The list of downloads, shown in the tray that opens from the Models header (DownloadsTray). *@
 @if (Downloads.Jobs.Count == 0)
 {
-    <EmptyState IconName="models" Title="No downloads">
-        Models you download from Recommended or Browse appear here. Each file is checked against the checksum Hugging Face publishes before it is used.
-    </EmptyState>
+    <p class="note" id="downloads-none">No downloads. Models you download from Get models appear here. Each file is checked against its published checksum before it is used.</p>
 }
 else
 {
     @if (!Gate.IsOnline && Downloads.Jobs.Any(j => j.Status is DownloadStatus.Paused or DownloadStatus.Queued))
     {
-        <div class="notice"><span>DOG.ai is offline. Go online at the top of this page to continue paused downloads.</span></div>
+        <div class="notice"><span>DOG.ai is offline. Go online to continue paused downloads.</span></div>
     }
-    <div class="models">
+    <div class="models" id="downloads-list">
         @foreach (var job in Downloads.Jobs)
         {
             var j = job;

@@ -59,7 +59,7 @@ public sealed class WhisperRecognizer : ISpeechRecognizer, IDisposable
     public async Task<Recognized> RecognizeAsync(float[] samples, string language, CancellationToken ct = default)
     {
         var path = await ModelPathAsync(ct).ConfigureAwait(false)
-                   ?? throw new VoiceUnavailableException("No speech recognition model is downloaded. Get one in Models → Voice.");
+                   ?? throw new VoiceUnavailableException("No speech recognition model is downloaded. Get one in " + DogAI.Core.Models.ModelsPlaces.GetVoiceName + ".");
         if (VoiceCatalog.IsEnglishOnly(Path.GetFileName(path))) language = "en";
         if (string.IsNullOrWhiteSpace(language)) language = "auto";
 

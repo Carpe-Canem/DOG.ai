@@ -1,31 +1,35 @@
 @page "/models"
 @page "/models/{Tab}"
+@page "/models/{Tab}/{Part}"
 @implements IDisposable
 @inject OnlineGate Gate
 @inject OnlineSession Session
 @inject ModelsContext Ctx
 @inject DownloadManager Downloads
 @inject EngineUpdater Updater
-@inject EngineManager Engine
 @inject ISettingsStore SettingsStore
-@inject HfToken Token
 @inject NavigationManager Nav
+
+@* The Models section: three groups (Get models, On this PC, Engines) with tabs inside the first two, and downloads as a
+   button in the header. Which group and tab an address opens is ModelsPlaces (Core); addresses from before the
+   regrouping keep working. The side panel shows only what fits the tab. *@
 
 <SectionContent SectionName="title">
     <div class="head-row">
         <div class="head-text">
             <h2>Models</h2>
-            <p>@Subtitle</p>
+            <p>@Group.Title · @Place.Subtitle</p>
         </div>
         <div class="online-switch">
+            <DownloadsTray @bind-Open="_trayOpen" />
             <span class="offline @(Gate.IsOnline ? "on" : "")"><i class="dot"></i>@(Gate.IsOnline ? "Online" : "Offline")</span>
             @if (Gate.IsOnline)
             {
-                <button class="btn" @onclick="() => Session.SetWanted(false)">Go offline</button>
+                <button class="btn" id="go-offline" @onclick="() => Session.SetWanted(false)">Go offline</button>
             }
             else
             {
-                <button class="btn primary" @onclick="() => Session.SetWanted(true)">Go online</button>
+                <button class="btn primary" id="go-online" @onclick="() => Session.SetWanted(true)">Go online</button>
             }
         </div>
     </div>
@@ -33,143 +37,139 @@
 
 <SectionContent SectionName="list">
     <div class="list-head"><h3>Models</h3></div>
-    @foreach (var (id, title, sub) in Tabs)
+    @foreach (var group in ModelsPlaces.Groups)
     {
-        <a class="li @(id == Current ? "active" : "")" href="@(id == "recommended" ? "models" : $"models/{id}")" aria-current="@(id == Current ? "page" : null)">
+        var g = group;
+        <a class="li @(g.Id == Group.Id ? "active" : "")" href="@GroupAddress(g)" data-group="@g.Id" aria-current="@(g.Id == Group.Id ? "page" : null)">
             <span class="li-text">
-                <span class="li-title">@title</span>
-                <span class="li-sub">@sub</span>
+                <span class="li-title">@g.Title</span>
+                <span class="li-sub">@GroupSub(g)</span>
             </span>
         </a>
     }
 </SectionContent>
 
-@switch (Current)
+<PageTabs Class="narrow-only" Label="Models groups" Current="@Group.Id"
+          Items="@(ModelsPlaces.Groups.Select(g => (g.Id, g.Title)).ToList())" Href="@(id => GroupAddress(ModelsPlaces.Groups.First(g => g.Id == id)))" />
+@if (Group.Places.Count > 1)
 {
-    case "browse" when Repo is { Length: > 0 } repo:
+    <PageTabs Class="models-tabs" Label="@Group.Title" Current="@Place.Id"
+              Items="@(Group.Places.Select(p => (p.Id, p.Title)).ToList())" Href="@(id => ModelsPlaces.Address(id))" />
+}
+
+@switch (Place.Id)
+{
+    case ModelsPlaces.Browse when Repo is { Length: > 0 } repo:
         <RepoView Repo="@repo" Installed="_installed" />
         break;
-    case "browse":
+    case ModelsPlaces.Browse:
         <BrowseTab />
         break;
-    case "library":
+    case ModelsPlaces.GetPictures:
+        <PictureDownloads />
+        break;
+    case ModelsPlaces.GetVoice:
+        <VoiceDownloads />
+        break;
+    case ModelsPlaces.Library:
         <LibraryTab Changed="ScanAsync" />
         break;
-    case "downloads":
-        <DownloadsTab />
+    case ModelsPlaces.Pictures:
+        <ImagesTab Part="@PicturePart" />
         break;
-    case "engine":
-        <EngineTab />
-        break;
-    case "voice":
+    case ModelsPlaces.Voice:
         <VoiceTab />
         break;
-    case "images":
-        <ImagesTab />
+    case ModelsPlaces.Engines:
+        <EngineTab />
         break;
     default:
-        <div class="hw">@foreach (var chip in HardwareChips) {<span class="chip">@chip</span>}</div>
+        @* The side panel has the hardware; below 1050 px it is hidden, so the same facts show here instead. *@
+        <div class="hw when-no-aside">@foreach (var chip in HardwareChips) {<span class="chip">@chip</span>}</div>
         <RecommendedTab Installed="_installed" />
         break;
 }
 
-<SectionContent SectionName="aside">
-    <div class="panel">
-        <h4>Your hardware</h4>
-        @if (!Ctx.Measured)
+@if (ShowsHardware || ShowsCard || ShowsConnection)
+{
+    <SectionContent SectionName="aside">
+        @if (ShowsHardware)
         {
-            <div class="small">Measuring…</div>
+            <div class="panel" id="hardware-panel">
+                <h4>Your hardware</h4>
+                @if (!Ctx.Measured)
+                {
+                    <div class="small">Measuring…</div>
+                }
+                else
+                {
+                    var hw = Ctx.Hardware;
+                    <div class="kv"><span>GPU</span><span>@(hw.MainGpu?.Name.Replace("NVIDIA GeForce ", "") ?? "None found")</span></div>
+                    <div class="kv"><span>CPU</span><span>@(hw.CpuName ?? "Unknown") (@hw.CpuThreads threads)</span></div>
+                    <div class="kv"><span>RAM</span><span>@Sizes.Gb(hw.RamTotalBytes) · @Sizes.Gb(hw.RamFreeBytes) free</span></div>
+                    @foreach (var d in hw.Drives)
+                    {
+                        <div class="kv"><span>Drive @d.Name</span><span>@Sizes.Gb(d.FreeBytes) free</span></div>
+                    }
+                }
+            </div>
         }
-        else
+        @if (ShowsCard && Ctx.Hardware.MainGpu is { } gpu)
         {
-            var hw = Ctx.Hardware;
-            <div class="kv"><span>GPU</span><span>@(hw.MainGpu?.Name.Replace("NVIDIA GeForce ", "") ?? "None found")</span></div>
-            <div class="kv"><span>CPU</span><span>@(hw.CpuName ?? "Unknown") (@hw.CpuThreads threads)</span></div>
-            <div class="kv"><span>RAM</span><span>@Sizes.Gb(hw.RamTotalBytes) · @Sizes.Gb(hw.RamFreeBytes) free</span></div>
-            @foreach (var d in hw.Drives)
-            {
-                <div class="kv"><span>Drive @d.Name</span><span>@Sizes.Gb(d.FreeBytes) free</span></div>
-            }
+            var used = gpu.TotalBytes - gpu.FreeBytes;
+            <div class="panel" id="card-panel">
+                <h4>Graphics memory</h4>
+                <div class="meter full-w"><i style="width:@Pct(used, gpu.TotalBytes)%"></i></div>
+                <div class="small">@Sizes.Gb(used) of @Sizes.Gb(gpu.TotalBytes) in use@(Ctx.EngineVram > 0 ? $", {Sizes.Gb(Ctx.EngineVram)} by the loaded model" : "")</div>
+                <div class="row"><button class="btn" @onclick="Ctx.RefreshAsync">Measure again</button></div>
+            </div>
         }
-    </div>
-    @if (Ctx.Hardware.MainGpu is { } gpu)
-    {
-        var used = gpu.TotalBytes - gpu.FreeBytes;
-        <div class="panel">
-            <h4>Graphics memory</h4>
-            <div class="meter full-w"><i style="width:@Pct(used, gpu.TotalBytes)%"></i></div>
-            <div class="small">@Sizes.Gb(used) of @Sizes.Gb(gpu.TotalBytes) in use@(Ctx.EngineVram > 0 ? $", {Sizes.Gb(Ctx.EngineVram)} by the loaded model" : "")</div>
-            <div class="row"><button class="btn" @onclick="Ctx.RefreshAsync">Measure again</button></div>
-        </div>
-    }
-    <div class="panel">
-        <h4>How fit is judged</h4>
-        <div class="small" id="fit-context-note">For a @Ctx.Context.ToString("N0")-token conversation, the context size models load with. Change it in <a href="models/library">Library › Default models</a>.</div>
-    </div>
-    <div class="panel">
-        <h4>Connection</h4>
-        <div class="small">This is the only section that goes online, and only to Hugging Face and GitHub (never Civitai). Leaving it goes offline again, unless a download is still running.</div>
-    </div>
-    <div class="panel">
-        <h4>Hugging Face token</h4>
-        @if (Token.IsSet)
+        @if (ShowsHardware)
         {
-            <div class="small">A token is saved, encrypted for your Windows account. It is sent only to Hugging Face.</div>
-            <div class="row"><button class="btn" @onclick="() => SaveTokenAsync(null)">Remove token</button></div>
+            <div class="panel" id="fit-panel">
+                <h4>How fit is judged</h4>
+                <div class="small" id="fit-context-note">For a @Ctx.Context.ToString("N0")-token conversation, the context size models load with. Change it in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">On this PC › Chat models › Default models</a>.</div>
+            </div>
         }
-        else
+        @if (ShowsConnection)
         {
-            <div class="small">Only needed for gated models. Accept the model’s terms on huggingface.co, create a read token there, and paste it here.</div>
-            <form class="row" @onsubmit="() => SaveTokenAsync(_tokenInput)">
-                <input class="field" type="password" autocomplete="off" placeholder="hf_…" @bind="_tokenInput" aria-label="Hugging Face token" />
-                <button class="btn" type="submit" disabled="@string.IsNullOrWhiteSpace(_tokenInput)">Save</button>
-            </form>
+            <ConnectionPanel WithToken="@(Place.Group == ModelsPlaces.Get)" />
         }
-    </div>
-</SectionContent>
+    </SectionContent>
+}
 
 @code {
     [Parameter] public string? Tab { get; set; }
+    [Parameter] public string? Part { get; set; }
     [SupplyParameterFromQuery(Name = "repo")] public string? Repo { get; set; }
 
     private IReadOnlySet<string> _installed = new HashSet<string>();
     private int _libraryCount;
     private long _librarySize;
-    private string? _tokenInput;
+    private bool _trayOpen;
 
-    private string Current => Tab ?? "recommended";
+    /// <summary>The tab shown last in each group while Models is open, so a click on a group comes back to it.</summary>
+    private readonly Dictionary<string, string> _lastIn = [];
 
-    private string Subtitle => Current switch
+    private ModelsPlace Place => ModelsPlaces.Find(Tab);
+    private ModelsGroup Group => ModelsPlaces.GroupOf(Place);
+    private string PicturePart => ModelsPlaces.PicturePart(Part);
+
+    // What the side panel shows on this tab: hardware and fit where chat models are judged, graphics memory where a
+    // model is loaded or drawn with, the connection where something can be downloaded.
+    private bool ShowsHardware => Place.Id is ModelsPlaces.Recommended or ModelsPlaces.Browse or ModelsPlaces.Library;
+    private bool ShowsCard => ShowsHardware || Place.Id == ModelsPlaces.GetPictures || (Place.Id == ModelsPlaces.Pictures && PicturePart != ModelsPlaces.Tags);
+    private bool ShowsConnection => Place.Group == ModelsPlaces.Get || Place.Id == ModelsPlaces.Engines || (Place.Id == ModelsPlaces.Pictures && PicturePart == ModelsPlaces.Tags);
+
+    private string GroupAddress(ModelsGroup group) =>
+        ModelsPlaces.Address(_lastIn.GetValueOrDefault(group.Id) ?? group.Places[0].Id);
+
+    private string GroupSub(ModelsGroup group) => group.Id switch
     {
-        "browse" => "Search Hugging Face for GGUF models",
-        "library" => "Models on this PC",
-        "downloads" => "Downloads in progress and finished",
-        "engine" => "The program that runs chat models",
-        "images" => "Models that draw pictures, and the picture engine",
-        "voice" => "Models for listening and speaking",
-        _ => "Recommended for your PC",
+        ModelsPlaces.Get => "Recommended, Hugging Face, pictures, voice",
+        ModelsPlaces.OnThisPc => $"{_libraryCount} chat {(_libraryCount == 1 ? "model" : "models")} · {Sizes.Gb(_librarySize)}",
+        _ => Updater.InstalledTag is { } tag ? $"llama.cpp {tag}" : "Chat engine, picture engine",
     };
-
-    private IEnumerable<(string, string, string)> Tabs =>
-    [
-        ("recommended", "Recommended", "Picked for your hardware"),
-        ("browse", "Browse Hugging Face", "Search all GGUF models"),
-        ("library", "Library", $"{_libraryCount} installed · {Sizes.Gb(_librarySize)}"),
-        ("voice", "Voice", "Listening and speaking"),
-        ("images", "Images", "Checkpoints and LoRAs"),
-        ("downloads", "Downloads", DownloadsSub),
-        ("engine", "Engine", Updater.InstalledTag is { } tag ? $"llama.cpp {tag}" : "llama.cpp"),
-    ];
-
-    private string DownloadsSub
-    {
-        get
-        {
-            var jobs = Downloads.Jobs;
-            var active = jobs.Count(j => j.IsActive || j.Status == DownloadStatus.Queued);
-            return active > 0 ? $"{active} active" : jobs.Any(j => j.Status == DownloadStatus.Paused) ? "Paused" : "None active";
-        }
-    }
 
     private IEnumerable<string> HardwareChips
     {
@@ -199,6 +199,18 @@
         await ScanAsync();
     }
 
+    protected override void OnParametersSet()
+    {
+        // The Downloads tab is a button in the header now; its old address opens it.
+        if (string.Equals(Tab, ModelsPlaces.OldDownloads, StringComparison.OrdinalIgnoreCase))
+        {
+            _trayOpen = true;
+            Nav.NavigateTo(ModelsPlaces.Address(ModelsPlaces.Recommended), replace: true);
+            return;
+        }
+        _lastIn[Place.Group] = Place.Id;
+    }
+
     private void Refresh() => InvokeAsync(StateHasChanged);
     private void OnCompleted(DownloadJob job) => InvokeAsync(ScanAsync);
 
@@ -211,13 +223,6 @@
         _libraryCount = files.Count;
         _librarySize = files.Sum(f => f.SizeBytes);
         StateHasChanged();
-    }
-
-    private async Task SaveTokenAsync(string? token)
-    {
-        var protectedToken = Token.Set(token);
-        await SettingsStore.SaveAsync(await SettingsStore.LoadAsync() with { HfTokenProtected = protectedToken });
-        _tokenInput = null;
     }
 
     private static string Pct(long part, long whole) =>

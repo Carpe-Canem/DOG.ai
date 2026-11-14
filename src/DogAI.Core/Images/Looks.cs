@@ -52,7 +52,7 @@ public sealed record Looks(string Tags = "", string? Lora = null, double? LoraSt
     /// These looks as they are taken from an imported card: without any piece that is a tag DOG.ai leaves out of its own
     /// list, or contains one (<see cref="TagList.LeavesOut"/>), and how many pieces went. Everything else stays as
     /// written, known tag or not. Looks are otherwise used in prompts exactly as typed and never checked, which is right
-    /// for words the owner typed and wrong for words that came with a card. With the full tag list added (Models → Images
+    /// for words the owner typed and wrong for words that came with a card. With the full tag list added (Models › On this PC › Pictures
     /// → Extra tags) nothing is left out, as for the planner's own tags.
     /// </summary>
     public (Looks Looks, int LeftOut) ForImport(TagList? tags = null)
@@ -78,7 +78,7 @@ public sealed record Looks(string Tags = "", string? Lora = null, double? LoraSt
     /// <summary>What the owner is told when <see cref="CheckImported"/> took something out. Says how many, never which.</summary>
     public static string ImportNote(int leftOut) =>
         $"{leftOut} of this card’s Looks {(leftOut == 1 ? "tag was" : "tags were")} left out, because DOG.ai leaves {(leftOut == 1 ? "it" : "them")} out of its own tag list. " +
-        "Cards keep such tags once the full tag list is added in Models › Images.";
+        "Cards keep such tags once the full tag list is added in " + DogAI.Core.Models.ModelsPlaces.TagsName + ".";
 
     // ---- Characters: inside the card ----
 

@@ -47,7 +47,7 @@
     }
     else if (_models.Count == 0)
     {
-        <p class="note">No .gguf files in these folders yet. Download one from Recommended or Browse, or add a folder that already has some.</p>
+        <p class="note">No .gguf files in these folders yet. Download one in <a href="@ModelsPlaces.Address(ModelsPlaces.Recommended)">Get models</a>, or add a folder that already has some.</p>
     }
     <div class="models">
         @foreach (var item in _models ?? [])

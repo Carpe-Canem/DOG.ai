@@ -462,7 +462,7 @@ public sealed class VoiceFlowTests
         ears.Model = null;
         await dictation.StartAsync();
         Assert.False(dictation.IsOn);
-        Assert.Contains("Models → Voice", dictation.Problem);
+        Assert.Contains("Models › Get models › Voice", dictation.Problem);
 
         ears.Model = "whisper.bin";
         await dictation.StartHandsFreeAsync();

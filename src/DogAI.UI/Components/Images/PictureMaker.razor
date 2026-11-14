@@ -318,9 +318,9 @@
     private bool Installed(PictureTry t) => CardOf(t.Checkpoint) is not null && _engine is not null;
 
     private string? Missing() =>
-        _engine is null ? "The picture engine is not installed. Install it in Models › Images (at the end of the page)."
+        _engine is null ? "The picture engine is not installed. Install it in " + ModelsPlaces.EnginesName + "."
         : _root is null ? "No models folder is set. Choose one in Models."
-        : _checkpoint is null || _settings is null ? "There is no checkpoint to draw with. Download one in Models › Images, or put a .safetensors checkpoint in its checkpoints folder."
+        : _checkpoint is null || _settings is null ? "There is no checkpoint to draw with. Download one in " + ModelsPlaces.GetPicturesName + ", or put a .safetensors checkpoint in the checkpoints folder (" + ModelsPlaces.PicturesName + " opens it)."
         : null;
 
     private void Refresh() => _ = InvokeAsync(StateHasChanged);

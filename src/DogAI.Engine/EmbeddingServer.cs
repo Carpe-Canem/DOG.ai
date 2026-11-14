@@ -133,7 +133,7 @@ public sealed class EmbeddingServer : IEmbedder, IDisposable
     private async Task<LlamaApi> EnsureStartedAsync(CancellationToken ct)
     {
         var path = await ModelPathAsync(ct).ConfigureAwait(false)
-                   ?? throw new EmbedderUnavailableException("There is no document search model yet. Get one in Models → Recommended → Document search.");
+                   ?? throw new EmbedderUnavailableException("There is no document search model yet. Get one in " + DogAI.Core.Models.ModelsPlaces.RecommendedName + ", under Document search.");
         if (_api is { } ready && _process is { HasExited: false } && _runningPath == path) return ready;
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
@@ -144,7 +144,7 @@ public sealed class EmbeddingServer : IEmbedder, IDisposable
             IsStarting = true;
             Changed?.Invoke();
             var exe = _locator.Find() ?? throw new EmbedderUnavailableException(
-                "The model engine (llama-server) was not found on this PC, so documents cannot be searched. Install it in Models → Engine.");
+                "The model engine (llama-server) was not found on this PC, so documents cannot be searched. Install it in " + DogAI.Core.Models.ModelsPlaces.EnginesName + ".");
 
             var port = EngineManager.FreePort();
             var key = Guid.NewGuid().ToString("N");

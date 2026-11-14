@@ -436,7 +436,7 @@ public sealed class ImageServer : IImageEngine, IDisposable
 
     /// <summary>The message for an exit code Windows gives a program it could not start; null for any other code.</summary>
     public static string? StartFailure(int exitCode) => EngineFailure.StartProblem(exitCode) is { } why
-        ? $"The picture engine could not start: {why} Install it again in Models › Images (at the end of the page)."
+        ? $"The picture engine could not start: {why} Install it again in {DogAI.Core.Models.ModelsPlaces.EnginesName}."
         : null;
 
     private string ExitMessage(string lead)

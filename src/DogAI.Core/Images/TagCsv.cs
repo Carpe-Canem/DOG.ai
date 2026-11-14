@@ -11,7 +11,7 @@ public sealed class TagFileException(string message) : Exception(message);
 /// <summary>
 /// Reads a tag file of the a1111-sd-webui-tagcomplete project (<c>danbooru_e621_merged.csv</c> and files like it): one tag a
 /// line, <c>name,category,posts,"other,spellings"</c>. The same rules make the bundled list (<c>tools/make-taglist.ps1</c>
-/// calls <see cref="BuildBundledList"/>) and read the full list the owner may add on Models → Images, so both agree.
+/// calls <see cref="BuildBundledList"/>) and read the full list the owner may add in Models › On this PC › Pictures › Tags, so both agree.
 /// </summary>
 /// <remarks>
 /// Kept: Danbooru's general tags (category 0), e621's general tags (7) and e621's species tags (12), with at least
