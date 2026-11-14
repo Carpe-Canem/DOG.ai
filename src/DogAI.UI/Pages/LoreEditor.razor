@@ -1,0 +1,198 @@
+@page "/characters/{CharacterId:long}/lore"
+@inject ICharacterStore Characters
+@inject IDesktopShell Desktop
+@inject NavigationManager Nav
+
+<SectionContent SectionName="title">
+    <div class="head-row">
+        <div class="head-text">
+            <h2>@(_c?.Name is { Length: > 0 } name ? $"{name}'s lore" : "Lore")</h2>
+            <p>Facts that are added to the prompt only when their keywords come up in the chat</p>
+        </div>
+    </div>
+</SectionContent>
+
+<SectionContent SectionName="list"><CharacterList ActiveId="@CharacterId" /></SectionContent>
+
+@if (_c is not null)
+{
+    <div class="editor">
+        <p class="small">
+            Each entry has keywords and some text. When a keyword appears in the latest messages, the text is given to the model,
+            so details about places, people and history are there when they matter without filling every reply.
+            Write {{char}} and {{user}} for the names. Lore is saved inside the character card and goes with it on export.
+        </p>
+
+        <div class="lore-settings">
+            <label>
+                Messages searched
+                <input class="field" type="number" min="1" max="50" placeholder="@LoreMatcher.DefaultScanDepth" value="@_book.ScanDepth"
+                       @onchange="e => _book.ScanDepth = ParseOrNull(e, 1, 50)" />
+            </label>
+            <label>
+                Most tokens for lore
+                <input class="field" type="number" min="50" step="50" placeholder="A quarter of the context" value="@_book.TokenBudget"
+                       @onchange="e => _book.TokenBudget = ParseOrNull(e, 50, 1_000_000)" />
+            </label>
+            <label class="check" title="An entry's own text can bring in other entries whose keywords it mentions">
+                <input type="checkbox" @bind="_book.RecursiveScanning" /> Entries can bring in other entries
+            </label>
+        </div>
+
+        @if (_book.Entries.Count == 0)
+        {
+            <p class="small">No entries yet. Add one, or import lore from a World Info file or another character card.</p>
+        }
+        @for (var i = 0; i < _book.Entries.Count; i++)
+        {
+            var index = i;
+            var e = _book.Entries[index];
+            <details class="card-text lore-entry @(e.Enabled ? "" : "off")" open="@(_open.Contains(e))" @ontoggle="() => Toggle(e)">
+                <summary>
+                    <span class="lore-title">@CharacterPrompt.LoreLabel(e)</span>
+                    <span class="small">@(e.Constant ? "always included" : e.Keys.Count == 0 ? "no keywords yet" : string.Join(", ", e.Keys))@(e.Enabled ? "" : " · off")</span>
+                </summary>
+                <div class="two">
+                    <label>Name <span class="small">For you; not sent to the model.</span><input class="field" @bind="e.Name" /></label>
+                    <label>Keywords <span class="small">Separate with commas. /like this/ for a pattern.</span>
+                        <input class="field" value="@string.Join(", ", e.Keys)" @onchange="ev => e.Keys = SplitKeys(ev)" />
+                    </label>
+                </div>
+                <label class="field-block">
+                    <span class="field-label">Text</span>
+                    <textarea class="field" rows="4" @bind="e.Content"></textarea>
+                </label>
+                <div class="lore-flags">
+                    <label class="check"><input type="checkbox" @bind="e.Enabled" /> On</label>
+                    <label class="check" title="Included in every reply, keywords or not"><input type="checkbox" @bind="e.Constant" /> Always included</label>
+                    <label class="check"><input type="checkbox" @bind="e.CaseSensitive" /> Match capitals exactly</label>
+                    <label class="check" title="Only fire when one of the second keywords appears as well"><input type="checkbox" @bind="e.Selective" /> Needs a second keyword</label>
+                </div>
+                @if (e.Selective)
+                {
+                    <label>Second keywords <span class="small">At least one of these must appear too.</span>
+                        <input class="field" value="@string.Join(", ", e.SecondaryKeys)" @onchange="ev => e.SecondaryKeys = SplitKeys(ev)" />
+                    </label>
+                }
+                <div class="lore-numbers">
+                    <label>
+                        Placed
+                        <select class="field" value="@((int)e.Position)" @onchange="ev => e.Position = ParsePosition(ev)">
+                            <option value="0">before the description</option>
+                            <option value="1">after the description</option>
+                        </select>
+                    </label>
+                    <label title="Lower numbers are placed first">Order<input class="field" type="number" @bind="e.InsertionOrder" /></label>
+                    <label title="When lore runs out of room, lower priority entries are left out first">Priority<input class="field" type="number" @bind="e.Priority" /></label>
+                    <button class="btn" @onclick="() => { _book.Entries.RemoveAt(index); _open.Remove(e); }">Remove</button>
+                </div>
+            </details>
+        }
+
+        <div class="row">
+            <button class="btn" @onclick="Add">Add an entry</button>
+            <button class="btn" @onclick="ImportAsync" title="From a SillyTavern World Info file, or from another character card">Import lore…</button>
+        </div>
+
+        @if (_notice is not null)
+        {
+            <div class="notice @(_noticeBad ? "bad" : "")"><span>@_notice</span></div>
+        }
+        <div class="editor-foot">
+            <div class="row">
+                <button class="btn primary" disabled="@_saving" @onclick="SaveAsync">Save lore</button>
+                <a class="btn" href="characters/@CharacterId">Cancel</a>
+            </div>
+            <span class="small">@_book.Entries.Count entr@(_book.Entries.Count == 1 ? "y" : "ies"), @_book.Entries.Count(x => x.Enabled) on</span>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public long CharacterId { get; set; }
+
+    private Character? _c;
+    private Lorebook _book = new();
+    private readonly HashSet<LoreEntry> _open = [];
+    private string? _notice;
+    private bool _noticeBad;
+    private bool _saving;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _notice = null;
+        _c = await Characters.GetAsync(CharacterId);
+        if (_c is null)
+        {
+            Nav.NavigateTo("characters", replace: true);
+            return;
+        }
+        _book = Lorebook.For(_c);
+        _open.Clear();
+    }
+
+    private void Toggle(LoreEntry entry)
+    {
+        if (!_open.Remove(entry)) _open.Add(entry);
+    }
+
+    private void Add()
+    {
+        var entry = new LoreEntry { InsertionOrder = _book.Entries.Count == 0 ? 100 : _book.Entries.Max(x => x.InsertionOrder) };
+        _book.Entries.Add(entry);
+        _open.Add(entry);
+    }
+
+    private async Task ImportAsync()
+    {
+        _notice = null;
+        var path = await Desktop.PickCardFileAsync();
+        if (path is null) return;
+        try
+        {
+            var imported = Lorebook.Import(await File.ReadAllBytesAsync(path));
+            foreach (var entry in imported.Entries)
+            {
+                entry.Raw.Remove("id"); // numbered again on save, so ids never clash with this book's
+                _book.Entries.Add(entry);
+            }
+            (_notice, _noticeBad) = ($"Added {imported.Entries.Count} entr{(imported.Entries.Count == 1 ? "y" : "ies")} from {Path.GetFileName(path)}. Save to keep them.", false);
+        }
+        catch (Exception e) when (e is CardFormatException or IOException or UnauthorizedAccessException)
+        {
+            (_notice, _noticeBad) = (e.Message, true);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_c is null) return;
+        _saving = true;
+        try
+        {
+            foreach (var entry in _book.Entries)
+            {
+                entry.Name = entry.Name.Trim();
+                entry.Content = entry.Content.Trim();
+            }
+            // Read the card again so edits made elsewhere since this page opened are not lost.
+            var fresh = await Characters.GetAsync(CharacterId) ?? _c;
+            _book.SaveTo(fresh);
+            await Characters.SaveAsync(fresh);
+            Nav.NavigateTo($"characters/{CharacterId}");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static List<string> SplitKeys(ChangeEventArgs e) =>
+        (e.Value?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().ToList();
+
+    private static LorePosition ParsePosition(ChangeEventArgs e) =>
+        e.Value?.ToString() == "0" ? LorePosition.BeforeCard : LorePosition.AfterCard;
+
+    private static int? ParseOrNull(ChangeEventArgs e, int min, int max) =>
+        int.TryParse(e.Value?.ToString(), out var v) ? Math.Clamp(v, min, max) : null;
+}

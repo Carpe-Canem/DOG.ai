@@ -1,0 +1,67 @@
+@* Picks a voice (Windows voices and downloaded ones) with a button to hear it. "Default voice" saves null. *@
+@implements IDisposable
+@inject ISpeechSynthesizer Voices
+@inject ReadAloud Reader
+
+<span class="voice-pick">
+    <select class="field" aria-label="@Label" value="@(Value ?? "")" @onchange="OnChange">
+        @* Each option says whether it is chosen: the list arrives after the first render, and a select's value set before
+           its options exist would otherwise fall back to the first one. *@
+        <option value="" selected="@string.IsNullOrEmpty(Value)">@(DefaultLabel)</option>
+        @foreach (var group in _voices.GroupBy(v => v.Group))
+        {
+            <optgroup label="@group.Key">
+                @foreach (var v in group)
+                {
+                    <option value="@v.Id.ToString()" selected="@(v.Id.ToString() == Value)">@v.Label</option>
+                }
+            </optgroup>
+        }
+        @if (Value is { Length: > 0 } saved && !_voices.Any(v => v.Id.ToString() == saved))
+        {
+            <option value="@saved" selected>@Missing(saved)</option>
+        }
+    </select>
+    <button type="button" class="btn" @onclick="TryAsync" title="Hear this voice">@(Reader.Key == TryKey ? "Stop" : "Listen")</button>
+</span>
+
+@code {
+    /// <summary>The saved voice (a VoiceId as text), or null for the default.</summary>
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "Voice";
+    [Parameter] public string DefaultLabel { get; set; } = "Default voice";
+
+    /// <summary>What the Listen button says, in the voice picked.</summary>
+    [Parameter] public string Sample { get; set; } = "Hello! This is how I sound when I read replies aloud.";
+
+    private const string TryKey = "voice-try";
+    private IReadOnlyList<VoiceOption> _voices = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Reader.Changed += Refresh;
+        _voices = await Voices.VoicesAsync();
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task OnChange(ChangeEventArgs e)
+    {
+        var text = e.Value?.ToString();
+        Value = string.IsNullOrEmpty(text) ? null : text;
+        await ValueChanged.InvokeAsync(Value);
+    }
+
+    private void TryAsync()
+    {
+        if (Reader.Key == TryKey) Reader.Stop();
+        else Reader.Speak(TryKey, Sample, VoiceId.Parse(Value));
+    }
+
+    private static string Missing(string saved) => VoiceId.Parse(saved) is { } id
+        ? $"{(id.Speaker is { } s ? KokoroVoices.Describe(s) : VoiceCatalog.Title(id.Model))} (not on this PC: the default is used)"
+        : "Unknown voice (the default is used)";
+
+    public void Dispose() => Reader.Changed -= Refresh;
+}

@@ -1,0 +1,183 @@
+@implements IDisposable
+@inject HuggingFaceClient Hf
+@inject OnlineGate Gate
+@inject ModelsContext Ctx
+@inject NavigationManager Nav
+
+@if (!Gate.IsOnline)
+{
+    <EmptyState IconName="models" Title="Go online to browse">
+        Searching Hugging Face needs the internet. Use “Go online” at the top of this page; DOG.ai goes offline again when you leave the Models section.
+    </EmptyState>
+}
+else
+{
+    <form class="search-row" @onsubmit="SearchAsync">
+        <input class="field" type="search" placeholder="Search GGUF models, e.g. gemma or qwen 27b" @bind="_query" aria-label="Search" />
+        @if (Ctx.Filter == ModelFilters.Usable)
+        {
+            <select class="field" @bind="_sort" @bind:after="SearchAsync" aria-label="Sort by">
+                <option value="@HfSort.Trending">Trending</option>
+                <option value="@HfSort.Downloads">Most downloaded</option>
+                <option value="@HfSort.Recent">Recently updated</option>
+                <option value="@HfSort.Likes">Most liked</option>
+            </select>
+        }
+        <button class="btn primary" type="submit">Search</button>
+    </form>
+    <FilterBar Rating="true" Hidden="Hidden" />
+
+    @if (_error is not null)
+    {
+        <div class="notice bad"><span>@_error</span></div>
+    }
+    else if (_busy && _results.Count == 0)
+    {
+        <p class="note">Searching…</p>
+    }
+    else if (_searched && Shown.Count == 0)
+    {
+        <p class="note">@(Hidden > 0 ? "Everything that matched is too large for this PC. Turn on “Show models too large for this PC” to see it." : "Nothing matched. Try fewer words.")</p>
+    }
+
+    <div class="models">
+        @foreach (var repo in Shown)
+        {
+            <a class="model link" href="@($"models/browse?repo={Uri.EscapeDataString(repo.Id)}")">
+                <div class="li-text">
+                    <div class="model-name">@repo.Name @if (repo.Gated) {<span class="chip">Gated</span>} @if (repo.Uncensored) {<span class="chip">Uncensored</span>} @if (!Ctx.CanRun(repo.Parameters)) {<span class="chip">Too large</span>}</div>
+                    @if (Describe(repo.Id) is { } about)
+                    {
+                        <div class="model-about">@about</div>
+                    }
+                    <div class="model-meta">@repo.Author@(repo.BaseModel is { } b ? $" · based on {b}" : "") · @(repo.Parameters is > 0 ? $"{repo.Parameters / 1e9:0.#}B · " : "")@Count(repo.Downloads) downloads · @repo.Likes likes@(repo.LastModified is { } d ? $" · updated {d:d MMM yyyy}" : "")</div>
+                </div>
+                <span class="chevron" aria-hidden="true">›</span>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    private string _query = "";
+    private HfSort _sort = HfSort.Trending;
+    private IReadOnlyList<HfModelSummary> _results = [];
+    private bool _busy, _searched;
+    private string? _error;
+    private string _searchedFilter = "";
+    private CancellationTokenSource? _aboutCts;
+
+    /// <summary>How many rows get a description; each costs one to four small requests.</summary>
+    private const int Described = 24;
+
+    /// <summary>Results this PC can run, unless "show too large" is on. Before the hardware is measured nothing is hidden.</summary>
+    private IReadOnlyList<HfModelSummary> Shown =>
+        Ctx.ShowAll || !Ctx.Measured ? _results : _results.Where(r => Ctx.CanRun(r.Parameters)).ToList();
+
+    private int Hidden => Ctx.Measured ? _results.Count(r => !Ctx.CanRun(r.Parameters)) : 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Gate.Changed += OnGate;
+        Ctx.Changed += OnContext;
+        if (!Ctx.Measured) await Ctx.RefreshAsync();
+        if (Gate.IsOnline) await SearchAsync();
+    }
+
+    /// <summary>Changing which models to list searches again; other changes (context size, toggles) only redraw.</summary>
+    private void OnContext() => InvokeAsync(async () =>
+    {
+        if (Gate.IsOnline && _searched && _searchedFilter != Ctx.Filter) await SearchAsync();
+        else LoadDescriptions();
+        StateHasChanged();
+    });
+
+    private void OnGate() => InvokeAsync(async () =>
+    {
+        if (Gate.IsOnline && !_searched) await SearchAsync();
+        StateHasChanged();
+    });
+
+    private async Task SearchAsync()
+    {
+        if (!Gate.IsOnline) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            _searchedFilter = Ctx.Filter;
+            // Hidden models take up room in the results, so ask for plenty.
+            _results = Ctx.Filter switch
+            {
+                ModelFilters.Uncensored => await Hf.SearchUncensoredAsync(_query),
+                ModelFilters.Top => await Hf.SearchAsync(_query, HfSort.Likes, 100),
+                _ => await Hf.SearchAsync(_query, _sort, 100),
+            };
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException)
+        {
+            _error = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
+        }
+        finally
+        {
+            _busy = false;
+            _searched = true;
+        }
+        LoadDescriptions();
+    }
+
+    /// <summary>The first paragraph a model card gives (its own, or its original model's), once fetched.</summary>
+    private string? Describe(string repo) => Ctx.KnownAbout(repo) is { Count: > 0 } about
+        ? about.Select(a => a.Intro?.Split("\n\n")[0] ?? a.Highlights.FirstOrDefault()).FirstOrDefault(t => t is not null)
+        : null;
+
+    /// <summary>
+    /// Fetches descriptions for the first rows shown, four at a time, in the background. A new search
+    /// cancels what the last one started. A card that cannot be read leaves its row without a description.
+    /// </summary>
+    private void LoadDescriptions()
+    {
+        _aboutCts?.Cancel();
+        if (!Gate.IsOnline) return;
+        var cts = _aboutCts = new CancellationTokenSource();
+        var repos = Shown.Take(Described).Select(r => r.Id).Where(id => Ctx.KnownAbout(id) is null).ToList();
+        if (repos.Count == 0) return;
+        var slots = new SemaphoreSlim(4);
+        foreach (var id in repos)
+        {
+            _ = InvokeAsync(async () =>
+            {
+                try
+                {
+                    await slots.WaitAsync(cts.Token);
+                    try
+                    {
+                        await Ctx.AboutAsync(id, cts.Token);
+                    }
+                    finally
+                    {
+                        slots.Release();
+                    }
+                    if (!cts.IsCancellationRequested) StateHasChanged();
+                }
+                catch (Exception e) when (e is OperationCanceledException or HubException or HttpRequestException or OfflineException or HostNotAllowedException)
+                {
+                }
+            });
+        }
+    }
+
+    public static string Count(long n) => n switch
+    {
+        >= 1_000_000 => $"{n / 1e6:0.#}M",
+        >= 1_000 => $"{n / 1e3:0.#}k",
+        _ => n.ToString(),
+    };
+
+    public void Dispose()
+    {
+        _aboutCts?.Cancel();
+        Gate.Changed -= OnGate;
+        Ctx.Changed -= OnContext;
+    }
+}

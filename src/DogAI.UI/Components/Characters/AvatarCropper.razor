@@ -1,0 +1,158 @@
+@* Choose the square of a picture shown in lists and chats: drag the square (or use the arrow keys)
+   and set its size with the slider. Works on the full picture; returns a new small avatar. *@
+@implements IAsyncDisposable
+@inject IDesktopShell Desktop
+@inject IJSRuntime JS
+
+<Modal Title="Choose the part to show" OnClose="OnCancel">
+    @if (_size is { } size)
+    {
+        <div class="cropper">
+            <div class="crop-stage">
+                <img @ref="_image" src="@_url" alt="" draggable="false" />
+                <div @ref="_square" class="crop-square" tabindex="0" role="slider" aria-label="Avatar area. Arrow keys move it."
+                     aria-valuetext="@($"{_crop.Side} pixels at {_crop.X}, {_crop.Y}")" style="@SquareStyle(size)" @onkeydown="KeyAsync"></div>
+            </div>
+            <div class="crop-side">
+                <div class="crop-preview" style="@PreviewStyle(size)" aria-hidden="true"></div>
+                <p class="small">This is how the picture looks in lists and chats. Drag the square to move it.</p>
+                <label class="field-block">
+                    <span class="field-label">Size</span>
+                    <input type="range" min="@Math.Min(AvatarCrop.MinSide, Math.Min(size.Width, size.Height))" max="@Math.Min(size.Width, size.Height)"
+                           value="@_crop.Side" @oninput="Resize" aria-label="Size of the square" />
+                </label>
+                <div class="row">
+                    <button class="btn primary" disabled="@_busy" @onclick="DoneAsync">Use this</button>
+                    <button class="btn" @onclick="() => _crop = AvatarCrop.Default(size.Width, size.Height)">Reset</button>
+                    <button class="btn" @onclick="OnCancel">Cancel</button>
+                </div>
+                @if (_error is not null)
+                {
+                    <div class="notice bad"><span>@_error</span></div>
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="notice bad"><span>That picture could not be read.</span></div>
+    }
+</Modal>
+
+@code {
+    /// <summary>The full picture as PNG.</summary>
+    [Parameter, EditorRequired] public byte[] Picture { get; set; } = [];
+
+    /// <summary>Called with the new avatar PNG.</summary>
+    [Parameter] public EventCallback<byte[]> OnDone { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private (int Width, int Height)? _size;
+    private AvatarCrop _crop;
+    private string _url = "";
+    private byte[]? _shown;
+    private bool _busy;
+    private string? _error;
+    private ElementReference _image;
+    private ElementReference _square;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<AvatarCropper>? _self;
+
+    protected override void OnParametersSet()
+    {
+        if (ReferenceEquals(_shown, Picture)) return;
+        _shown = Picture;
+        _size = AvatarCrop.PngSize(Picture);
+        _url = "data:image/png;base64," + Convert.ToBase64String(Picture);
+        if (_size is { } s) _crop = AvatarCrop.Default(s.Width, s.Height);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_size is null) return;
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/crop.js");
+            _self ??= DotNetObjectReference.Create(this);
+            await _module.InvokeVoidAsync("initCrop", _square, _image, _self);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException or ObjectDisposedException)
+        {
+            // Dragging needs the script; the arrow keys and the slider still work without it.
+        }
+    }
+
+    [JSInvokable]
+    public Task Moved(double fx, double fy) => InvokeAsync(() =>
+    {
+        if (_size is not { } s) return;
+        _crop = new AvatarCrop((int)Math.Round(fx * s.Width), (int)Math.Round(fy * s.Height), _crop.Side).Within(s.Width, s.Height);
+        StateHasChanged();
+    });
+
+    private void Resize(ChangeEventArgs e)
+    {
+        if (_size is { } s && int.TryParse(e.Value?.ToString(), out var side)) _crop = _crop.Resized(side, s.Width, s.Height);
+    }
+
+    private void KeyAsync(KeyboardEventArgs e)
+    {
+        if (_size is not { } s) return;
+        var step = Math.Max(1, Math.Min(s.Width, s.Height) / 50) * (e.ShiftKey ? 5 : 1);
+        var (dx, dy) = e.Key switch
+        {
+            "ArrowLeft" => (-step, 0),
+            "ArrowRight" => (step, 0),
+            "ArrowUp" => (0, -step),
+            "ArrowDown" => (0, step),
+            _ => (0, 0),
+        };
+        _crop = (_crop with { X = _crop.X + dx, Y = _crop.Y + dy }).Within(s.Width, s.Height);
+    }
+
+    private async Task DoneAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await OnDone.InvokeAsync(await Desktop.CropAvatarAsync(Picture, _crop));
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string Pct(double v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    private string SquareStyle((int Width, int Height) s) =>
+        $"left:{Pct(100.0 * _crop.X / s.Width)};top:{Pct(100.0 * _crop.Y / s.Height)};" +
+        $"width:{Pct(100.0 * _crop.Side / s.Width)};height:{Pct(100.0 * _crop.Side / s.Height)}";
+
+    // The preview shows the chosen square at 120 pixels by scaling and shifting the whole picture behind a round window.
+    private string PreviewStyle((int Width, int Height) s)
+    {
+        const double box = 120;
+        var scale = box / _crop.Side;
+        string Px(double v) => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) + "px";
+        return $"background-image:url('{_url}');background-size:{Px(s.Width * scale)} {Px(s.Height * scale)};" +
+               $"background-position:{Px(-_crop.X * scale)} {Px(-_crop.Y * scale)}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _self?.Dispose();
+        try
+        {
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
+}

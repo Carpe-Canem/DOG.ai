@@ -1,0 +1,161 @@
+@* Dialog for making and changing styles (sampler presets). Built-in styles are read-only and can be copied. *@
+@inject PresetCatalog Presets
+
+<Modal Title="Styles" Class="wide" OnClose="() => OnClose.InvokeAsync(null)">
+    <div class="split">
+        <div class="split-list">
+            @foreach (var preset in Presets.All)
+            {
+                var p = preset;
+                <button class="li @(p.Id == _form.Id ? "active" : "")" @onclick="() => Select(p)">
+                    <span class="li-text">
+                        <span class="li-title">@p.Name</span>
+                        <span class="li-sub">@(PresetCatalog.IsBuiltIn(p.Id) ? "Built in" : "Yours")</span>
+                    </span>
+                </button>
+            }
+            @if (_form.Id == "")
+            {
+                <div class="li active"><span class="li-text"><span class="li-title">@_form.Name</span><span class="li-sub">Not saved yet</span></span></div>
+            }
+        </div>
+        <div class="split-body">
+            @if (ReadOnly)
+            {
+                <div class="notice"><span>Built-in styles can't be changed. Make a copy to adjust one.</span>
+                    <button class="btn" @onclick="Copy">Make a copy</button></div>
+            }
+            <div class="form-grid">
+                <label class="wide-field">Name<input class="field" @bind="_form.Name" disabled="@ReadOnly" /></label>
+                <label class="wide-field">What it's for<input class="field" @bind="_form.Description" disabled="@ReadOnly" /></label>
+                @Number("Temperature", "How adventurous word choice is. Lower is steadier, higher is more varied. 0.7 is typical.", () => _form.Temperature, v => _form.Temperature = v, 0.05)
+                @Number("Min-P", "Leaves out words far less likely than the best one. 0.05 is a good start; 0 is off.", () => _form.MinP, v => _form.MinP = v, 0.01)
+                @Number("Top-P", "An older limit on word choice. 1 is off.", () => _form.TopP, v => _form.TopP = v, 0.01)
+                @Number("Top-K", "Only the K likeliest words are considered. 0 is off.", () => _form.TopK, v => _form.TopK = (int)v, 1)
+                @Number("Repetition penalty", "Above 1 discourages repeating single words. 1 is off.", () => _form.RepeatPenalty, v => _form.RepeatPenalty = v, 0.01)
+                @Number("DRY", "Discourages repeating whole phrases from earlier. 0 is off, 0.8 is typical.", () => _form.DryMultiplier, v => _form.DryMultiplier = v, 0.1)
+                @Number("XTC chance", "How often the most obvious words are skipped for something fresher. 0 is off.", () => _form.XtcProbability, v => _form.XtcProbability = v, 0.05)
+                @Number("XTC threshold", "Only words at least this likely count as \"obvious\". 0.1 is typical.", () => _form.XtcThreshold, v => _form.XtcThreshold = v, 0.01)
+            </div>
+            @if (_error is not null)
+            {
+                <div class="notice bad"><span>@_error</span></div>
+            }
+            <div class="modal-foot">
+                <div class="row">
+                    @if (!ReadOnly)
+                    {
+                        <button class="btn primary" @onclick="SaveAsync">Save</button>
+                        @if (_form.Id != "")
+                        {
+                            @if (_confirmDelete)
+                            {
+                                <button class="btn danger" @onclick="DeleteAsync">Yes, delete it</button>
+                                <button class="btn" @onclick="() => _confirmDelete = false">Keep</button>
+                            }
+                            else
+                            {
+                                <button class="btn" @onclick="() => _confirmDelete = true">Delete</button>
+                            }
+                        }
+                    }
+                    else
+                    {
+                        <button class="btn" @onclick="Copy">Make a copy</button>
+                    }
+                </div>
+                @if (_form.Id != "")
+                {
+                    <button class="btn" @onclick="() => OnClose.InvokeAsync(_form.Id)">Use this style</button>
+                }
+            </div>
+            @if (_saved)
+            {
+                <p class="small">Saved. Chats using this style pick up the change with their next reply.</p>
+            }
+        </div>
+    </div>
+</Modal>
+
+@code {
+    [Parameter] public string? Selected { get; set; }
+
+    /// <summary>Called when the dialog closes, with the style to switch to, or null to keep the current one.</summary>
+    [Parameter] public EventCallback<string?> OnClose { get; set; }
+
+    private sealed class Form
+    {
+        public string Id = "", Name = "", Description = "";
+        public double Temperature, TopP, MinP, RepeatPenalty, DryMultiplier, XtcProbability, XtcThreshold;
+        public int TopK;
+
+        public static Form From(SamplerPreset p) => new()
+        {
+            Id = p.Id, Name = p.Name, Description = p.Description, Temperature = p.Temperature, TopP = p.TopP, TopK = p.TopK,
+            MinP = p.MinP, RepeatPenalty = p.RepeatPenalty, DryMultiplier = p.DryMultiplier,
+            XtcProbability = p.XtcProbability, XtcThreshold = p.XtcThreshold,
+        };
+
+        public SamplerPreset ToPreset() => new(Id, Name, Description)
+        {
+            Temperature = Temperature, TopP = TopP, TopK = TopK, MinP = MinP, RepeatPenalty = RepeatPenalty,
+            DryMultiplier = DryMultiplier, XtcProbability = XtcProbability, XtcThreshold = XtcThreshold,
+        };
+    }
+
+    private Form _form = new();
+    private string? _error;
+    private bool _saved;
+    private bool _confirmDelete;
+
+    private bool ReadOnly => PresetCatalog.IsBuiltIn(_form.Id);
+
+    protected override void OnInitialized() => _form = Form.From(Presets.Get(Selected));
+
+    private void Select(SamplerPreset preset)
+    {
+        _form = Form.From(preset);
+        _error = null;
+        _saved = false;
+        _confirmDelete = false;
+    }
+
+    private void Copy()
+    {
+        _form = Form.From(PresetCatalog.CopyOf(_form.ToPreset()));
+        _error = null;
+        _saved = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            var saved = await Presets.SaveAsync(_form.ToPreset());
+            _form = Form.From(saved);
+            _error = null;
+            _saved = true;
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        await Presets.DeleteAsync(_form.Id);
+        Select(Presets.Get(SamplerPresets.DefaultId));
+    }
+
+    private RenderFragment Number(string label, string help, Func<double> get, Action<double> set, double step) => __builder =>
+    {
+        <label>
+            @label
+            <input class="field" type="number" step="@step.ToString(System.Globalization.CultureInfo.InvariantCulture)" disabled="@ReadOnly"
+                   value="@get().ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                   @onchange="e => { if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) set(v); _saved = false; }" />
+            <span class="small">@help</span>
+        </label>
+    };
+}

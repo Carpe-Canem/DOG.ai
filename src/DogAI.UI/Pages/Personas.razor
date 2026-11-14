@@ -1,0 +1,242 @@
+@page "/characters/personas"
+@inject ICharacterStore Characters
+@inject IDesktopShell Desktop
+@inject PictureWriter Writer
+@inject IPictureStore Pictures
+
+<SectionContent SectionName="title">
+    <div class="head-text">
+        <h2>Your personas</h2>
+        <p>Who you are in character chats. The character sees the name and description.</p>
+    </div>
+</SectionContent>
+
+<SectionContent SectionName="list"><CharacterList PersonasActive="true" /></SectionContent>
+
+<div class="editor">
+    <div class="persona-grid">
+        @foreach (var p in _personas)
+        {
+            var persona = p;
+            <button class="persona @(persona.Id == _form.Id ? "active" : "")" @onclick="() => Select(persona)">
+                <CharacterAvatar Persona="persona" />
+                <span class="li-text">
+                    <span class="li-title">@persona.Name</span>
+                    <span class="li-sub">@(persona.IsDefault ? "Default for new chats" : Shorten(persona.Description))</span>
+                </span>
+            </button>
+        }
+        <button class="persona add @(_form.Id == 0 ? "active" : "")" @onclick="New">
+            <span class="avatar" aria-hidden="true">+</span>
+            <span class="li-text"><span class="li-title">New persona</span></span>
+        </button>
+    </div>
+
+    <div class="editor-top">
+        <div class="picture-pick">
+            @if (Format.PictureUrl("persona-edit", _form.Id, _stamp, _form.Avatar) is { } picture)
+            {
+                <img class="portrait small-portrait" src="@picture" alt="" />
+            }
+            else
+            {
+                <div class="portrait small-portrait empty-portrait" aria-hidden="true">@(_form.Name.Length > 0 ? _form.Name[..1].ToUpperInvariant() : "?")</div>
+            }
+            <div class="row">
+                <button class="btn" @onclick="PickPictureAsync">@(_form.Avatar is null ? "Add picture" : "Change")</button>
+                <button class="btn" id="generate-picture" title="Plan and draw a picture of you with the picture engine" @onclick="() => _making = true">Generate picture</button>
+                @if (_form.Avatar is not null)
+                {
+                    <button class="btn" @onclick="RemovePicture">Remove</button>
+                }
+            </div>
+        </div>
+        <div class="editor-fields">
+            <label>Name<input class="field" @bind="_form.Name" placeholder="What characters call you" /></label>
+            <label class="field-block">
+                <span class="field-label">Description <span class="small">Optional. Who you are in the story: looks, role, anything the character should know.</span></span>
+                <textarea class="field" rows="6" @bind="_form.Description"></textarea>
+            </label>
+            <label class="check"><input type="checkbox" @bind="_form.IsDefault" /> Use for new chats</label>
+        </div>
+    </div>
+
+    <LooksBox @key="_form.Id" @bind-Value="_looks" Name="@_form.Name" About="@_form.Description" Persona="true" />
+
+    @if (_error is not null)
+    {
+        <div class="notice bad"><span>@_error</span></div>
+    }
+    <div class="editor-foot">
+        <div class="row">
+            <button class="btn primary" @onclick="SaveAsync">@(_form.Id == 0 ? "Create persona" : "Save")</button>
+            @if (_form.Id != 0)
+            {
+                @if (_confirmDelete)
+                {
+                    <button class="btn danger" @onclick="DeleteAsync">Yes, delete it</button>
+                    <button class="btn" @onclick="() => _confirmDelete = false">Keep</button>
+                }
+                else
+                {
+                    <button class="btn" @onclick="() => _confirmDelete = true">Delete</button>
+                }
+            }
+        </div>
+        @if (_savedNote)
+        {
+            <span class="small">Saved.</span>
+        }
+    </div>
+</div>
+
+@if (_making)
+{
+    <PictureMaker Title="@($"Picture of {(_form.Name.Trim().Length > 0 ? _form.Name.Trim() : "you")}")" OwnerKind="@PictureOwners.Persona" OwnerId="@_form.Id"
+                  Pending="_portrait" People="@([(_form.Name.Trim(), _looks)])" Plan="PlanPortrait" OnUse="UseGeneratedAsync" OnClose="() => _making = false"
+                  Intro="Draw asks the chat model to plan a picture of you from your description, then draws it." />
+}
+
+@if (_picked is { } picked)
+{
+    <AvatarCropper Picture="picked" OnDone="Cropped" OnCancel="() => _picked = null" />
+}
+
+@code {
+    /// <summary>A picture just chosen, while its square is picked. Personas keep only the avatar, so cropping happens now.</summary>
+    private byte[]? _picked;
+
+    // ---- Generated portraits ----
+    // Kept (a Pictures row) only when the persona is saved; a persona keeps one row, for the picture in use.
+    private bool _making;
+    private DogAI.Core.Images.PictureTry? _portrait;
+    private bool _portraitReplaced;
+
+    private Task<DogAI.Core.Images.PictureScene> PlanPortrait(DogAI.Core.Images.PromptStyle style, DogAI.Core.Images.PictureRating rating, CancellationToken ct) =>
+        Writer.PortraitAsync(_form.Name, _form.Description, !string.IsNullOrWhiteSpace(_looks.Tags), style, rating, ct);
+
+    private async Task UseGeneratedAsync(PictureMaker.Used used)
+    {
+        _error = null;
+        try
+        {
+            (_picked, _form.Avatar) = await Desktop.PreparePictureAsync(used.Png);
+            _portrait = used.Try;
+            _portraitReplaced = true;
+            _stamp = DateTime.UtcNow;
+            _making = false;
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private void RemovePicture()
+    {
+        _form.Avatar = null;
+        _portrait = null;
+        _portraitReplaced = true;
+        _stamp = DateTime.UtcNow;
+    }
+
+    private async Task KeepPortraitAsync(long id)
+    {
+        if (!_portraitReplaced) return;
+        await DogAI.Core.Images.Portraits.KeepAsync(Pictures, DogAI.Core.Images.PictureOwners.Persona, id, _portrait);
+        _portraitReplaced = false;
+    }
+
+    private List<Persona> _personas = [];
+    private Persona _form = new() { Name = "" };
+    private DogAI.Core.Images.Looks _looks = DogAI.Core.Images.Looks.None;
+    private DateTime _stamp = DateTime.UtcNow;
+    private string? _error;
+    private bool _confirmDelete;
+    private bool _savedNote;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+        if ((_personas.FirstOrDefault(p => p.IsDefault) ?? _personas.FirstOrDefault()) is { } first) Select(first);
+    }
+
+    private async Task ReloadAsync() => _personas = (await Characters.ListPersonasAsync()).ToList();
+
+    private void Select(Persona persona)
+    {
+        _form = new Persona { Id = persona.Id, Name = persona.Name, Description = persona.Description, Avatar = persona.Avatar, IsDefault = persona.IsDefault, CreatedAt = persona.CreatedAt, LooksJson = persona.LooksJson };
+        _looks = DogAI.Core.Images.Looks.Of(_form);
+        _stamp = DateTime.UtcNow;
+        _error = null;
+        _confirmDelete = false;
+        _savedNote = false;
+        _portrait = null;
+        _portraitReplaced = false;
+        _making = false;
+    }
+
+    private void Cropped(byte[] avatar)
+    {
+        _form.Avatar = avatar;
+        _stamp = DateTime.UtcNow;
+        _picked = null;
+    }
+
+    private void New() => Select(new Persona { Name = "" });
+
+    private async Task PickPictureAsync()
+    {
+        _error = null;
+        var path = await Desktop.PickImageFileAsync();
+        if (path is null) return;
+        try
+        {
+            if (new FileInfo(path).Length > CharacterCard.MaxFileBytes) throw new InvalidOperationException("That picture is too large.");
+            (_picked, _form.Avatar) = await Desktop.PreparePictureAsync(await File.ReadAllBytesAsync(path));
+            _portrait = null;
+            _portraitReplaced = true;
+            _stamp = DateTime.UtcNow;
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        _form.Name = _form.Name.Trim();
+        if (_form.Name.Length == 0)
+        {
+            _error = "Give the persona a name.";
+            return;
+        }
+        _looks.SaveTo(_form);
+        var saved = await Characters.SavePersonaAsync(_form);
+        string? pictureError = null;
+        try
+        {
+            await KeepPortraitAsync(saved.Id);
+        }
+        catch (InvalidOperationException e)
+        {
+            pictureError = "Saved, but the picture could not be kept for Edit and redraw: " + e.Message;
+        }
+        await ReloadAsync();
+        Select(_personas.First(p => p.Id == saved.Id));
+        _error = pictureError;
+        _savedNote = pictureError is null;
+    }
+
+    private async Task DeleteAsync()
+    {
+        await Characters.DeletePersonaAsync(_form.Id);
+        await ReloadAsync();
+        if (_personas.FirstOrDefault() is { } first) Select(first);
+        else New();
+    }
+
+    private static string Shorten(string text) => text.Length <= 60 ? text : text[..59].TrimEnd() + "…";
+}

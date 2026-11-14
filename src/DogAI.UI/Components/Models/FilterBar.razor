@@ -1,0 +1,37 @@
+@implements IDisposable
+@inject ModelsContext Ctx
+
+<div class="filter-bar">
+    @if (Rating)
+    {
+        <div class="seg" role="radiogroup" aria-label="Which models">
+            @foreach (var (id, label) in Choices)
+            {
+                var active = id == Ctx.Filter;
+                <label class="@(active ? "active" : "")">
+                    <input type="radio" name="modelfilter" value="@id" checked="@active" @onchange="() => Ctx.SetFilterAsync(id)" />@label
+                </label>
+            }
+        </div>
+    }
+    <label class="check"><input type="checkbox" checked="@Ctx.ShowAll" @onchange="e => Ctx.SetShowAllAsync(e.Value is true)" /> Show models too large for this PC</label>
+    @if (Hidden > 0 && !Ctx.ShowAll)
+    {
+        <span class="small">@Hidden hidden</span>
+    }
+</div>
+
+@code {
+    /// <summary>Also offer the choice between all usable, top rated and top rated uncensored models.</summary>
+    [Parameter] public bool Rating { get; set; }
+
+    /// <summary>How many models the list is leaving out because they are too large.</summary>
+    [Parameter] public int Hidden { get; set; }
+
+    private static readonly (string, string)[] Choices =
+        [(ModelFilters.Usable, "All usable"), (ModelFilters.Top, "Top rated"), (ModelFilters.Uncensored, "Top rated uncensored")];
+
+    protected override void OnInitialized() => Ctx.Changed += Refresh;
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Ctx.Changed -= Refresh;
+}

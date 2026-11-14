@@ -1,0 +1,236 @@
+using System.Diagnostics;
+using DogAI.Core;
+using DogAI.Core.Images;
+using DogAI.Engine;
+using DogAI.Engine.Images;
+using DogAI.Data;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit.Abstractions;
+
+namespace DogAI.Tests;
+
+/// <summary>
+/// Draws real pictures with the real picture engine. Skipped unless DOGAI_SD_SERVER points at sd-server.exe and
+/// DOGAI_TEST_IMAGE_MODEL at an SDXL .safetensors checkpoint; DOGAI_TEST_IMAGE_LORAS may name a folder of LoRAs.
+/// Needs about 12 GB of free graphics memory and takes about half a minute.
+/// </summary>
+public class ImageSmokeTests(ITestOutputHelper output)
+{
+    public const string ModelVariable = "DOGAI_TEST_IMAGE_MODEL";
+    public const string LorasVariable = "DOGAI_TEST_IMAGE_LORAS";
+    private const string Marker = "zqxmarkerword";
+
+    [Fact]
+    public async Task Draws_previews_cancels_uses_a_lora_and_unloads()
+    {
+        var exe = Environment.GetEnvironmentVariable(SdServerLocator.OverrideVariable);
+        var checkpoint = Environment.GetEnvironmentVariable(ModelVariable);
+        if (string.IsNullOrEmpty(exe) || string.IsNullOrEmpty(checkpoint)) return;
+        var loras = Environment.GetEnvironmentVariable(LorasVariable) is { Length: > 0 } l ? l : null;
+
+        var root = Path.Combine(Path.GetTempPath(), "dogai-sdsmoke-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var engineFolder = Path.GetDirectoryName(exe)!;
+        var engineFilesBefore = Directory.GetFiles(engineFolder, "*", SearchOption.AllDirectories).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var lines = new List<string>();
+        var logged = new List<string>();
+        var kept = Path.Combine(Path.GetTempPath(), "dogai-sdsmoke-kept-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var paths = new AppPaths(root);
+            using var http = new LoopbackHttp();
+            using var server = new ImageServer(http, new SdServerLocator(paths), paths);
+            server.Output += line => { lock (lines) lines.Add(line); };
+            server.Logged += line => { lock (logged) logged.Add(line); };
+
+            var clock = Stopwatch.StartNew();
+            await server.LoadAsync(new ImageModel(checkpoint, loras));
+            Assert.True(server.IsRunning, server.Error);
+            output.WriteLine($"started in {clock.ElapsedMilliseconds} ms");
+
+            // Its own web page is replaced by DOG.ai's blank one.
+            var page = await http.Client.GetStringAsync($"http://127.0.0.1:{server.Port}/");
+            Assert.Contains("<title>DOG.ai</title>", page);
+
+            var caps = await server.CapabilitiesAsync();
+            Assert.Contains("euler_a", caps.Samplers);
+            output.WriteLine($"samplers: {string.Join(", ", caps.Samplers)}; loras: {string.Join(", ", caps.Loras.Select(x => x.Path))}");
+
+            // 1. A Draft picture with previews.
+            var progress = new Collect<ImageProgress>();
+            clock.Restart();
+            var draft = new ImageRequest($"1girl, silver hair, green eyes, forest, {Marker}", "lowres, bad anatomy", 832, 1216, Seed: 1234,
+                Steps: 20, Sampler: "euler_a", Guidance: 5.5, ClipSkip: 2, Preview: true, PreviewEvery: 4);
+            var first = await server.DrawAsync(draft, progress);
+            output.WriteLine($"draft: {clock.ElapsedMilliseconds} ms, {first.Images[0].Length} bytes; stages {string.Join(",", progress.Items.Select(p => p.Stage).Distinct())}");
+            Assert.Equal(1234, first.Seed);
+            Assert.True(IsPng(Assert.Single(first.Images)));
+            Assert.Equal((832, 1216), PngSize(first.Images[0]));
+            // Progress is asked for four times a second and the engine does about five steps a second, so not every step is seen.
+            var sampling = progress.Items.Where(p => p.Stage == "sampling").ToList();
+            Assert.All(sampling, p => Assert.Equal(20, p.TotalSteps));
+            Assert.InRange(sampling.Max(p => p.Step ?? 0), 15, 20);
+            Assert.True(sampling.Count >= 8, $"only {sampling.Count} progress reports while sampling");
+            var previews = progress.Items.Where(p => p.Preview is not null).ToList();
+            Assert.NotEmpty(previews);
+            Assert.All(previews, p => Assert.True(IsPng(p.Preview!)));
+            Assert.False(server.IsBusy);
+
+            // 2. The same seed and settings give the same picture (what "Edit and redraw" will rely on).
+            var again = await server.DrawAsync(draft);
+            Assert.True(first.Images[0].AsSpan().SequenceEqual(again.Images[0]), "the same seed gave a different picture");
+
+            // 3. Cancel mid-picture, then draw again normally.
+            using (var cts = new CancellationTokenSource())
+            {
+                var watch = new Collect<ImageProgress> { Then = p => { if (p.Stage == "sampling" && p.Step >= 3) cts.Cancel(); } };
+                clock.Restart();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => server.DrawAsync(draft with { Steps = 60, Preview = false }, watch, cts.Token));
+                output.WriteLine($"cancel came back after {clock.ElapsedMilliseconds} ms from the start");
+            }
+
+            // 4. A LoRA, WebP output, random seed.
+            var lora = caps.Loras.FirstOrDefault();
+            var webp = await server.DrawAsync(draft with
+            {
+                Seed = -1, Steps = 12, Format = ImageFormat.Webp, Quality = 90,
+                Loras = lora.Path is { } path ? [new LoraUse(path, 0.8)] : null,
+            });
+            Assert.True(webp.Seed >= 0);
+            Assert.True(IsWebp(Assert.Single(webp.Images)));
+            output.WriteLine($"webp with lora {lora.Path ?? "(none)"}: {webp.Images[0].Length} bytes, seed {webp.Seed}");
+
+            // 4b. Keeping a picture (M9 step 5): drawn as WebP at the kept quality, with nothing written inside it; kept
+            // in a database; read back; and drawn again from what was saved with it, which gives the same bytes.
+            var settings = CheckpointSettings.ForFamily(ImageFamily.Illustrious);
+            var keepRequest = (draft with { Seed = -1, Preview = false, Loras = lora.Path is { } p ? [new LoraUse(p, 0.8)] : null }).ForKeeping();
+            var drawn = await server.DrawAsync(keepRequest);
+            var info = WebpInfo.Read(drawn.Images[0]);
+            Assert.Equal(new WebpInfo(832, 1216, Lossless: false, HasMetadata: false), info);
+            var keptPaths = new AppPaths(kept);
+            keptPaths.EnsureCreated();
+            await using (var services = new ServiceCollection().AddSingleton(keptPaths).AddDogData().BuildServiceProvider())
+            {
+                await services.MigrateDogDatabaseAsync();
+                var store = services.GetRequiredService<IPictureStore>();
+                var saved = await store.AddAsync(Picture.Of(PictureOwners.Test, 0, Path.GetFileName(checkpoint), settings, keepRequest, drawn));
+                var read = (await store.GetAsync(saved.Id))!;
+                Assert.Equal(drawn.Images[0], read.Image);
+                Assert.Equal(drawn.Seed, read.Seed);
+                var redrawn = await server.DrawAsync(read.ToRequest());
+                Assert.True(redrawn.Images[0].AsSpan().SequenceEqual(read.Image), "drawing a kept picture again from its saved settings gave a different picture");
+                output.WriteLine($"kept picture: {read.ImageBytes} bytes, seed {read.Seed}; drawn again: identical");
+            }
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+            // 4c. The quality levels (M9 step 6), assembled the way the app does it. Draft and Standard come out at the
+            // shape's own size; Fine comes out enlarged, and a Fine picture drawn again from what a kept picture
+            // remembers (the hires fix with its upscaler) is the same picture.
+            var planned = PicturePrompt.Assemble(
+                new PictureScene("", [new ScenePerson("Mara", "girl", [], ["leather armor"], ["smile"], ["standing"])], ["forest"], ["sunlight"], ["upper body"]),
+                new PictureOrder(settings, [new PersonLooks("Mara", new Looks("1girl, grey hair, braid, green eyes"))], Quality: PictureQuality.Draft, Seed: 4321));
+            Assert.StartsWith(settings.QualityBefore + ", 1girl, solo, grey hair, braid, green eyes, leather armor, smile, standing, forest, sunlight, upper body", planned.Request.Prompt);
+            clock.Restart();
+            var quick = await server.DrawAsync(planned.Request.ForKeeping());
+            output.WriteLine($"draft level: {clock.ElapsedMilliseconds} ms, {planned.Request.Steps} steps");
+            var quickSize = WebpInfo.Read(quick.Images[0]).GetValueOrDefault();
+            Assert.Equal((832, 1216), (quickSize.Width, quickSize.Height));
+            var fineRequest = planned.Request.At(PictureQuality.Fine, PictureShape.Wide).ForKeeping();
+            clock.Restart();
+            var fine = await server.DrawAsync(fineRequest);
+            output.WriteLine($"fine level: {clock.ElapsedMilliseconds} ms, {fine.Images[0].Length} bytes");
+            // The engine rounds the enlarged size up to a multiple of 64: 1216×832 at 1.5 comes out 1856×1280.
+            var fineSize = WebpInfo.Read(fine.Images[0]).GetValueOrDefault();
+            Assert.Equal((1856, 1280), (fineSize.Width, fineSize.Height));
+            var keptFine = Picture.Of(PictureOwners.Test, 0, Path.GetFileName(checkpoint), settings, fineRequest, fine);
+            Assert.Equal(PictureLevels.FineUpscaler, keptFine.Hires?.Upscaler);
+            var fineAgain = await server.DrawAsync(keptFine.ToRequest());
+            Assert.True(fineAgain.Images[0].AsSpan().SequenceEqual(fine.Images[0]), "a Fine picture drawn again from its saved settings gave a different picture");
+
+            // 5. Hires fix doubles nothing it should not: 768×768 at 1.5 gives 1152×1152.
+            var hires = await server.DrawAsync(new ImageRequest("1girl, portrait", Width: 768, Height: 768, Seed: 5, Steps: 8, ClipSkip: 2,
+                Hires: new HiresFix(1.5, 4, 0.5)));
+            Assert.Equal((1152, 1152), PngSize(hires.Images[0]));
+
+            // 6. Unload ends the program and gives the memory back.
+            await server.UnloadAsync();
+            Assert.Null(server.Model);
+            Assert.False(server.IsRunning);
+            await Assert.ThrowsAsync<ImageEngineException>(() => server.DrawAsync(draft));
+        }
+        finally
+        {
+            lock (lines)
+            {
+                output.WriteLine($"{lines.Count} output lines");
+                // The prompt never shows up in what the engine prints at its normal level.
+                Assert.DoesNotContain(lines, line => line.Contains(Marker, StringComparison.OrdinalIgnoreCase));
+            }
+            lock (logged)
+            {
+                // What DOG.ai would write to its log: the engine's status lines, and never a word of the prompts.
+                output.WriteLine($"{logged.Count} lines let through to the log");
+                foreach (var line in logged.TakeLast(40)) output.WriteLine("  log: " + line);
+                Assert.Contains(logged, line => line.Contains("loading model from"));
+                Assert.Contains(logged, line => line.Contains("sampling completed"));
+                Assert.Contains(logged, line => line.Contains("generate_image completed"));
+                var promptWords = new[] { Marker, "1girl", "silver", "forest", "lowres", "anatomy" };
+                Assert.DoesNotContain(logged, line => promptWords.Any(w => line.Contains(w, StringComparison.OrdinalIgnoreCase)));
+                Assert.DoesNotContain(logged, line => line.Contains("it/s"));
+            }
+            try { Directory.Delete(kept, true); } catch (IOException) { }
+            // It wrote nothing beside itself except DOG.ai's blank page (when it runs from DOG.ai's own engine folder).
+            var added = Directory.GetFiles(engineFolder, "*", SearchOption.AllDirectories).Where(f => !engineFilesBefore.Contains(f)).ToList();
+            Assert.Empty(added);
+            var leftInRoot = Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+                .Where(f => !f.EndsWith("dogai-blank.html", StringComparison.OrdinalIgnoreCase)).ToList();
+            Assert.Empty(leftInRoot);
+            Directory.Delete(root, true);
+        }
+    }
+
+    /// <summary>
+    /// The program alone, without the libraries that come with it: Windows cannot start it. DOG.ai must say so at once,
+    /// not wait a minute behind a Windows error box nobody sees.
+    /// </summary>
+    [Fact]
+    public async Task A_copy_without_its_libraries_says_so_at_once()
+    {
+        var exe = Environment.GetEnvironmentVariable(SdServerLocator.OverrideVariable);
+        var checkpoint = Environment.GetEnvironmentVariable(ModelVariable);
+        if (string.IsNullOrEmpty(exe) || string.IsNullOrEmpty(checkpoint)) return;
+
+        var root = Path.Combine(Path.GetTempPath(), "dogai-sdsmoke-bare-" + Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root);
+        Directory.CreateDirectory(paths.ImageEngineDirectory);
+        File.Copy(exe, Path.Combine(paths.ImageEngineDirectory, SdServerLocator.FileName));
+        // The locator prefers the override; without it, it finds the bare copy in this data folder.
+        Environment.SetEnvironmentVariable(SdServerLocator.OverrideVariable, null);
+        try
+        {
+            using var http = new LoopbackHttp();
+            using var server = new ImageServer(http, new SdServerLocator(paths), paths);
+            var clock = Stopwatch.StartNew();
+            var failure = await Assert.ThrowsAsync<ImageEngineException>(() => server.LoadAsync(new ImageModel(checkpoint, null)));
+            output.WriteLine($"failed after {clock.ElapsedMilliseconds} ms: {failure.Message}");
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(15), $"took {clock.Elapsed.TotalSeconds:0} seconds to say so");
+            Assert.Contains("could not find a file it needs", failure.Message);
+            Assert.Contains("Install it again", failure.Message);
+            Assert.False(server.IsRunning);
+            Assert.Equal(failure.Message, server.Error);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(SdServerLocator.OverrideVariable, exe);
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    private static bool IsPng(byte[] data) => data.Length > 24 && data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G';
+
+    private static bool IsWebp(byte[] data) =>
+        data.Length > 12 && data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' && data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P';
+
+    private static (int Width, int Height) PngSize(byte[] data) =>
+        ((data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19], (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23]);
+}

@@ -1,0 +1,37 @@
+@* The Story list region: every story, newest first, and the button that starts a new one. *@
+@inject IChatStore Chats
+@inject IStoryStore Stories
+
+<div class="list-head"><h3>Stories</h3><a class="btn" href="story/new">New story</a></div>
+@foreach (var chat in _chats)
+{
+    <a class="li @(chat.Id == ActiveId ? "active" : "")" href="story/@chat.Id">
+        <span class="li-text">
+            <span class="li-title">@chat.Title</span>
+            <span class="li-sub">@(_kinds.GetValueOrDefault(chat.Id) == StoryKind.Interactive ? "Adventure" : "Written") · @Format.When(chat.UpdatedAt)</span>
+        </span>
+    </a>
+}
+@if (_chats.Count == 0 && _loaded)
+{
+    <p class="list-note">No stories yet.</p>
+}
+
+@code {
+    [Parameter] public long? ActiveId { get; set; }
+
+    /// <summary>Change this to make the list load again (after a story is renamed, added or deleted).</summary>
+    [Parameter] public int Version { get; set; }
+
+    private IReadOnlyList<Conversation> _chats = [];
+    private Dictionary<long, StoryKind> _kinds = [];
+    private bool _loaded;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var chats = await Chats.ListAsync(DogAI.Core.Stories.Story.Mode);
+        _kinds = (await Stories.ListAsync()).ToDictionary(s => s.ConversationId, s => s.Kind);
+        _chats = chats;
+        _loaded = true;
+    }
+}

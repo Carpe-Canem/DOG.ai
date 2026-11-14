@@ -1,0 +1,615 @@
+@* The picture maker: plan a picture with the chat model, draw it, try again with a new seed, redraw with one thing changed
+   (same seed), and hand the chosen one back with "Use this picture". Every try lives in memory only; nothing is written
+   anywhere here. The page that opens it keeps the chosen one (IPictureStore) when the owner saves.
+   Shared: portraits (character editor, personas) and story illustrations (StoryThread). *@
+@using DogAI.Engine.Images
+@implements IAsyncDisposable
+@inject IImageEngine Card
+@inject CardCoordinator Coordinator
+@inject ImageModelCatalog Catalog
+@inject IPictureStore Pictures
+@inject EngineManager Engine
+@inject ChatService Chat
+@inject ModelLauncher Launcher
+@inject ISettingsStore SettingsStore
+@inject SdServerLocator PictureLocator
+@inject ExtraTags ExtraTagList
+@inject IJSRuntime JS
+
+<Modal Title="@Title" Class="wide picture-maker" OnClose="CloseAsync">
+    @if (!_ready)
+    {
+        <p class="small">Looking at the image models…</p>
+    }
+    else if (Missing() is { } missing)
+    {
+        <div class="notice" id="maker-missing"><span>@missing</span></div>
+        @if (_tries.All.Count > 0)
+        {
+            @Strip()
+        }
+    }
+    else
+    {
+        <div class="maker-bar">
+            <span class="small" id="maker-with">
+                @_checkpoint!.Name · rating @PictureRatings.Title(_prefs.Rating)@(_styleLoras.Count > 0 ? " · " + string.Join(", ", _styleLoras.Select(l => Path.GetFileNameWithoutExtension(l.Path))) : "")
+            </span>
+            <label class="inline-field">
+                Quality
+                <select class="field" id="maker-quality" @bind="_quality" disabled="@Busy">
+                    @foreach (var q in Enum.GetValues<PictureQuality>())
+                    {
+                        <option value="@q">@PictureLevels.Title(q)</option>
+                    }
+                </select>
+            </label>
+            <label class="inline-field">
+                Shape
+                <select class="field" id="maker-shape" @bind="_shape" disabled="@Busy">
+                    @foreach (var s in Enum.GetValues<PictureShape>())
+                    {
+                        <option value="@s">@PictureLevels.Title(s)</option>
+                    }
+                </select>
+            </label>
+        </div>
+
+        <div class="row">
+            @if (Busy)
+            {
+                <button class="btn" id="maker-cancel" @onclick="Cancel">Cancel</button>
+            }
+            else
+            {
+                <button class="btn @(_tries.All.Count == 0 ? "primary" : "")" id="maker-draw" disabled="@(Chat.IsBusy || _review is not null)"
+                        title="The chat model plans a picture from what is written about them, then it is drawn" @onclick="PlanAsync">
+                    @(_tries.All.Count == 0 ? "Draw" : "New idea")
+                </button>
+                @if (Selected is { } like)
+                {
+                    <button class="btn" id="maker-again" disabled="@(_review is not null || !Installed(like))" title="The same prompt with a new seed: another take on it, side by side"
+                            @onclick="() => TryAgainAsync(like)">Try again</button>
+                }
+            }
+            @if (StatusText is { } status)
+            {
+                <span class="small" id="maker-status">@status</span>
+            }
+            else if (!Busy && Chat.IsBusy)
+            {
+                <span class="small">Waiting for a chat reply to finish.</span>
+            }
+        </div>
+
+        @if (_error is not null)
+        {
+            <div class="notice bad" id="maker-error"><span>@_error</span></div>
+        }
+
+        @if (_review is { } review && !Busy)
+        {
+            <div class="maker-review" id="maker-review">
+                <p><b>The picture:</b> <span id="maker-moment">@review.Moment</span></p>
+                @NotesLine(review.Planned.Notes, "maker-notes")
+                <label class="field-block">
+                    <span class="field-label">Prompt <span class="small">Change it if you like. The negative prompt and the numbers come from the checkpoint’s settings.</span></span>
+                    <textarea class="field" id="maker-prompt" rows="4" @bind="_reviewPrompt"></textarea>
+                </label>
+                <p class="small">Negative prompt: @review.Base.NegativePrompt</p>
+                <div class="row">
+                    <button class="btn primary" id="maker-review-draw" @onclick="DrawReviewedAsync">Draw this</button>
+                    <button class="btn" id="maker-review-cancel" @onclick="() => _review = null">Don’t draw</button>
+                </div>
+            </div>
+        }
+
+        @if (_preview is not null && Busy)
+        {
+            <img class="maker-picture" id="maker-preview" src="@_preview" alt="The picture so far" />
+        }
+        else if (Selected is { } shown)
+        {
+            <img class="maker-picture" id="maker-picture" src="@shown.Src" alt="@($"Try {shown.Number}")" />
+            <p class="small" id="maker-meta">@Meta(shown)</p>
+            @if (shown.Moment is { Length: > 0 } moment)
+            {
+                <p class="small" id="maker-shown-moment">@moment</p>
+            }
+            <details class="maker-details" id="maker-details">
+                <summary>How it was drawn</summary>
+                <p class="small">@shown.Request.Prompt</p>
+                <p class="small">Not wanted: @shown.Request.NegativePrompt</p>
+                @NotesLine(shown.Notes, "maker-shown-notes")
+            </details>
+
+            @if (_editing && !Busy)
+            {
+                <div class="maker-edit" id="maker-edit-box">
+                    <p class="small">Change one thing and draw it again with the same seed. A different quality alone keeps the picture and draws it faster or finer; a different shape or prompt changes more.</p>
+                    <label class="field-block">
+                        <span class="field-label">Prompt</span>
+                        <textarea class="field" id="maker-edit-prompt" rows="4" @bind="_editPrompt"></textarea>
+                    </label>
+                    <div class="two">
+                        <label>
+                            Quality
+                            <select class="field" id="maker-edit-quality" @bind="_editQuality">
+                                @foreach (var q in Enum.GetValues<PictureQuality>())
+                                {
+                                    <option value="@q">@PictureLevels.Title(q)</option>
+                                }
+                            </select>
+                            <span class="small">@PictureLevels.Blurb(_editQuality)</span>
+                        </label>
+                        <label>
+                            Shape
+                            <select class="field" id="maker-edit-shape" @bind="_editShape">
+                                @foreach (var s in Enum.GetValues<PictureShape>())
+                                {
+                                    <option value="@s">@PictureLevels.Title(s)</option>
+                                }
+                            </select>
+                        </label>
+                    </div>
+                    @if (_editLoras.Count > 0)
+                    {
+                        <div class="field-block">
+                            <span class="field-label">LoRAs <span class="small">Untick one to draw without it. Its trigger words stay in the prompt until you take them out.</span></span>
+                            @foreach (var l in _editLoras)
+                            {
+                                var lora = l;
+                                <div class="maker-lora" data-lora="@lora.Path">
+                                    <label class="check">
+                                        <input type="checkbox" checked="@lora.On" @onchange="e => lora.On = e.Value is true" />
+                                        @Path.GetFileNameWithoutExtension(lora.Path)
+                                    </label>
+                                    <input class="field" type="number" step="0.05" min="-5" max="5" aria-label="@($"Strength of {Path.GetFileNameWithoutExtension(lora.Path)}")"
+                                           value="@lora.Strength.ToString(System.Globalization.CultureInfo.InvariantCulture)" disabled="@(!lora.On)"
+                                           @onchange="e => { if (double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)) lora.Strength = Math.Clamp(v, -5, 5); }" />
+                                </div>
+                            }
+                        </div>
+                    }
+                    <div class="row">
+                        <button class="btn primary" id="maker-redraw" @onclick="() => RedrawAsync(shown)">Redraw</button>
+                        <button class="btn" @onclick="() => _editing = false">Close</button>
+                    </div>
+                </div>
+            }
+
+            <div class="row">
+                <button class="btn primary" id="maker-use" disabled="@(Busy || _using)" @onclick="() => UseAsync(shown)">Use this picture</button>
+                @if (!_editing)
+                {
+                    <button class="btn" id="maker-edit" disabled="@(Busy || !Installed(shown))" title="@(Installed(shown) ? "" : "Its checkpoint is not in the image models folder any more")"
+                            @onclick="() => StartEdit(shown)">Edit and redraw</button>
+                }
+            </div>
+        }
+        else if (!Busy && _review is null)
+        {
+            <p class="small">@Intro</p>
+        }
+
+        @if (_tries.All.Count > 1 || (_tries.All.Count == 1 && Busy))
+        {
+            @Strip()
+        }
+        <p class="small">Pictures you try are kept in memory only, until you use one. SDXL can get details wrong: who holds what, hands, and one person’s features showing up on another.</p>
+    }
+</Modal>
+
+@code {
+    /// <summary>A picture the owner chose: the try (to keep with <see cref="PictureTry.ToKeep"/> once its owner is saved) and the same picture as PNG.</summary>
+    public sealed record Used(PictureTry Try, byte[] Png);
+
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+
+    /// <summary>What the pictures belong to (<see cref="PictureOwners"/>), and its id; 0 while it is not saved yet.</summary>
+    [Parameter] public string OwnerKind { get; set; } = PictureOwners.Character;
+    [Parameter] public long OwnerId { get; set; }
+
+    /// <summary>A picture chosen earlier and not saved yet; when null, the owner's kept picture is shown (if any) for Edit and redraw.</summary>
+    [Parameter] public PictureTry? Pending { get; set; }
+
+    /// <summary>Who may be in the pictures, with their looks (used exactly as typed).</summary>
+    [Parameter] public IReadOnlyList<(string Name, Looks Looks)> People { get; set; } = [];
+
+    /// <summary>The model job that plans a picture: the checkpoint's prompt style and the rating in, a planned scene out.</summary>
+    [Parameter, EditorRequired] public Func<PromptStyle, PictureRating, CancellationToken, Task<PictureScene>> Plan { get; set; } = default!;
+
+    [Parameter] public PictureShape DefaultShape { get; set; } = PictureShape.Tall;
+
+    /// <summary>The mode whose default chat model is loaded when none is (as the Looks box does).</summary>
+    [Parameter] public string ChatMode { get; set; } = "characters";
+
+    [Parameter] public string Intro { get; set; } = "Draw asks the chat model to plan a picture from what is written here, then draws it.";
+
+    /// <summary>True when <see cref="Used.Png"/> is wanted (portraits go to the cropper as PNG); false leaves it empty.</summary>
+    [Parameter] public bool Png { get; set; } = true;
+
+    [Parameter] public EventCallback<Used> OnUse { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private sealed record Review(PlannedPicture Planned, string Moment, ImageRequest Base);
+
+    /// <summary>A LoRA in the Edit and redraw box: used or not, and how strongly.</summary>
+    private sealed class EditLora(string path, double strength)
+    {
+        public string Path { get; } = path;
+        public double Strength { get; set; } = strength;
+        public bool On { get; set; } = true;
+    }
+
+    private List<EditLora> _editLoras = [];
+
+    private PictureTries _tries = default!;
+    private PictureTry? _selected;
+    private bool _ready, _editing, _using, _drawing, _planning;
+    private string? _root, _engine, _status, _error, _preview, _reviewPrompt, _editPrompt;
+    private ImageFile? _checkpoint;
+    private CheckpointSettings? _settings;
+    private IReadOnlyList<ImageFile> _files = [];
+    private List<(string Path, LoraSettings Settings)> _styleLoras = [];
+    private PicturePreferences _prefs = PicturePreferences.Default;
+    private PictureQuality _quality, _editQuality;
+    private PictureShape _shape, _editShape;
+    private Review? _review;
+    private CancellationTokenSource? _cts;
+    private IJSObjectReference? _module;
+
+    private bool Busy => _cts is not null;
+
+    /// <summary>
+    /// What is happening now. While the plan waits for a chat model that was set aside for pictures, it says so: the plan's
+    /// request brings the model back first, which takes about half a minute for a large one.
+    /// </summary>
+    private string? StatusText => _planning && !Engine.IsLoaded
+        ? "The chat model was set aside to make room for pictures. Loading it again before it plans the picture (about half a minute for a large model)…"
+        // A chat model that is loading (often the page's own default) holds the graphics card; loading the picture model waits
+        // for it and reports no progress of its own, so say what is happening.
+        : _drawing && _status == Starting && Engine.State == EngineState.Loading
+            ? "Waiting for the chat model to finish loading; then the picture makes room on the graphics card if it needs to…"
+            : _status;
+
+    private const string Starting = "Starting…";
+    private PictureTry? Selected => _selected ?? _tries.All.LastOrDefault();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tries = new PictureTries(Card);
+        Chat.Changed += Refresh;
+        Engine.Changed += Refresh;
+        _prefs = Catalog.Preferences;
+        _quality = _prefs.Quality;
+        _shape = DefaultShape;
+        _engine = PictureLocator.Find();
+        _root = (await SettingsStore.LoadAsync()).ImageFolder();
+        var root = _root;
+        // The tag check follows the image folder in use now (it may have been changed since DOG.ai started).
+        await ExtraTagList.FollowAsync(root);
+        _files = await Task.Run(() => ImageLibrary.Scan(root));
+        var checkpoints = _files.Where(f => f.Usable && f.Kind == ImageFileKind.Checkpoint).ToList();
+        if (Catalog.ChosenAmong(checkpoints.Select(c => c.RelativePath).ToList()) is { } chosen)
+        {
+            _checkpoint = checkpoints.First(c => c.RelativePath == chosen);
+            _settings = Catalog.CheckpointFor(chosen, _checkpoint.Verdict);
+            var styles = Catalog.StyleLorasFor(chosen);
+            _styleLoras = Loras().Where(l => styles.Contains(ImageModelCatalog.Normalise(l.RelativePath), StringComparer.OrdinalIgnoreCase))
+                .Select(l => (ImageModelCatalog.Normalise(l.RelativePath), Catalog.LoraFor(l.RelativePath, l.Verdict.Lora))).ToList();
+        }
+
+        // The picture chosen earlier in this editor, else the one kept for this owner: it can be redrawn from its seed.
+        if (Pending is { } pending) _selected = _tries.Add(pending);
+        else if (OwnerId != 0 && (await Pictures.ListAsync(OwnerKind, OwnerId)).FirstOrDefault() is { } latest
+                 && await Pictures.GetAsync(latest.Id) is { Image: not null } kept)
+            _selected = _tries.Adopt(kept, CardOf(kept.Checkpoint) ?? CheckpointSettings.ForFamily(ImageFamily.Sdxl));
+        _ready = true;
+    }
+
+    private IEnumerable<ImageFile> Loras() => _files.Where(f => f.Usable && f.Kind == ImageFileKind.Lora);
+
+    private CheckpointSettings? CardOf(string checkpoint) =>
+        _files.FirstOrDefault(f => f.Usable && f.Kind == ImageFileKind.Checkpoint && ImageModelCatalog.Normalise(f.RelativePath).Equals(checkpoint, StringComparison.OrdinalIgnoreCase))
+            is { } file ? Catalog.CheckpointFor(file.RelativePath, file.Verdict) : null;
+
+    /// <summary>True when the checkpoint a try was drawn with is still installed, so it can be drawn again.</summary>
+    private bool Installed(PictureTry t) => CardOf(t.Checkpoint) is not null && _engine is not null;
+
+    private string? Missing() =>
+        _engine is null ? "The picture engine is not installed. Install it in Models › Images (at the end of the page)."
+        : _root is null ? "No models folder is set. Choose one in Models."
+        : _checkpoint is null || _settings is null ? "There is no checkpoint to draw with. Download one in Models › Images, or put a .safetensors checkpoint in its checkpoints folder."
+        : null;
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private IReadOnlyList<PersonLooks> PeopleLooks() => People.Select(p =>
+    {
+        // A character LoRA counts only when its file is installed; otherwise it is left out with its trigger words.
+        var lora = p.Looks.Lora is { } path && Loras().FirstOrDefault(l => ImageModelCatalog.Normalise(l.RelativePath).Equals(path, StringComparison.OrdinalIgnoreCase)) is { } file
+            ? Catalog.LoraFor(file.RelativePath, file.Verdict.Lora)
+            : null;
+        return new PersonLooks(p.Name, p.Looks, lora);
+    }).ToList();
+
+    /// <summary>The chat model plans a picture; it is drawn at once, or shown first when Settings asks for that.</summary>
+    private async Task PlanAsync()
+    {
+        if (_settings is null || _checkpoint is null) return;
+        _error = null;
+        _editing = false;
+        using var cts = Begin();
+        try
+        {
+            if (!Engine.IsReady)
+            {
+                _status = "Loading the chat model…";
+                StateHasChanged();
+                bool ready;
+                try
+                {
+                    // Waits for a model the page is already loading, else loads the mode's default.
+                    ready = await Launcher.EnsureReadyAsync(await SettingsStore.LoadAsync(), ChatMode, cts.Token);
+                }
+                catch (ModelRefusedException e)
+                {
+                    _error = e.Message;
+                    return;
+                }
+                if (!ready)
+                {
+                    _error = "No chat model is loaded, and none is set to load by itself here. Load one with the model button, then try again.";
+                    return;
+                }
+            }
+            cts.Token.ThrowIfCancellationRequested();
+            _status = "The chat model is planning the picture…";
+            _planning = true;
+            StateHasChanged();
+            PictureScene scene;
+            try
+            {
+                scene = await Plan(_settings.Style, _prefs.Rating, cts.Token);
+            }
+            finally
+            {
+                _planning = false;
+            }
+            var planned = PicturePrompt.Assemble(scene, new PictureOrder(_settings, PeopleLooks(), _styleLoras, _shape, PictureQuality.Standard, -1, _prefs.Rating));
+            if (_prefs.ShowPromptFirst)
+            {
+                _review = new Review(planned, scene.Moment, planned.Request);
+                _reviewPrompt = planned.Request.Prompt;
+                _status = null;
+                return;
+            }
+            // The plan job has ended: only now may the picture take the graphics card.
+            await DrawAsync(() => _tries.DrawAsync(_root!, _checkpoint.RelativePath, _settings, planned.Request, _quality, _shape, scene.Moment, planned.Notes, Progress(), cts.Token));
+        }
+        catch (OperationCanceledException)
+        {
+            _status = "Cancelled.";
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            _error = e.Message;
+            _status = null;
+        }
+        finally
+        {
+            End(cts);
+        }
+    }
+
+    private async Task DrawReviewedAsync()
+    {
+        if (_review is not { } review || _settings is null || _checkpoint is null) return;
+        var prompt = string.Join(' ', (_reviewPrompt ?? "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).Trim();
+        if (prompt.Length == 0)
+        {
+            _error = "The prompt is empty.";
+            return;
+        }
+        _review = null;
+        var changed = prompt != review.Base.Prompt;
+        using var cts = Begin();
+        try
+        {
+            await DrawAsync(() => _tries.DrawAsync(_root!, _checkpoint.RelativePath, _settings, review.Base with { Prompt = prompt }, _quality, _shape,
+                changed ? null : review.Moment, review.Planned.Notes, Progress(), cts.Token));
+        }
+        finally
+        {
+            End(cts);
+        }
+    }
+
+    private async Task TryAgainAsync(PictureTry like)
+    {
+        _error = null;
+        _editing = false;
+        using var cts = Begin();
+        try
+        {
+            // The same plan again: no chat model job, so a model set aside for pictures stays set aside. It takes the rating
+            // chosen now, so a picture drawn or kept under another rating does not bring that rating's words back.
+            var again = PictureRatings.Reapply(like.Base, like.Settings, _prefs.Rating) with { Seed = -1 };
+            await DrawAsync(() => _tries.DrawAsync(_root!, like.Checkpoint, like.Settings, again, _quality, _shape, like.Moment, like.Notes, Progress(), cts.Token));
+        }
+        finally
+        {
+            End(cts);
+        }
+    }
+
+    private void StartEdit(PictureTry shown)
+    {
+        _editing = true;
+        _error = null;
+        _editPrompt = shown.Base.Prompt;
+        _editQuality = shown.Quality;
+        _editShape = shown.Shape;
+        _editLoras = (shown.Base.Loras ?? []).Select(l => new EditLora(l.Path, l.Strength)).ToList();
+    }
+
+    private async Task RedrawAsync(PictureTry from)
+    {
+        _error = null;
+        using var cts = Begin();
+        try
+        {
+            await DrawAsync(() => _tries.RedrawAsync(_root!, from, _editPrompt ?? "", _editQuality, _editShape,
+                _editLoras.Where(l => l.On).Select(l => new LoraUse(l.Path, l.Strength)).ToList(), Progress(), cts.Token));
+            if (_error is null) _editing = false;
+        }
+        finally
+        {
+            End(cts);
+        }
+    }
+
+    /// <summary>Draws through the engine (the graphics-card coordinator) and shows the result; failures and Cancel are said in words.</summary>
+    private async Task DrawAsync(Func<Task<PictureTry>> draw)
+    {
+        _status = Starting;
+        _preview = null;
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            ImageLibrary.Ensure(_root!);
+            _drawing = true;
+            var made = await Task.Run(draw);
+            _drawing = false; // reports still on their way are about this picture: ignore them
+            _selected = made;
+            _status = $"Drawn in {clock.Elapsed.TotalSeconds:0.0} seconds." +
+                      (Coordinator.LastDecision?.Choice == CardChoice.SetChatAside ? " The chat model was set aside to make room; it loads again with your next message." : "") +
+                      (_tries.Dropped ? $" Only the last {PictureTries.Max} tries are kept; the oldest was let go." : "");
+        }
+        catch (OperationCanceledException)
+        {
+            _status = "The picture was cancelled.";
+        }
+        catch (Exception e) when (e is ImageEngineException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+            _status = null;
+        }
+        finally
+        {
+            _drawing = false;
+            _preview = null;
+        }
+    }
+
+    // Reports may arrive on any thread (the drawing runs in Task.Run, so no context is captured): always switch to the
+    // renderer before touching the component.
+    private Progress<ImageProgress> Progress() => new(p => _ = InvokeAsync(() => Show(p)));
+
+    private void Show(ImageProgress p)
+    {
+        if (!_drawing) return; // a late report, after the picture finished or was cancelled
+        _status = PictureWords.Of(p);
+        if (p.Preview is { } preview) _preview = "data:image/png;base64," + Convert.ToBase64String(preview);
+        StateHasChanged();
+    }
+
+    private CancellationTokenSource Begin()
+    {
+        var cts = new CancellationTokenSource();
+        _cts = cts;
+        StateHasChanged();
+        return cts;
+    }
+
+    private void End(CancellationTokenSource cts)
+    {
+        if (ReferenceEquals(_cts, cts)) _cts = null;
+    }
+
+    private void Cancel() => _cts?.Cancel();
+
+    /// <summary>Hands the picture back as PNG (made in the page, in memory) with the try to keep.</summary>
+    private async Task UseAsync(PictureTry chosen)
+    {
+        _using = true;
+        _error = null;
+        try
+        {
+            byte[] png = [];
+            if (Png)
+            {
+                _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/pictures.js");
+                png = await _module.InvokeAsync<byte[]>("toPng", chosen.Src);
+            }
+            await OnUse.InvokeAsync(new Used(chosen, png));
+        }
+        catch (Exception e) when (e is JSException or InvalidOperationException)
+        {
+            _error = (Png ? "The picture could not be prepared: " : "The picture could not be kept: ") + e.Message;
+        }
+        finally
+        {
+            _using = false;
+        }
+    }
+
+    private Task CloseAsync()
+    {
+        _cts?.Cancel();
+        return OnClose.InvokeAsync();
+    }
+
+    private static string Meta(PictureTry t) =>
+        $"{(t.KeptId is null ? $"Try {t.Number}" : "The picture in use")} · {PictureLevels.Title(t.Quality)} · {t.ImageWidth}×{t.ImageHeight} · seed {t.Base.Seed} · {Path.GetFileNameWithoutExtension(t.Checkpoint)}";
+
+    private RenderFragment Strip() => __builder =>
+    {
+        <div class="maker-tries" id="maker-tries" role="list" aria-label="Tries">
+            @foreach (var t in _tries.All)
+            {
+                var item = t;
+                <button class="maker-try @(ReferenceEquals(item, Selected) ? "active" : "")" role="listitem" data-try="@item.Number" disabled="@Busy"
+                        title="@Meta(item)" @onclick="() => { _selected = item; _editing = false; }">
+                    <img src="@item.Src" alt="@($"Try {item.Number}")" />
+                </button>
+            }
+        </div>
+    };
+
+    private static RenderFragment NotesLine(TagNotes notes, string id) => __builder =>
+    {
+        @if (notes.Corrected.Count > 0 || notes.Dropped.Count > 0)
+        {
+            <p class="small" id="@id">
+                @if (notes.Corrected.Count > 0)
+                {
+                    <span>Corrected to real tags: @string.Join("; ", notes.Corrected.Select(c => $"{c.Written} → {c.Used}")). </span>
+                }
+                @if (notes.Dropped.Count > 0)
+                {
+                    <span>Left out, not tags these checkpoints know: @string.Join(", ", notes.Dropped).</span>
+                }
+            </p>
+        }
+        else
+        {
+            <p class="small" id="@id">The tag check changed nothing.</p>
+        }
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        Chat.Changed -= Refresh;
+        Engine.Changed -= Refresh;
+        try
+        {
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
+}

@@ -1,0 +1,12 @@
+@if (IncludeHome)
+{
+    <NavLink class="nav-btn" href="" Match="NavLinkMatch.All"><Icon Name="home" /><span>Home</span></NavLink>
+}
+@foreach (var mode in Modes.All)
+{
+    <NavLink class="nav-btn" href="@mode.Id"><Icon Name="@mode.Id" /><span>@mode.Label</span></NavLink>
+}
+
+@code {
+    [Parameter] public bool IncludeHome { get; set; }
+}

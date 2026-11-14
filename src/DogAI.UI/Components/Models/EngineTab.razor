@@ -1,0 +1,212 @@
+@implements IDisposable
+@inject EngineUpdater Updater
+@inject EngineManager Engine
+@inject DogAI.Engine.Images.ImageServer Pictures
+@inject ModelsContext Ctx
+@inject OnlineGate Gate
+@inject OnlineSession Session
+@inject AppPaths Paths
+
+<section class="group">
+    <h3 class="group-title">Engine in use</h3>
+    <div class="about">
+        <div class="kv"><span>Program</span><span>@(_exe ?? "Not found")</span></div>
+        <div class="kv"><span>Source</span><span>@Source</span></div>
+        @if (Updater.InstalledTag is { } tag)
+        {
+            <div class="kv"><span>DOG.ai’s copy</span><span>llama.cpp @tag</span></div>
+        }
+        <div class="kv"><span>Graphics driver</span><span>@(Ctx.Hardware.DriverCuda is { } cuda ? $"NVIDIA, supports CUDA {cuda}" : "No NVIDIA driver found")</span></div>
+    </div>
+</section>
+
+<section class="group">
+    <h3 class="group-title">Picture engine</h3>
+    <p class="note">The picture engine (stable-diffusion.cpp) is installed and updated in Models → Images, beside the image models it draws with.</p>
+    <div class="row"><a class="btn" id="go-images" href="models/images">Open Images</a></div>
+</section>
+
+<section class="group">
+    <h3 class="group-title">Updates</h3>
+    @if (!Gate.IsOnline)
+    {
+        <div class="notice"><span>Go online at the top of this page to check for newer engines.</span></div>
+    }
+    else if (!_checked)
+    {
+        <div class="row"><button class="btn primary" disabled="@_busy" @onclick="CheckAsync">@(_busy ? "Checking…" : "Check for updates")</button></div>
+    }
+    else
+    {
+        @if (_release is { } release)
+        {
+            var current = Updater.InstalledTag == release.Tag && Updater.IsInstalled;
+            <div class="model has-fit">
+                <div class="li-text">
+                    <div class="model-name">llama.cpp @release.Tag (@release.Flavor)</div>
+                    <div class="model-meta">Runs chat models · @Sizes.Gb(release.TotalBytes) download@(release.Runtime is null ? "" : ", including the CUDA runtime")@(release.Published is { } p ? $" · released {p:d MMM yyyy}" : "")</div>
+                </div>
+                @if (_installing == Which.Chat)
+                {
+                    <div class="progress wide">
+                        <div class="meter"><i style="width:@Percent(release)%"></i></div>
+                        <span>@_step</span>
+                    </div>
+                }
+                else if (current)
+                {
+                    <span class="chip">Up to date</span>
+                }
+                else
+                {
+                    <button class="btn primary" disabled="@(_installing is not null)" @onclick="InstallChatAsync">@(Updater.IsInstalled ? "Update" : "Install")</button>
+                }
+            </div>
+            @if (Engine.State is EngineState.Ready or EngineState.Loading && !current && _installing is null)
+            {
+                <p class="note">Installing unloads the current model first; load it again afterwards.</p>
+            }
+        }
+        else if (_chatNote is not null)
+        {
+            <div class="notice"><span>@_chatNote</span></div>
+        }
+
+        <div class="row"><button class="btn" disabled="@(_busy || _installing is not null)" @onclick="CheckAsync">@(_busy ? "Checking…" : "Check again")</button></div>
+    }
+    @if (_message is not null)
+    {
+        <div class="notice @(_bad ? "bad" : "ok")"><span>@_message</span></div>
+    }
+</section>
+
+<p class="note">DOG.ai installs the CUDA build of llama.cpp that matches your graphics driver (Vulkan on other cards) from the project’s GitHub releases, checks every file against its published checksum, and only replaces the engine once the new one is complete. It goes in @Paths.EngineDirectory.</p>
+
+@code {
+    private enum Which { Chat }
+
+    private EngineRelease? _release;
+    private bool _busy, _checked, _bad;
+    private Which? _installing;
+    private string? _message, _exe, _step, _chatNote;
+    private long _done;
+
+    private string Percent(EngineRelease release) => release.TotalBytes == 0 ? "0"
+        : (_done * 100.0 / release.TotalBytes).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private string Source => _exe is null ? "—"
+        : _exe.StartsWith(Paths.EngineDirectory, StringComparison.OrdinalIgnoreCase) ? "Installed by DOG.ai"
+        : _exe.Contains("WinGet", StringComparison.OrdinalIgnoreCase) ? "Installed with winget (DOG.ai uses it until it has its own copy)"
+        : "Found on this PC";
+
+    protected override void OnInitialized()
+    {
+        _exe = Engine.FindExecutable();
+        Gate.Changed += Refresh;
+        Ctx.Changed += Refresh;
+        Engine.Changed += Refresh;
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private async Task CheckAsync()
+    {
+        _busy = true;
+        _message = _chatNote = null;
+        _release = null;
+        try
+        {
+            await CheckChatAsync();
+            _checked = true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CheckChatAsync()
+    {
+        try
+        {
+            _release = await Updater.LatestAsync(Ctx.Hardware.DriverCuda);
+            if (_release is null) _chatNote = "No Windows build of llama.cpp suits this PC in the latest release.";
+        }
+        catch (Exception e) when (IsCheckProblem(e))
+        {
+            _chatNote = "llama.cpp: " + Plain(e);
+        }
+    }
+
+    private static bool IsCheckProblem(Exception e) =>
+        e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException or OperationCanceledException;
+
+    private static string Plain(Exception e) => e switch
+    {
+        HttpRequestException => "Could not reach GitHub: " + e.Message,
+        OperationCanceledException => "The check stopped because DOG.ai went offline.",
+        _ => e.Message,
+    };
+
+    private Task InstallChatAsync() => InstallAsync(Which.Chat, _release, async (release, progress, ct) =>
+    {
+        await Engine.UnloadAsync();
+        // The picture engine runs from a subfolder of the engine folder, which is moved during the swap.
+        await Pictures.StopAsync();
+        await Updater.InstallAsync(release, progress, ct);
+        _exe = Engine.FindExecutable();
+        return $"llama.cpp {release.Tag} is installed. Models load with it from now on.";
+    });
+
+    private async Task InstallAsync(Which which, EngineRelease? release, Func<EngineRelease, Action<long>, CancellationToken, Task<string>> install)
+    {
+        if (release is null || _installing is not null) return;
+        _installing = which;
+        _message = null;
+        _done = 0;
+        _step = "Downloading…";
+        using var work = Session.BeginWork();
+        // The gate only checks new requests; going offline must also stop a transfer in progress.
+        using var cts = new CancellationTokenSource();
+        Action stop = () => cts.Cancel();
+        Session.Closed += stop;
+        try
+        {
+            var done = await Task.Run(() => install(release, n =>
+            {
+                _done = n;
+                _step = n >= release.TotalBytes ? "Unpacking…" : $"{n * 100 / Math.Max(1, release.TotalBytes)}%";
+                _ = InvokeAsync(StateHasChanged);
+            }, cts.Token));
+            Say(done);
+        }
+        catch (OperationCanceledException)
+        {
+            Say("The install stopped because DOG.ai went offline. The engine was not changed; it continues from where it stopped next time.", bad: true);
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            // A llama.cpp update can succeed and still fail to bring the picture engine across; then it did change.
+            var changed = which == Which.Chat && Updater.InstalledTag == release.Tag && Updater.IsInstalled;
+            Say(changed ? e.Message : "The engine was not changed: " + e.Message, bad: true);
+        }
+        finally
+        {
+            Session.Closed -= stop;
+            _installing = null;
+        }
+    }
+
+    private void Say(string text, bool bad = false)
+    {
+        _message = text;
+        _bad = bad;
+    }
+
+    public void Dispose()
+    {
+        Gate.Changed -= Refresh;
+        Ctx.Changed -= Refresh;
+        Engine.Changed -= Refresh;
+    }
+}

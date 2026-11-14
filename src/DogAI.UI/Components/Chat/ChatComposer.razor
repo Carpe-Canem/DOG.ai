@@ -1,0 +1,280 @@
+@* The message box under a chat: Enter sends, Shift+Enter adds a line, Stop while a reply is written,
+   and the context meter. Shared by General, Characters and Story. *@
+@implements IAsyncDisposable
+@inject ChatService Chat
+@inject EngineManager Engine
+@inject IJSRuntime JS
+@inject Dictation Dict
+@inject ReadAloud Reader
+@inject ReplyVoice Voice
+
+<div class="composer">
+    <textarea @ref="_input" rows="1" aria-label="Message" @bind="_draft" @bind:event="oninput"
+              placeholder="@(Engine.IsReady ? Placeholder : "Load a model to start chatting.")"></textarea>
+    <span class="voice-btns">
+        <button class="btn icon" @onclick="() => _picking = true" title="Use a saved prompt"><Icon Name="prompt" Size="18" /></button>
+        <button class="btn icon @(Dict.IsOn && !Dict.HandsFree ? "on" : "")" aria-pressed="@Aria(Dict.IsOn && !Dict.HandsFree)" @onclick="ToggleMicAsync"
+                title="@(Dict.IsOn && !Dict.HandsFree ? "Done talking: write it down" : "Talk instead of typing (or hold Ctrl+Space)")"><Icon Name="mic" Size="18" /></button>
+        <button class="btn icon @(Dict.HandsFree ? "on" : "")" aria-pressed="@Aria(Dict.HandsFree)" @onclick="ToggleHandsFreeAsync"
+                title="Hands-free: talk, pause, and it is sent. Click again to stop."><Icon Name="handsfree" Size="18" /></button>
+        @if (Reader.IsSpeaking)
+        {
+            <button class="btn icon on" @onclick="Reader.Stop" title="Stop reading aloud"><Icon Name="stop" Size="18" /></button>
+        }
+        else
+        {
+            <button class="btn icon @(Voice.AutoRead ? "on" : "")" aria-pressed="@Aria(Voice.AutoRead)" @onclick="() => Voice.SetAutoReadAsync(!Voice.AutoRead)"
+                    title="@(Voice.AutoRead ? "Replies are read aloud as they are written. Click to stop that." : "Read replies aloud as they are written")"><Icon Name="speaker" Size="18" /></button>
+        }
+    </span>
+    @if (Chat.IsBusy)
+    {
+        <button class="btn" @onclick="Chat.Stop">Stop</button>
+    }
+    else
+    {
+        @if (Impersonate is not null)
+        {
+            <button class="btn" disabled="@(!Engine.IsReady || !string.IsNullOrWhiteSpace(_draft))" @onclick="ImpersonateAsync"
+                    title="The model writes your next message here, for you to change before sending">Write mine</button>
+        }
+        @Extra
+        <button class="btn primary" disabled="@(!Engine.IsReady || (!AllowEmpty && string.IsNullOrWhiteSpace(_draft)))" @onclick="SendAsync">@SendLabel</button>
+    }
+</div>
+@if (_picking)
+{
+    <PromptPicker OnPick="InsertPromptAsync" OnCancel="() => _picking = false" />
+}
+@if (VoiceLine is { } line)
+{
+    <div class="ctx voice-line @(line.Problem ? "bad-text" : "")" role="status">
+        @if (!line.Problem && Dict.IsOn && !(Dict.HandsFree && (Chat.IsBusy || Reader.IsSpeaking)))
+        {
+            <div class="meter level"><i style="width:@((int)(Dict.Level * 100))%"></i></div>
+        }
+        <span>@line.Text</span>
+    </div>
+}
+@if (Usage is { } usage)
+{
+    <div class="ctx" title="How much of the model's context window this chat is using">
+        <div class="meter"><i style="width:@usage.Percent%"></i></div>
+        <span>@usage.Used.ToString("N0") of @usage.Total.ToString("N0") tokens@(usage.Trimmed > 0 ? $" · {usage.Trimmed} older message{(usage.Trimmed == 1 ? "" : "s")} left out to fit" : "")</span>
+    </div>
+}
+
+@code {
+    [Parameter] public string Placeholder { get; set; } = "Message the model. Enter sends, Shift+Enter adds a line.";
+
+    /// <summary>The branch on screen, used for the context meter.</summary>
+    [Parameter] public IReadOnlyList<ChatMessage> Path { get; set; } = [];
+
+    /// <summary>Called with the trimmed text. The box is cleared first.</summary>
+    [Parameter] public EventCallback<string> OnSend { get; set; }
+
+    /// <summary>When set, a "Write mine" button asks the model to draft the user's message (character chats).</summary>
+    [Parameter] public Func<Task<string>>? Impersonate { get; set; }
+
+    /// <summary>The words on the send button.</summary>
+    [Parameter] public string SendLabel { get; set; } = "Send";
+
+    /// <summary>Lets the button be pressed with nothing typed (a story's "Write next", where steering is optional).</summary>
+    [Parameter] public bool AllowEmpty { get; set; }
+
+    /// <summary>Extra controls shown before the send button, such as a story's dice switch.</summary>
+    [Parameter] public RenderFragment? Extra { get; set; }
+
+    private bool _drafting;
+    private bool _picking;
+
+    private async Task InsertPromptAsync(string text)
+    {
+        _picking = false;
+        _draft = string.IsNullOrWhiteSpace(_draft) ? text : _draft.TrimEnd() + "\n\n" + text;
+        await Task.Yield();
+        StateHasChanged();
+        try
+        {
+            if (_module is not null) await _module.InvokeVoidAsync("resizeComposer", _input);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
+
+    private string _draft = "";
+    private ElementReference _input;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<ChatComposer>? _self;
+
+    private (int Used, int Total, int Percent, int Trimmed)? Usage
+    {
+        get
+        {
+            if (!Engine.IsReady || Engine.ContextLength <= 0) return null;
+            var last = Path.LastOrDefault(m => m.Role == ChatRole.Assistant && m.PromptTokens is not null);
+            if (last is null) return null;
+            var used = last.PromptTokens!.Value + (last.CompletionTokens ?? 0);
+            return (used, Engine.ContextLength, Math.Clamp(used * 100 / Engine.ContextLength, 1, 100), last.TrimmedMessages ?? 0);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
+            _self ??= DotNetObjectReference.Create(this);
+            if (_input.Context is not null)
+            {
+                await _module.InvokeVoidAsync("initComposer", _input, _self);
+                await _module.InvokeVoidAsync("resizeComposer", _input);
+            }
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException or ObjectDisposedException)
+        {
+            // Enter-to-send and the growing box are conveniences; the Send button still works.
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Chat.Changed += OnChatChanged;
+        Dict.Changed += OnVoiceChanged;
+        Dict.Heard += OnHeard;
+        Reader.Changed += OnVoiceChanged;
+        Voice.Changed += OnVoiceChanged;
+        // Hands-free does not listen while a reply is written or read aloud, so DOG.ai never hears itself.
+        Dict.Paused = () => Chat.IsBusy || Reader.IsSpeaking;
+    }
+
+    private DateTime _lastVoiceRender;
+
+    /// <summary>aria-pressed needs the words "true" or "false"; Blazor would drop a false attribute and leave a true one empty.</summary>
+    private static string Aria(bool on) => on ? "true" : "false";
+
+    private void OnVoiceChanged()
+    {
+        // The level meter changes twenty times a second; redraw at most ten.
+        if (DateTime.UtcNow - _lastVoiceRender < TimeSpan.FromMilliseconds(100) && Dict.State is DictationState.Listening or DictationState.Hearing) return;
+        _lastVoiceRender = DateTime.UtcNow;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private (string Text, bool Problem)? VoiceLine
+    {
+        get
+        {
+            if (Dict.Problem is { } p) return (p, true);
+            if (Dict.State == DictationState.Writing) return ("Writing down what you said…", false);
+            if (Dict.HandsFree)
+            {
+                if (Chat.IsBusy || Reader.IsSpeaking) return ("Hands-free: waiting until the reply is finished.", false);
+                return Dict.State == DictationState.Hearing
+                    ? ("Hands-free: hearing you…", false)
+                    : ("Hands-free: listening. Talk, then pause, and it is sent.", false);
+            }
+            if (Dict.IsOn) return ("Listening… press the microphone again (or let go of Ctrl+Space) when you are done.", false);
+            if (Reader.Problem is { } r) return ("Could not read aloud: " + r, true);
+            return null;
+        }
+    }
+
+    private async Task ToggleMicAsync()
+    {
+        if (Dict.IsOn && !Dict.HandsFree) await Dict.FinishAsync();
+        else await Dict.StartAsync();
+    }
+
+    private async Task ToggleHandsFreeAsync()
+    {
+        if (Dict.HandsFree) Dict.Stop();
+        else await Dict.StartHandsFreeAsync();
+    }
+
+    [JSInvokable]
+    public Task PushToTalk(bool down) => InvokeAsync(async () =>
+    {
+        if (down && !Dict.IsOn) await Dict.StartAsync();
+        else if (!down && Dict.IsOn && !Dict.HandsFree) await Dict.FinishAsync();
+    });
+
+    private void OnHeard(string text, bool send) => _ = InvokeAsync(async () =>
+    {
+        if (send && !Chat.IsBusy && !_drafting && Engine.IsReady && string.IsNullOrWhiteSpace(_draft))
+        {
+            _draft = text;
+            await SendAsync();
+        }
+        else
+        {
+            _draft = string.IsNullOrWhiteSpace(_draft) ? text : _draft.TrimEnd() + " " + text;
+        }
+        StateHasChanged();
+        try
+        {
+            if (_module is not null) await _module.InvokeVoidAsync("resizeComposer", _input);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    });
+
+    // While the model drafts the user's message, show it growing in the box.
+    private void OnChatChanged()
+    {
+        if (!_drafting || Chat.Active is not { Kind: ReplyKind.Draft } draft) return;
+        _draft = draft.Content.TrimStart();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ImpersonateAsync()
+    {
+        if (Impersonate is null || Chat.IsBusy) return;
+        _drafting = true;
+        _draft = "";
+        try
+        {
+            _draft = await Impersonate();
+        }
+        finally
+        {
+            _drafting = false;
+        }
+    }
+
+    [JSInvokable]
+    public Task SubmitFromKeyboard() => InvokeAsync(async () =>
+    {
+        await SendAsync();
+        StateHasChanged();
+    });
+
+    private async Task SendAsync()
+    {
+        var text = _draft.Trim();
+        if ((text.Length == 0 && !AllowEmpty) || Chat.IsBusy || _drafting || !Engine.IsReady) return;
+        _draft = "";
+        await OnSend.InvokeAsync(text);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Chat.Changed -= OnChatChanged;
+        Dict.Changed -= OnVoiceChanged;
+        Dict.Heard -= OnHeard;
+        Reader.Changed -= OnVoiceChanged;
+        Voice.Changed -= OnVoiceChanged;
+        // Leaving the screen turns the microphone off; reading aloud carries on.
+        if (Dict.IsOn) Dict.Stop();
+        _self?.Dispose();
+        try
+        {
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
+}

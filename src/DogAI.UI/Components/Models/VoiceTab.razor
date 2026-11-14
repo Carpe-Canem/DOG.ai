@@ -1,0 +1,245 @@
+@* Models → Voice: recommended speech recognition models and voices, downloaded into the "voice" folder inside the
+   models folder, plus whatever voice models are already there. *@
+@implements IDisposable
+@inject DownloadManager Downloads
+@inject OnlineGate Gate
+@inject HuggingFaceClient Hf
+@inject ISettingsStore SettingsStore
+@inject ISpeechSynthesizer Voices
+
+@foreach (var (use, heading, intro) in Sections)
+{
+    <section class="group">
+        <h3 class="group-title">@heading</h3>
+        <p class="note">@intro</p>
+        <div class="models">
+            @foreach (var item in VoiceCatalog.All.Where(d => d.Use == use))
+            {
+                var d = item;
+                var installed = Installed(d);
+                <div class="model has-fit">
+                    <div class="li-text">
+                        <div class="model-name">@d.Title@if (d.Recommended) {<span class="rec">Best pick</span>}@if (IsInUse(d)) {<span class="rec">In use</span>}</div>
+                        <div class="model-meta">@d.Blurb</div>
+                        <div class="model-meta">@(installed is { } size ? Sizes.Gb(size) : "≈ " + Sizes.Gb(d.ApproxBytes)) · @d.Licence · @d.Repo</div>
+                    </div>
+                    <div class="actions">
+                        @if (JobFor(d) is { } job && job.Status != DownloadStatus.Done)
+                        {
+                            <div class="progress" title="@DownloadButton.StatusText(job)">
+                                <div class="meter"><i style="width:@((job.Fraction * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
+                                <span>@DownloadButton.StatusText(job)</span>
+                            </div>
+                        }
+                        else if (installed is not null)
+                        {
+                            @if (use == VoiceModelUse.Listening && !IsInUse(d))
+                            {
+                                <button class="btn" @onclick="() => UseSpeechModelAsync(d.Target)">Use this</button>
+                            }
+                            <button class="btn danger" @onclick="() => _confirmDelete = (d.Title, d.Target, installed.Value)">Delete</button>
+                        }
+                        else
+                        {
+                            <button class="btn @(d.Recommended ? "primary" : "")" disabled="@(!Gate.IsOnline || _starting.Contains(d.Target))"
+                                    title="@(Gate.IsOnline ? "" : "Go online to download")" @onclick="() => DownloadAsync(d)">
+                                @(_starting.Contains(d.Target) ? "Starting…" : "Download")
+                            </button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@if (Others.Count > 0)
+{
+    <section class="group">
+        <h3 class="group-title">Also in the voice folder</h3>
+        <div class="models">
+            @foreach (var other in Others)
+            {
+                var o = other;
+                <div class="model has-fit">
+                    <div class="li-text">
+                        <div class="model-name">@VoiceCatalog.Title(o.Target)@if (_speechModel is { } m && m.Equals(o.Target, StringComparison.OrdinalIgnoreCase)) {<span class="rec">In use</span>}</div>
+                        <div class="model-meta">@(o.Listening ? "Speech recognition" : "Voice") · @Sizes.Gb(o.Size)</div>
+                    </div>
+                    <div class="actions">
+                        @if (o.Listening && !(_speechModel ?? "").Equals(o.Target, StringComparison.OrdinalIgnoreCase))
+                        {
+                            <button class="btn" @onclick="() => UseSpeechModelAsync(o.Target)">Use this</button>
+                        }
+                        <button class="btn danger" @onclick="() => _confirmDelete = (VoiceCatalog.Title(o.Target), o.Target, o.Size)">Delete</button>
+                    </div>
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@if (_error is not null)
+{
+    <div class="notice bad"><span>@_error</span></div>
+}
+<p class="note">
+    Voice models go in <b>@(_folder ?? "the models folder")</b>. Listening and speaking run on this PC; nothing you say or hear leaves it.
+    Choose the default voice, microphone and speakers in Settings, and a voice for each character in its editor.
+</p>
+
+@if (_confirmDelete is { } doomed)
+{
+    <Modal Title="Delete this voice model?" OnClose="() => _confirmDelete = null">
+        <p>This permanently deletes <b>@doomed.Title</b> (@Sizes.Gb(doomed.Size)) from <b>@_folder</b>. It does not go to the Recycle Bin. You can download it again later.</p>
+        <div class="row end">
+            <button class="btn" @onclick="() => _confirmDelete = null">Keep it</button>
+            <button class="btn danger" @onclick="DeleteAsync">Delete</button>
+        </div>
+    </Modal>
+}
+
+@code {
+    private static readonly (VoiceModelUse, string, string)[] Sections =
+    [
+        (VoiceModelUse.Listening, "Listening", "Speech recognition turns what you say into text, for the microphone button under the message box."),
+        (VoiceModelUse.Speaking, "Voices", "Voices read replies aloud. Windows' own voices always work; these sound far more natural. They run on the processor."),
+    ];
+
+    private sealed record Found(string Target, long Size, bool Listening);
+
+    private string? _folder;
+    private string? _speechModel;
+    private IReadOnlyList<Found> _found = [];
+    private readonly HashSet<string> _starting = new(StringComparer.OrdinalIgnoreCase);
+    private string? _error;
+    private (string Title, string Target, long Size)? _confirmDelete;
+
+    private IReadOnlyList<Found> Others => _found.Where(f => !VoiceCatalog.All.Any(d => d.Target.Equals(f.Target, StringComparison.OrdinalIgnoreCase))).ToList();
+
+    private long? Installed(VoiceDownload d) =>
+        JobFor(d) is { Status: not DownloadStatus.Done } ? null : _found.FirstOrDefault(f => f.Target.Equals(d.Target, StringComparison.OrdinalIgnoreCase))?.Size;
+
+    /// <summary>The speech model used: the chosen one, else the first found (as the recognizer picks).</summary>
+    private bool IsInUse(VoiceDownload d) => d.Use == VoiceModelUse.Listening && Installed(d) is not null &&
+                                            d.Target.Equals(_speechModel, StringComparison.OrdinalIgnoreCase);
+
+    private DownloadJob? JobFor(VoiceDownload d) => _folder is null ? null : Downloads.Jobs.LastOrDefault(j =>
+        j.Repo.Equals(d.Repo, StringComparison.OrdinalIgnoreCase) &&
+        (d.File is not null ? j.Parts[0].FileName.Equals(d.File, StringComparison.OrdinalIgnoreCase) : SamePath(j.Folder, Path.Combine(_folder, d.Target))));
+
+    protected override async Task OnInitializedAsync()
+    {
+        Downloads.Changed += Refresh;
+        Downloads.Completed += OnCompleted;
+        Gate.Changed += Refresh;
+        await ScanAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    private void OnCompleted(DownloadJob job) => InvokeAsync(ScanAsync);
+
+    private async Task ScanAsync()
+    {
+        var settings = await SettingsStore.LoadAsync();
+        _folder = settings.VoiceFolder();
+        var folder = _folder;
+        _found = await Task.Run(() =>
+            VoiceLibrary.SpeechModels(folder).Select(m => new Found(m.Name, m.SizeBytes, true))
+                .Concat(VoiceLibrary.Packs(folder).Select(p => new Found(p.Name, p.SizeBytes, false)))
+                .ToList());
+        var speech = VoiceLibrary.SpeechModels(folder);
+        _speechModel = speech.FirstOrDefault(m => m.Name.Equals(settings.SpeechModel, StringComparison.OrdinalIgnoreCase))?.Name ?? speech.FirstOrDefault()?.Name;
+        StateHasChanged();
+    }
+
+    private async Task UseSpeechModelAsync(string file)
+    {
+        await SettingsStore.SaveAsync(await SettingsStore.LoadAsync() with { SpeechModel = file });
+        await ScanAsync();
+    }
+
+    private async Task DownloadAsync(VoiceDownload d)
+    {
+        _error = null;
+        if (_folder is null)
+        {
+            _error = "No models folder is set.";
+            return;
+        }
+        _starting.Add(d.Target);
+        try
+        {
+            var files = await Hf.FilesAsync(d.Repo);
+            var parts = d.File is not null
+                ? files.Where(f => f.Path.Equals(d.File, StringComparison.Ordinal)).ToList()
+                : files.Where(f => !IsExtra(f.Path)).OrderBy(f => f.Path.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase) ? 0 : 1).ToList();
+            if (parts.Count == 0)
+            {
+                _error = $"{d.Title} is no longer on Hugging Face in the expected form.";
+                return;
+            }
+            await Downloads.EnqueueAsync(new DownloadJob
+            {
+                Repo = d.Repo,
+                Title = d.Title,
+                UseCase = VoiceUse,
+                Folder = d.File is not null ? _folder : Path.Combine(_folder, d.Target),
+                Parts = parts.Select(p => new DownloadPart
+                {
+                    Url = HuggingFaceClient.ResolveUrl(d.Repo, p.Path),
+                    FileName = p.Path.Replace('/', Path.DirectorySeparatorChar),
+                    Size = p.Size,
+                    Sha256 = p.Sha256,
+                }).ToList(),
+            });
+        }
+        catch (Exception e) when (e is DownloadRefusedException or HubException or HttpRequestException or OfflineException or IOException or UnauthorizedAccessException)
+        {
+            _error = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
+        }
+        finally
+        {
+            _starting.Remove(d.Target);
+        }
+    }
+
+    /// <summary>The use case voice downloads carry, so the app knows not to list them among chat models.</summary>
+    public const string VoiceUse = "voice";
+
+    /// <summary>Repository files a voice does not need: git and readme files, and the scripts that built it.</summary>
+    private static bool IsExtra(string path) =>
+        path is ".gitattributes" or "README.md" || path.EndsWith(".py", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".sh", StringComparison.OrdinalIgnoreCase);
+
+    private async Task DeleteAsync()
+    {
+        if (_confirmDelete is not { } doomed || _folder is null) return;
+        _confirmDelete = null;
+        _error = null;
+        var path = Path.Combine(_folder, doomed.Target);
+        try
+        {
+            await Task.Run(() =>
+            {
+                if (File.Exists(path)) File.Delete(path);
+                else if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+            });
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _error = $"Could not delete it: {e.Message} If it is speaking or listening right now, try again in a moment.";
+        }
+        Voices.Refresh();
+        await ScanAsync();
+    }
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+
+    public void Dispose()
+    {
+        Downloads.Changed -= Refresh;
+        Downloads.Completed -= OnCompleted;
+        Gate.Changed -= Refresh;
+    }
+}

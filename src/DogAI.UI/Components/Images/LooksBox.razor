@@ -1,0 +1,189 @@
+@* The Looks box of a character or persona: the appearance words that go into every picture of them, and optionally a
+   character LoRA. The loaded chat model can draft the words from the description. Works on a copy (Value); the page saves it. *@
+@using DogAI.Core.Images
+@using DogAI.Engine.Images
+@implements IDisposable
+@inject PictureWriter Writer
+@inject EngineManager Engine
+@inject ChatService Chat
+@inject ModelLauncher Launcher
+@inject ImageModelCatalog Catalog
+@inject ISettingsStore SettingsStore
+@inject DogAI.Engine.Images.ExtraTags ExtraTagList
+
+<div class="field-block looks-box">
+    <div class="field-label">
+        Looks
+        <span class="small">How @Who look@(Who == "you" ? "" : "s") in pictures. These words go into every picture of @Them, so @They stay recognisable from one picture to the next. Never sent to the chat model.</span>
+    </div>
+    <textarea class="field" id="looks-tags" rows="2" maxlength="@Looks.MaxTagsLength" value="@Value.Tags" disabled="@(_draftCts is not null)"
+              placeholder="@(_style == PromptStyle.Tags ? "1girl, silver hair, long hair, green eyes, scar on cheek" : "a tall woman with long silver hair, green eyes and a scar on her cheek")"
+              @onchange="e => Set(Value with { Tags = e.Value?.ToString() ?? string.Empty })"></textarea>
+    <div class="row">
+        @if (_draftCts is not null)
+        {
+            <button class="btn" id="looks-draft-stop" @onclick="() => _draftCts?.Cancel()">Stop</button>
+            <span class="small">@_working</span>
+        }
+        else
+        {
+            <button class="btn" id="looks-draft" disabled="@(Chat.IsBusy || string.IsNullOrWhiteSpace(About))"
+                    title="The loaded chat model reads the description and writes the looks for you to change" @onclick="DraftAsync">Draft from the description</button>
+            @if (string.IsNullOrWhiteSpace(About))
+            {
+                <span class="small">Write a description first; the looks are drafted from it.</span>
+            }
+            else if (Chat.IsBusy)
+            {
+                <span class="small">Waiting for a chat reply to finish.</span>
+            }
+        }
+    </div>
+    @if (_note is not null)
+    {
+        <p class="small" id="looks-note">@_note</p>
+    }
+    @if (_error is not null)
+    {
+        <div class="notice bad"><span>@_error</span></div>
+    }
+    @if (_loras.Count > 0 || Value.Lora is not null)
+    {
+        <div class="two">
+            <label>
+                @(Persona ? "Your LoRA" : "Character LoRA")
+                <select class="field" id="looks-lora" @onchange="e => Set(Value with { Lora = e.Value?.ToString() is { Length: > 0 } l ? l : null })">
+                    <option value="" selected="@(Value.Lora is null)">None</option>
+                    @foreach (var lora in _loras)
+                    {
+                        <option value="@lora" selected="@(lora == Value.Lora)">@Path.GetFileNameWithoutExtension(lora)</option>
+                    }
+                    @if (Value.Lora is { } missing && !_loras.Contains(missing))
+                    {
+                        <option value="@missing" selected>@Path.GetFileNameWithoutExtension(missing) (not in the loras folder)</option>
+                    }
+                </select>
+                <span class="small">A LoRA trained on @(Persona ? "how you look" : "this character"), if you have one. Its trigger words are added for you.</span>
+            </label>
+            <label>
+                LoRA strength
+                <input class="field" id="looks-strength" type="number" step="0.05" min="@Looks.MinStrength" max="@Looks.MaxStrength" disabled="@(Value.Lora is null)"
+                       placeholder="The LoRA’s own" value="@(Value.LoraStrength?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                       @onchange="StrengthChanged" />
+                <span class="small">Leave empty to use the strength set for the LoRA in Models › Images.</span>
+            </label>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Looks Value { get; set; } = Looks.None;
+    [Parameter] public EventCallback<Looks> ValueChanged { get; set; }
+
+    /// <summary>What the looks are drafted from: the description as it is in the form now.</summary>
+    [Parameter] public string About { get; set; } = "";
+
+    [Parameter] public string Name { get; set; } = "";
+
+    /// <summary>True on the personas page, where the looks are the owner's own.</summary>
+    [Parameter] public bool Persona { get; set; }
+
+    private string Who => Persona ? "you" : "the character";
+    private string Them => Persona ? "you" : "them";
+    private string They => Persona ? "you" : "they";
+
+    private PromptStyle _style = PromptStyle.Tags;
+    private IReadOnlyList<string> _loras = [];
+    private CancellationTokenSource? _draftCts;
+    private string? _note, _error, _working;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Engine.Changed += Refresh;
+        Chat.Changed += Refresh;
+        // Which LoRAs there are, and whether the checkpoint pictures are drawn with wants tags or sentences. Reads file
+        // headers only (remembered between visits); starts nothing.
+        var root = (await SettingsStore.LoadAsync()).ImageFolder();
+        // The tag check follows the image folder in use now (it may have been changed since DOG.ai started).
+        await ExtraTagList.FollowAsync(root);
+        var files = await Task.Run(() => ImageLibrary.Scan(root));
+        _loras = files.Where(f => f.Usable && f.Kind == ImageFileKind.Lora).Select(f => ImageModelCatalog.Normalise(f.RelativePath)).ToList();
+        var checkpoints = files.Where(f => f.Usable && f.Kind == ImageFileKind.Checkpoint).ToList();
+        if (Catalog.ChosenAmong(checkpoints.Select(c => c.RelativePath).ToList()) is { } chosen)
+            _style = Catalog.CheckpointFor(chosen, checkpoints.First(c => c.RelativePath == chosen).Verdict).Style;
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private Task Set(Looks next)
+    {
+        Value = next;
+        return ValueChanged.InvokeAsync(next);
+    }
+
+    private Task StrengthChanged(ChangeEventArgs e) =>
+        Set(Value with
+        {
+            LoraStrength = double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s)
+                ? Math.Clamp(s, Looks.MinStrength, Looks.MaxStrength)
+                : null,
+        });
+
+    /// <summary>Asks the chat model for the looks and puts them in the box, unsaved. A LoRA already chosen is kept.</summary>
+    private async Task DraftAsync()
+    {
+        _error = _note = null;
+        using var cts = new CancellationTokenSource();
+        _draftCts = cts;
+        try
+        {
+            if (!Engine.IsReady)
+            {
+                _working = "Loading the model…";
+                StateHasChanged();
+                bool ready;
+                try
+                {
+                    // Waits for a model the page is already loading, else loads the Characters default.
+                    ready = await Launcher.EnsureReadyAsync(await SettingsStore.LoadAsync(), "characters", cts.Token);
+                }
+                catch (ModelRefusedException e)
+                {
+                    _error = e.Message;
+                    return;
+                }
+                if (!ready)
+                {
+                    _error = "No model is loaded. Load one with the model button in Characters, then try again.";
+                    return;
+                }
+            }
+            _working = "Reading the description…";
+            StateHasChanged();
+            var draft = await Writer.DraftLooksAsync(Name, About, _style, ct: cts.Token);
+            await Set(Value with { Tags = draft.Tags });
+            _note = "Drafted. Change what you like; it is saved with the rest." +
+                    (draft.Notes.Corrected.Count > 0 ? " Corrected to real tags: " + string.Join("; ", draft.Notes.Corrected.Select(c => $"{c.Written} → {c.Used}")) + "." : "") +
+                    (draft.Notes.Dropped.Count > 0 ? " Left out because they are not tags these checkpoints know: " + string.Join(", ", draft.Notes.Dropped) + ". Add them by hand if you know they work." : "");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _draftCts = null;
+            _working = null;
+        }
+    }
+
+    public void Dispose()
+    {
+        _draftCts?.Cancel();
+        Engine.Changed -= Refresh;
+        Chat.Changed -= Refresh;
+    }
+}

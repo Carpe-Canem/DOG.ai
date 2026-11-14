@@ -1,0 +1,52 @@
+@* Which document search model is used and whether it is running. It is picked in Models → Library. *@
+@implements IDisposable
+@inject EmbeddingServer Search
+@inject DocumentLibrary Library
+
+<div class="panel">
+    <h4>Document search model</h4>
+    @if (_path is null)
+    {
+        <p class="small">None yet. Documents can be added, but they are searched only once there is one.</p>
+        <p class="small"><a class="link-text" href="models">Get one in Models</a>: Recommended → Document search. Qwen3 Embedding 0.6B is small (about 0.6 GB) and works in many languages.</p>
+    }
+    else
+    {
+        <div class="kv"><span>Model</span><span>@Path.GetFileNameWithoutExtension(_path)</span></div>
+        <div class="kv"><span>State</span><span>@State</span></div>
+        <p class="small">It runs beside the chat model, starts when needed and stops after ten idle minutes. To use another, pick it in Models → Library → Default for… → Document search; documents are then indexed again.</p>
+    }
+    @if (Search.Error is { } error)
+    {
+        <div class="notice bad"><span>@error</span></div>
+    }
+    @if (Library.Progress is { } p)
+    {
+        <p class="small">Indexing @p.FileName: @p.Done of @p.Total passages.</p>
+    }
+</div>
+
+@code {
+    private string? _path;
+
+    private string State => Search.IsStarting ? "Starting…" : Search.IsRunning ? "Running" : "Stopped (starts when needed)";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Search.Changed += Refresh;
+        Library.Changed += Refresh;
+        _path = await Search.ModelPathAsync();
+    }
+
+    private void Refresh() => InvokeAsync(async () =>
+    {
+        _path = await Search.ModelPathAsync();
+        StateHasChanged();
+    });
+
+    public void Dispose()
+    {
+        Search.Changed -= Refresh;
+        Library.Changed -= Refresh;
+    }
+}

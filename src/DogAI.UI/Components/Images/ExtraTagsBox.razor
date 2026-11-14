@@ -1,0 +1,208 @@
+@* Models → Images → Extra tags: the owner may add the full public tag list, which brings back the tags DOG.ai's
+   bundled list leaves out (off by default; the owner's decision, 2026-11-14). Two ways: download the pinned file
+   (name, source and size shown before anything is fetched; checked against its SHA-256), or choose a file on this PC.
+   Remove deletes the file and goes back to the bundled list. *@
+@using DogAI.Engine.Images
+@implements IDisposable
+@inject ExtraTags Extra
+@inject DownloadManager Downloads
+@inject OnlineGate Gate
+@inject IDesktopShell Desktop
+
+<section class="group" id="extra-tags">
+    <h3 class="group-title">Extra tags</h3>
+    @if (Extra.IsOn)
+    {
+        <p class="note" id="extra-tags-state">
+            <b>On: @Extra.Count.ToString("N0") extra @(Extra.Count == 1 ? "tag" : "tags").</b> The tag check knows the full Danbooru and e621 list, including the
+            tags DOG.ai leaves out of its own list. The planner’s tags for the two highest ratings are kept.
+        </p>
+        <div class="row">
+            <button class="btn" id="extra-tags-remove" disabled="@_busy" @onclick="RemoveAsync">Remove</button>
+        </div>
+    }
+    else
+    {
+        <p class="note" id="extra-tags-state">
+            <b>Off.</b> DOG.ai checks the tags the chat model writes against its own list, which leaves some tags out;
+            the chat model’s tags of that kind are dropped from pictures. Adding the full tag list brings them back, for pictures at
+            the two highest ratings in Settings › Pictures.
+        </p>
+        @if (Job is { Status: not (DownloadStatus.Done or DownloadStatus.Failed) } job)
+        {
+            <div class="models">
+                <div class="model">
+                    <div class="li-text">
+                        <div class="model-name">@ExtraTags.SourceFile</div>
+                        <div class="model-meta">@DownloadButton.StatusText(job)</div>
+                    </div>
+                    <div class="actions">
+                        <div class="progress" title="@DownloadButton.StatusText(job)">
+                            <div class="meter"><i style="width:@((job.Fraction * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
+                            <span>@DownloadButton.StatusText(job)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+        else if (!_open)
+        {
+            <div class="row">
+                <button class="btn" id="extra-tags-add" disabled="@(Root is null)" @onclick="() => _open = true">Add the full tag list…</button>
+            </div>
+        }
+        else
+        {
+            <div class="models" id="extra-tags-ways">
+                <div class="model">
+                    <div class="li-text">
+                        <div class="model-name">Download it</div>
+                        <div class="model-meta" id="extra-tags-source">
+                            <b>@ExtraTags.SourceFile</b> · 6 MB (@ExtraTags.SourceBytes.ToString("N0") bytes) · from GitHub, project
+                            @ExtraTags.SourceRepo at commit @ExtraTags.SourceCommit (MIT licence) · checked against its SHA-256 before it is used
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <button class="btn primary" id="extra-tags-download" disabled="@(!Gate.IsOnline || _busy)"
+                                title="@(Gate.IsOnline ? "" : "Go online to download")" @onclick="DownloadAsync">Download</button>
+                    </div>
+                </div>
+                <div class="model">
+                    <div class="li-text">
+                        <div class="model-name">Choose a file</div>
+                        <div class="model-meta">A copy of that file (or another tag file in the same form) already on this PC. It is copied into the image models folder.</div>
+                    </div>
+                    <div class="actions">
+                        <button class="btn" id="extra-tags-choose" disabled="@_busy" @onclick="ChooseAsync">Choose a file…</button>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <button class="btn" id="extra-tags-cancel" disabled="@_busy" @onclick="() => { _open = false; _error = null; }">Cancel</button>
+            </div>
+        }
+    }
+    @if (_busy)
+    {
+        <p class="note" id="extra-tags-busy">Reading the tag list…</p>
+    }
+    @if ((_error ?? Extra.Problem ?? (Job is { Status: DownloadStatus.Failed } failed ? "The download did not finish: " + failed.Message : null)) is { } problem)
+    {
+        <div class="notice bad" id="extra-tags-error"><span>@problem</span></div>
+    }
+    <p class="note">Only tags are added: general and species tags with 100 posts or more, never artist, character or series names. What you type in a Looks box is never checked either way.</p>
+</section>
+
+@code {
+    /// <summary>The image models folder, or null when no models folder is set.</summary>
+    [Parameter] public string? Root { get; set; }
+
+    private bool _open, _busy;
+    private string? _error;
+
+    private DownloadJob? Job => Downloads.Jobs.LastOrDefault(j => j.UseCase == ExtraTags.UseCase);
+
+    protected override void OnInitialized()
+    {
+        Extra.Changed += Refresh;
+        Downloads.Changed += Refresh;
+        Gate.Changed += Refresh;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // The models folder may have changed since the list was read at start.
+        if (Root is not null) await Extra.FollowAsync(Root);
+    }
+
+    private async Task DownloadAsync()
+    {
+        if (Root is null) return;
+        _error = null;
+        _busy = true;
+        try
+        {
+            var target = ExtraTags.PathIn(Root);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            // A finished or failed download of the file is cleared from the list, so it can be fetched again.
+            if (Job is { Status: DownloadStatus.Done or DownloadStatus.Failed } old) await Downloads.RemoveAsync(old.Id);
+            await Downloads.EnqueueAsync(new DownloadJob
+            {
+                Repo = ExtraTags.SourceRepo,
+                Title = "Full tag list",
+                UseCase = ExtraTags.UseCase,
+                Folder = Path.GetDirectoryName(target)!,
+                Parts =
+                [
+                    new DownloadPart
+                    {
+                        Url = ExtraTags.SourceUrl,
+                        FileName = Path.GetFileName(target),
+                        Size = ExtraTags.SourceBytes,
+                        Sha256 = ExtraTags.SourceSha256,
+                    },
+                ],
+            });
+            _open = false;
+        }
+        catch (Exception e) when (e is DownloadRefusedException or HttpRequestException or OfflineException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ChooseAsync()
+    {
+        if (Root is null) return;
+        _error = null;
+        var source = await Desktop.PickOpenPathAsync("Choose a tag list", "Tag list (*.csv)|*.csv|All files (*.*)|*.*");
+        if (source is null) return;
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            await Extra.AddAsync(Root, source);
+            _open = false;
+        }
+        catch (Exception e) when (e is TagFileException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RemoveAsync()
+    {
+        _error = null;
+        _busy = true;
+        try
+        {
+            await Extra.RemoveAsync(Root);
+            if (Job is { Status: DownloadStatus.Done } done) await Downloads.RemoveAsync(done.Id);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _error = "The tag file could not be removed: " + e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Extra.Changed -= Refresh;
+        Downloads.Changed -= Refresh;
+        Gate.Changed -= Refresh;
+    }
+}

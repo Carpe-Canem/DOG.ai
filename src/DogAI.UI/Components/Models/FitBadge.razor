@@ -1,0 +1,26 @@
+@* The fit verdict for one model file: fits on the card, partly on the card, or too large. *@
+@if (Fit is not null)
+{
+    <div class="fit @Css" title="@Detail">
+        <span aria-hidden="true">@Mark</span> @Fit.Label@(Speed is { Length: > 0 } s ? $" · {s}" : "")
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public FitResult? Fit { get; set; }
+
+    /// <summary>A measured speed replaces the estimate.</summary>
+    [Parameter] public double? MeasuredTokensPerSecond { get; set; }
+
+    private string Css => Fit!.Kind switch { FitKind.Full => "full", FitKind.Partial => "partial", _ => "no" };
+    private string Mark => Fit!.Kind switch { FitKind.Full => "●", FitKind.Partial => "◐", _ => "✕" };
+
+    private string Speed => MeasuredTokensPerSecond is > 0 and var m ? $"{m:0} tok/s measured" : Fit!.SpeedText;
+
+    private string Detail => Fit!.Kind switch
+    {
+        FitKind.Full => $"Needs about {Sizes.Gb(Fit.NeededBytes)} of graphics memory at this context size.",
+        FitKind.Partial => $"Needs about {Sizes.Gb(Fit.NeededBytes)}. {Fit.GpuLayers} of {Fit.Layers} layers go on the graphics card; the rest run from system memory, which is slower.",
+        _ => $"Needs about {Sizes.Gb(Fit.NeededBytes)}, more than the graphics card and system memory have free.",
+    };
+}

@@ -1,0 +1,94 @@
+@* Settings → Pictures: the checkpoint pictures are drawn with (the same choice as "Draw with" on Models → Images), the
+   quality pictures start at, whether the prompt is shown before drawing, and the rating pictures aim for. Saved as chosen.
+   Opening it only reads file headers: it starts nothing. *@
+@using DogAI.Engine.Images
+@implements IDisposable
+@inject ImageModelCatalog Catalog
+@inject ISettingsStore SettingsStore
+@inject ExtraTags Extra
+
+<div class="picture-settings form-grid">
+    <label>
+        Checkpoint
+        <select class="field" id="pictures-checkpoint" @onchange="ChooseAsync" disabled="@(_checkpoints.Count == 0)">
+            @if (_checkpoints.Count == 0)
+            {
+                <option selected>None installed</option>
+            }
+            @foreach (var c in _checkpoints)
+            {
+                <option value="@c.RelativePath" selected="@(c.RelativePath == _chosen)">@c.Name</option>
+            }
+        </select>
+        <span class="small">@(_checkpoints.Count == 0 ? "Add one in Models › Images." : "Its settings, rating words and style LoRAs are in Models › Images.")</span>
+    </label>
+    <label>
+        Quality to start at
+        <select class="field" id="pictures-quality" @onchange="e => SaveAsync(P with { Quality = Enum.Parse<PictureQuality>(e.Value!.ToString()!) })">
+            @foreach (var q in Enum.GetValues<PictureQuality>())
+            {
+                <option value="@q" selected="@(q == P.Quality)">@PictureLevels.Title(q)</option>
+            }
+        </select>
+        <span class="small">@PictureLevels.Blurb(P.Quality) Each picture can be drawn again at another quality.</span>
+    </label>
+    <div class="field-block wide-field">
+        <span class="field-label" id="rating-label">Rating pictures aim for</span>
+        <div class="seg" role="radiogroup" aria-labelledby="rating-label">
+            @foreach (var r in Enum.GetValues<PictureRating>())
+            {
+                var rating = r;
+                <label class="@(rating == P.Rating ? "active" : "")" title="@(rating >= PictureRating.Questionable && !Extra.IsOn ? TagsNote : null)">
+                    <input type="radio" name="picture-rating" value="@rating" checked="@(rating == P.Rating)" @onchange="() => SaveAsync(P with { Rating = rating })" />@PictureRatings.Title(rating)
+                </label>
+            }
+        </div>
+        <span class="small" id="rating-blurb">@PictureRatings.Blurb(P.Rating) The rating’s word goes into the prompt and the ratings above it into the negative prompt; the chat model is told the rating when it plans a picture. Checkpoints do not always obey.</span>
+        @if (!Extra.IsOn)
+        {
+            <span class="small" id="rating-tags-note">@TagsNote</span>
+        }
+    </div>
+    <label class="check wide-field">
+        <input type="checkbox" id="pictures-show-prompt" checked="@P.ShowPromptFirst" @onchange="e => SaveAsync(P with { ShowPromptFirst = e.Value is true })" />
+        Show me the prompt before drawing
+    </label>
+    <p class="small wide-field">Off, a picture is drawn as soon as the chat model has planned it. On, you see what it planned, the prompt and what the tag check corrected or left out, and can change the prompt first.</p>
+</div>
+
+@code {
+    private IReadOnlyList<ImageFile> _checkpoints = [];
+    private string? _chosen;
+
+    private PicturePreferences P => Catalog.Preferences;
+
+    /// <summary>Said beside the two highest ratings while the full tag list is not added.</summary>
+    private const string TagsNote = "The two highest ratings: DOG.ai’s own tag list leaves some tags out, so some of the planner’s tags for these levels are dropped. The full list can be added in Models › Images › Extra tags.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Catalog.Changed += Refresh;
+        Extra.Changed += Refresh;
+        var root = (await SettingsStore.LoadAsync()).ImageFolder();
+        var files = await Task.Run(() => ImageLibrary.Scan(root));
+        _checkpoints = files.Where(f => f.Usable && f.Kind == ImageFileKind.Checkpoint).ToList();
+        _chosen = Catalog.ChosenAmong(_checkpoints.Select(c => c.RelativePath).ToList());
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task ChooseAsync(ChangeEventArgs e)
+    {
+        if (e.Value?.ToString() is not { Length: > 0 } value || _checkpoints.All(c => c.RelativePath != value)) return;
+        await Catalog.ChooseAsync(value);
+        _chosen = value;
+    }
+
+    private Task SaveAsync(PicturePreferences next) => Catalog.SetPreferencesAsync(next);
+
+    public void Dispose()
+    {
+        Catalog.Changed -= Refresh;
+        Extra.Changed -= Refresh;
+    }
+}

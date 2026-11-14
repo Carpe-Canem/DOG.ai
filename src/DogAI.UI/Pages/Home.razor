@@ -1,0 +1,53 @@
+@page "/"
+@implements IDisposable
+@inject AppearanceState Appearance
+@inject NavigationManager Nav
+
+@* Only Playhouse has a home screen. The other skins open straight into General. *@
+@if (Appearance.Skin == Skins.Playhouse)
+{
+    <div class="home-inner">
+        <h1>@Greeting</h1>
+        <p class="sub">No model is loaded yet. Get one from Models to begin.</p>
+        <div class="tiles">
+            @foreach (var mode in Modes.All)
+            {
+                <a class="tile" href="@mode.Id" style="--tc:var(--c-@mode.Id)">
+                    <Icon Name="@mode.Id" Size="34" />
+                    <h3>@mode.Headline</h3>
+                    <p>@mode.Blurb</p>
+                </a>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private static string Greeting
+    {
+        get
+        {
+            var hour = DateTime.Now.Hour;
+            if (hour >= 18) return "Good evening.";
+            if (hour >= 12) return "Good afternoon.";
+            if (hour >= 5) return "Good morning.";
+            return "Up late.";
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        Appearance.Changed += OnAppearanceChanged;
+        RedirectIfNoHome();
+    }
+
+    private void OnAppearanceChanged() => InvokeAsync(RedirectIfNoHome);
+
+    private void RedirectIfNoHome()
+    {
+        if (Appearance.Skin != Skins.Playhouse)
+            Nav.NavigateTo("general", replace: true);
+    }
+
+    public void Dispose() => Appearance.Changed -= OnAppearanceChanged;
+}

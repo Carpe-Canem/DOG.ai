@@ -1,0 +1,21 @@
+@* "Read aloud" under a reply or passage; "Stop reading" while it is being read. Reads with the character's or
+   narrator's voice, or the default one. *@
+@implements IDisposable
+@inject ReplyVoice Voice
+@inject ReadAloud Reader
+
+@if (Message.Content.Length > 0)
+{
+    var reading = Voice.IsReading(Message);
+    <button title="@(reading ? "Stop reading this aloud" : "Read this aloud")" aria-pressed="@(reading ? "true" : "false")" @onclick="() => Voice.ToggleAsync(Message)">@(reading ? "Stop reading" : "Read aloud")</button>
+}
+
+@code {
+    [Parameter, EditorRequired] public ChatMessage Message { get; set; } = default!;
+
+    protected override void OnInitialized() => Reader.Changed += Refresh;
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Reader.Changed -= Refresh;
+}

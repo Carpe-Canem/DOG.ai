@@ -1,0 +1,98 @@
+@implements IDisposable
+@inject LibraryCatalog Library
+@inject EngineManager Engine
+@inject ModelLauncher Launcher
+@inject ISettingsStore SettingsStore
+
+@* Starts a chat from an assistant: copies its instructions and style into the chat. A model it prefers is only loaded if you say so. *@
+<div class="panel">
+    <h4>Assistant</h4>
+    <select class="field" aria-label="Assistant" @onchange="ChooseAsync">
+        <option value="" selected="@(_applied is null)">None</option>
+        @foreach (var a in Library.Assistants)
+        {
+            <option value="@a.Id" selected="@(a.Id == _applied)">@a.Name</option>
+        }
+    </select>
+    @if (Library.FindAssistant(_applied) is { } current)
+    {
+        <p class="small">@(current.Description.Length > 0 ? current.Description : "Its instructions and style were copied into this chat.")</p>
+        @if (current.ModelPath is { } model && !Loaded(model))
+        {
+            <div class="notice"><span>Prefers @System.IO.Path.GetFileNameWithoutExtension(model).@(Engine.IsReady ? " Another model is loaded now." : "")</span>
+                @if (!File.Exists(model))
+                {
+                    <span class="small">That file is not on this PC any more.</span>
+                }
+                else
+                {
+                    <button class="btn" disabled="@(Engine.State == EngineState.Loading)" @onclick="() => LoadAsync(model)">@(Engine.IsReady ? "Swap to it" : "Load it")</button>
+                }
+            </div>
+        }
+    }
+    @if (_problem is not null)
+    {
+        <div class="notice bad"><span>@_problem</span></div>
+    }
+    <p class="small"><a class="link-text" href="general/library">Assistants and prompts</a></p>
+</div>
+
+@code {
+    /// <summary>The chat to start from the assistant. Its instructions and style are replaced.</summary>
+    [Parameter, EditorRequired] public Conversation Conversation { get; set; } = new();
+
+    /// <summary>Called after the chat was changed, so the page can save it.</summary>
+    [Parameter] public EventCallback OnApplied { get; set; }
+
+    private string? _applied;
+    private string? _problem;
+
+    protected override void OnInitialized()
+    {
+        Library.Changed += OnChanged;
+        Engine.Changed += OnChanged;
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Show which assistant a chat came from only while its instructions still match; once edited, it is the user's own wording.
+        if (_applied is not null && Library.FindAssistant(_applied) is { } a && a.Instructions != Conversation.SystemPrompt) _applied = null;
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Library.Changed -= OnChanged;
+        Engine.Changed -= OnChanged;
+    }
+
+    private bool Loaded(string path) => Engine.IsReady && string.Equals(Engine.ModelPath, path, StringComparison.OrdinalIgnoreCase);
+
+    private async Task ChooseAsync(ChangeEventArgs e)
+    {
+        _problem = null;
+        var assistant = Library.FindAssistant(e.Value?.ToString());
+        _applied = assistant?.Id;
+        if (assistant is null) return;
+        Conversation.SystemPrompt = assistant.Instructions;
+        Conversation.PresetId = assistant.PresetId.Length > 0 && !string.IsNullOrEmpty(assistant.PresetId) ? assistant.PresetId : SamplerPresets.DefaultId;
+        await OnApplied.InvokeAsync();
+    }
+
+    private async Task LoadAsync(string path)
+    {
+        _problem = null;
+        try
+        {
+            var settings = await SettingsStore.LoadAsync();
+            await Launcher.LoadAsync(path, settings.ContextLength);
+            if (Engine.State == EngineState.Ready) await SettingsStore.SaveAsync((await SettingsStore.LoadAsync()) with { LastModelPath = path });
+        }
+        catch (ModelRefusedException ex)
+        {
+            _problem = ex.Message;
+        }
+    }
+}

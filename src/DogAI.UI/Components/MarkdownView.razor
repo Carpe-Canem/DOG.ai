@@ -1,0 +1,72 @@
+@inject IDesktopShell Desktop
+
+@* Model output is untrusted: MarkdownRenderer never passes raw HTML through, and code is drawn as plain text. *@
+@for (var i = 0; i < _segments.Count; i++)
+{
+    var index = i;
+    var segment = _segments[i];
+    if (segment.IsCode)
+    {
+        <div class="code">
+            <div class="code-head">
+                <span>@(segment.Language ?? "code")</span>
+                <button @onclick="() => CopyAsync(index, segment.Code!)">@(_copied == index ? "Copied" : "Copy")</button>
+            </div>
+            @* The whole <pre> goes in as one piece of markup so enhance.js can colour what is inside it without Blazor
+               losing track of its own nodes. The code is HTML-encoded here; highlight.js re-escapes what it writes. *@
+            @((MarkupString)CodeHtml(segment))
+        </div>
+    }
+    else
+    {
+        @((MarkupString)segment.Html!)
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public string Text { get; set; } = "";
+
+    /// <summary>How many numbered sources the text may cite; "[n]" for those becomes a button (see MarkdownRenderer).</summary>
+    [Parameter] public int Citations { get; set; }
+
+    /// <summary>Mark spoken lines and actions so the stylesheet can colour them (roleplay and stories).</summary>
+    [Parameter] public bool Speech { get; set; }
+
+    /// <summary>Stories: characters whose spoken lines get their own colour when a line can be pinned to one.</summary>
+    [Parameter] public IReadOnlyList<Speaker>? Speakers { get; set; }
+
+    private string? _rendered;
+    private int _renderedCitations;
+    private bool _renderedSpeech;
+    private IReadOnlyList<Speaker>? _renderedSpeakers;
+    private IReadOnlyList<MarkdownSegment> _segments = [];
+    private int _copied = -1;
+
+    protected override void OnParametersSet()
+    {
+        if (Text == _rendered && Citations == _renderedCitations && Speech == _renderedSpeech && SameSpeakers()) return;
+        _rendered = Text;
+        _renderedCitations = Citations;
+        _renderedSpeech = Speech;
+        _renderedSpeakers = Speakers;
+        _segments = MarkdownRenderer.Render(Text, Citations, Speech, Speech ? Speakers : null);
+    }
+
+    private bool SameSpeakers() => ReferenceEquals(Speakers, _renderedSpeakers) ||
+                                   (Speakers is not null && _renderedSpeakers is not null && Speakers.SequenceEqual(_renderedSpeakers));
+
+    private static string CodeHtml(MarkdownSegment segment)
+    {
+        var language = segment.Language is null ? "" : new string(segment.Language.Split(' ', 2)[0].Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '+' or '#').ToArray()).ToLowerInvariant();
+        var attribute = language.Length > 0 ? $" data-lang=\"{language}\"" : "";
+        return $"<pre><code{attribute}>{System.Net.WebUtility.HtmlEncode(segment.Code)}</code></pre>";
+    }
+
+    private async Task CopyAsync(int index, string code)
+    {
+        Desktop.CopyText(code);
+        _copied = index;
+        await Task.Delay(1500);
+        if (_copied == index) _copied = -1;
+    }
+}

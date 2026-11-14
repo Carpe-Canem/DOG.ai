@@ -1,0 +1,40 @@
+@* The "Style" side panel: pick how freely the model writes, and open the style editor. *@
+@implements IDisposable
+@inject PresetCatalog Presets
+
+<div class="panel">
+    <h4>Style</h4>
+    <select class="field" aria-label="Style" value="@Presets.Get(Value).Id" @onchange="PickAsync">
+        @foreach (var preset in Presets.All)
+        {
+            <option value="@preset.Id">@preset.Name</option>
+        }
+    </select>
+    <p class="small">@Presets.Get(Value).Description</p>
+    <div class="row"><button class="btn" @onclick="() => _editing = true">Edit styles…</button></div>
+</div>
+
+@if (_editing)
+{
+    <StyleEditor Selected="@Presets.Get(Value).Id" OnClose="CloseAsync" />
+}
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    private bool _editing;
+
+    protected override void OnInitialized() => Presets.Changed += Refresh;
+    private void Refresh() => InvokeAsync(StateHasChanged);
+    public void Dispose() => Presets.Changed -= Refresh;
+
+    private Task PickAsync(ChangeEventArgs e) => ValueChanged.InvokeAsync(Presets.Get(e.Value?.ToString()).Id);
+
+    /// <param name="chosen">The style to use from now on, when the editor made or picked one.</param>
+    private async Task CloseAsync(string? chosen)
+    {
+        _editing = false;
+        if (chosen is not null && chosen != Value) await ValueChanged.InvokeAsync(chosen);
+    }
+}

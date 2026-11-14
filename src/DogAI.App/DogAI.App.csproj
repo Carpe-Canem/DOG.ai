@@ -1,0 +1,83 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- The Windows 10 part of the name gives access to Windows Hello (locked data, M8). It is still .NET 9. -->
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <!-- Only for the notification-area icon; the window is WPF. -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <RootNamespace>DogAI.App</RootNamespace>
+    <AssemblyName>DOG.ai</AssemblyName>
+    <Product>DOG.ai</Product>
+    <Version>0.1.0</Version>
+    <ApplicationIcon>Assets\DOG.ai.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WinForms and WPF both define Application, MessageBox and more; the code here means WPF's. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DogAI.Core\DogAI.Core.csproj" />
+    <ProjectReference Include="..\DogAI.Data\DogAI.Data.csproj" />
+    <ProjectReference Include="..\DogAI.Engine\DogAI.Engine.csproj" />
+    <ProjectReference Include="..\DogAI.Hub\DogAI.Hub.csproj" />
+    <ProjectReference Include="..\DogAI.UI\DogAI.UI.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Wpf" Version="9.0.120" />
+    <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+  </ItemGroup>
+
+  <!--
+    A published copy is portable and tidy: the program files go in <install>\app\ (this project's PublishDir), and the install
+    folder's root gets only the small DOG.ai.exe launcher and portable.txt, with data\ and models\ created beside them at run time.
+    The marker must NOT be inside app\ (the app looks one level up for it). Debug and test builds are not affected.
+  -->
+  <ItemGroup>
+    <None Include="portable.txt" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!--
+    Publishing again replaces the program cleanly: old files from earlier builds are removed first, so they cannot pile up.
+    Safety: only a folder named "app" is ever emptied, and the install root (data\, models\) is never touched.
+  -->
+  <Target Name="CleanAppFolderBeforePublish" BeforeTargets="PrepareForPublish" Condition="'$(RuntimeIdentifier)' != ''">
+    <PropertyGroup>
+      <AppFolderToClean>$([System.IO.Path]::GetFullPath('$(PublishDir)'))</AppFolderToClean>
+      <AppFolderName>$([System.IO.Path]::GetFileName($(AppFolderToClean.TrimEnd('\'))))</AppFolderName>
+    </PropertyGroup>
+    <RemoveDir Directories="$(AppFolderToClean)" Condition="'$(AppFolderName)' == 'app' And Exists('$(AppFolderToClean)')" />
+  </Target>
+
+  <Target Name="PublishLauncherAndMarker" AfterTargets="Publish" Condition="'$(RuntimeIdentifier)' != ''">
+    <PropertyGroup>
+      <InstallRoot>$([System.IO.Path]::GetFullPath('$(PublishDir)..'))</InstallRoot>
+      <LauncherProject>$(MSBuildThisFileDirectory)..\DogAI.Launcher\DogAI.Launcher.csproj</LauncherProject>
+    </PropertyGroup>
+    <Exec Command="dotnet publish &quot;$(LauncherProject)&quot; -c Release -r $(RuntimeIdentifier) --self-contained -p:PublishSingleFile=true -p:PublishTrimmed=true -p:EnableCompressionInSingleFile=true -p:DebugType=none -o &quot;$(InstallRoot)&quot;" />
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)portable.txt" DestinationFolder="$(InstallRoot)" />
+    <!-- The launcher used to be called DogAI.exe. An install published before the rename would keep it, and it would look for app\DogAI.exe. -->
+    <Delete Files="$(InstallRoot)\DogAI.exe" Condition="Exists('$(InstallRoot)\DOG.ai.exe')" />
+  </Target>
+
+  <!--
+    The voice packages (Whisper.net) ship native libraries for every platform. A publish keeps only what this app can use: Windows
+    64-bit, with the Vulkan one for the graphics card. Nothing here changes a normal build.
+  -->
+  <Target Name="PruneForeignNativeFiles" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ForeignNative Include="@(ResolvedFileToPublish)"
+                     Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '^runtimes[\/]([a-z]+[\/])?(linux|macos|osx|android|ios|win-arm|win-x86)|^ggml-metal|\.pdb$'))" />
+      <ResolvedFileToPublish Remove="@(ForeignNative)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

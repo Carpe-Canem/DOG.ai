@@ -1,0 +1,27 @@
+<svg class="icon" viewBox="0 0 24 24" width="@Size" height="@Size" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">@((MarkupString)Paths.GetValueOrDefault(Name, ""))</svg>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public int Size { get; set; } = 20;
+
+    private static readonly Dictionary<string, string> Paths = new()
+    {
+        ["home"] = "<path d='M3 11l9-7 9 7v9h-6v-6H9v6H3z'/>",
+        ["general"] = "<path d='M4 5h16v11H9l-5 4z'/>",
+        ["characters"] = "<circle cx='12' cy='8' r='4'/><path d='M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7'/>",
+        ["story"] = "<path d='M4 5c3-1 6-1 8 1 2-2 5-2 8-1v14c-3-1-6-1-8 1-2-2-5-2-8-1z'/><path d='M12 6v14'/>",
+        ["models"] = "<path d='M12 3v11m0 0l-4-4m4 4l4-4'/><path d='M4 17v3h16v-3'/>",
+        ["docs"] = "<path d='M6 3h8l4 4v14H6z'/><path d='M14 3v4h4'/><path d='M9 12h6M9 16h6'/>",
+        ["mic"] = "<rect x='9' y='3' width='6' height='11' rx='3'/><path d='M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7'/>",
+        ["handsfree"] = "<rect x='9.5' y='3.5' width='5' height='9' rx='2.5'/><path d='M6.5 10a5.5 5.5 0 0 0 11 0M12 15.5V19'/><path d='M3 7v6M21 7v6'/>",
+        ["speaker"] = "<path d='M4 9h4l5-4v14l-5-4H4z'/><path d='M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12'/>",
+        ["search"] = "<circle cx='11' cy='11' r='6.5'/><path d='M16 16l5 5'/>",
+        ["prompt"] = "<path d='M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z'/><path d='M5 17a3 3 0 0 1 3-3h11M9 8h6'/>",
+        ["pin"] = "<path d='M9 3h6l-1 6 3 3v2H7v-2l3-3z'/><path d='M12 14v7'/>",
+        ["folder"] = "<path d='M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2.5h8.5A1.5 1.5 0 0 1 21 9v9.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z'/>",
+        ["chevron"] = "<path d='M9 6l6 6-6 6'/>",
+        ["more"] = "<circle cx='5.5' cy='12' r='1.2'/><circle cx='12' cy='12' r='1.2'/><circle cx='18.5' cy='12' r='1.2'/>",
+        ["stop"] ="<rect x='6.5' y='6.5' width='11' height='11' rx='2'/>",
+        ["settings"] = "<path d='M4 7h9M19 7h1M4 17h1M11 17h9'/><circle cx='16' cy='7' r='2.5'/><circle cx='8' cy='17' r='2.5'/>",
+    };
+}

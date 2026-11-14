@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="9.0.22" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DogAI.Core\DogAI.Core.csproj" />
+    <ProjectReference Include="..\DogAI.Engine\DogAI.Engine.csproj" />
+    <ProjectReference Include="..\DogAI.Hub\DogAI.Hub.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,62 @@
+@* The branch map: every path an interactive story has taken, as a tree read left to right. Picking a point
+   goes back to it (or over to another branch); what the player does next starts a new branch from there. *@
+
+<Modal Title="Branch map" Class="wide" OnClose="OnClose">
+    <p class="small">Every path this story has taken. Pick a point to go to it. Whatever you do next from there starts a new branch; nothing is lost.</p>
+    <div class="map-scroll">
+        <div class="map" style="width:@(Width)px;height:@(Height)px" role="tree" aria-label="@($"{_map.Nodes.Count} passages on {_map.Rows} branch{(_map.Rows == 1 ? "" : "es")}")">
+            <svg width="@Width" height="@Height" viewBox="0 0 @Width @Height" aria-hidden="true">
+                @foreach (var node in _map.Nodes)
+                {
+                    if (node.ParentId is { } parentId && _byId.TryGetValue(parentId, out var parent))
+                    {
+                        <path class="map-link @(node.OnPath ? "on" : "")" d="@Link(parent, node)" />
+                    }
+                }
+            </svg>
+            @foreach (var node in _map.Nodes)
+            {
+                var n = node;
+                <button class="map-node @(n.OnPath ? "on" : "") @(n.IsCurrent ? "current" : "")" style="left:@(X(n) - Dot / 2)px;top:@(Y(n) - Dot / 2)px"
+                        role="treeitem" aria-current="@(n.IsCurrent ? "true" : null)" title="@n.Preview" @onclick="() => OnPick.InvokeAsync(n.Id)">
+                    <i></i><span>@n.Label</span>
+                </button>
+            }
+        </div>
+    </div>
+    <p class="small">The highlighted line is the branch you are reading; the filled point is where the story stands now.</p>
+</Modal>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ChatMessage> Messages { get; set; } = [];
+    [Parameter] public long? ActiveLeafId { get; set; }
+
+    /// <summary>Called with the passage picked.</summary>
+    [Parameter] public EventCallback<long> OnPick { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private const int ColumnWidth = 170, RowHeight = 62, Pad = 22, Dot = 18;
+
+    private BranchMap.Layout _map = new([], 0, 0);
+    private Dictionary<long, MapNode> _byId = [];
+
+    private int Width => Pad * 2 + Math.Max(1, _map.Columns) * ColumnWidth;
+    private int Height => Pad * 2 + Math.Max(1, _map.Rows) * RowHeight;
+
+    protected override void OnParametersSet()
+    {
+        _map = BranchMap.Build(Messages, ActiveLeafId);
+        _byId = _map.Nodes.ToDictionary(n => n.Id);
+    }
+
+    private static int X(MapNode node) => Pad + Dot / 2 + node.Column * ColumnWidth;
+    private static int Y(MapNode node) => Pad + Dot / 2 + node.Row * RowHeight;
+
+    /// <summary>A curve from the parent's point to the child's.</summary>
+    private static string Link(MapNode parent, MapNode child)
+    {
+        var (x1, y1, x2, y2) = (X(parent), Y(parent), X(child), Y(child));
+        var mid = (x1 + x2) / 2;
+        return $"M {x1} {y1} C {mid} {y1}, {mid} {y2}, {x2} {y2}";
+    }
+}
