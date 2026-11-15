@@ -254,6 +254,12 @@ public sealed class PicturePlaceTests
         Assert.Empty(list.Check(["pines"]).Tags);
         Assert.Equal(["box", "dress", "branch", "potato"], list.Check(["boxes", "dresses", "branches", "potatoes"]).Tags);
         Assert.DoesNotContain("pin", TagList.Bundled.Check(["pines", "old pines"]).Tags);
+
+        // The left-out check keeps its old, broader spellings: a made-up left-out "glim" written "glimes" is still dropped,
+        // never corrected into the clean "glimmer" nearby.
+        var leaving = TagList.Of("glimmer\t9000", "glimes x\t10").Excluding(TagFingerprints.OfHashes([TagFingerprints.Of("glim")]));
+        Assert.True(leaving.LeavesOut("glimes"));
+        Assert.Empty(leaving.Check(["glimes"]).Tags);
     }
 
     [Fact]

@@ -333,7 +333,7 @@ public sealed class TagList
 
     /// <summary>Whether the written tag is a left-out tag: as written, without filler words, or in another spelling worth trying (joined, singular, plural).</summary>
     private bool IsLeftOut(string tag, string plain) =>
-        _excluded.Count > 0 && (_excluded.Contains(tag) || _excluded.Contains(plain) || Variants(plain).Any(_excluded.Contains));
+        _excluded.Count > 0 && (_excluded.Contains(tag) || _excluded.Contains(plain) || Variants(plain, broad: true).Any(_excluded.Contains));
 
     /// <summary>
     /// Whether a left-out tag is among the written words, other than inside a longer run of them that is itself a clean
@@ -355,8 +355,11 @@ public sealed class TagList
         return false;
     }
 
-    /// <summary>Other spellings worth trying: joined or hyphenated words, and singular or plural.</summary>
-    private static IEnumerable<string> Variants(string tag)
+    /// <summary>
+    /// Other spellings worth trying: joined or hyphenated words, and singular or plural. With <paramref name="broad"/>
+    /// (the left-out check, unchanged since it was approved) "-es" comes off any word; otherwise only after s, x, z, o, ch, sh.
+    /// </summary>
+    private static IEnumerable<string> Variants(string tag, bool broad = false)
     {
         if (tag.Contains(' '))
         {
@@ -370,7 +373,7 @@ public sealed class TagList
         }
         // "-es" only after the sounds that take it ("boxes", "dresses", "branches", "tomatoes"): "pines" is not "pin".
         if (tag.EndsWith("es", StringComparison.Ordinal) && tag.Length > 4 && tag[..^2] is var stem
-            && (stem.EndsWith('s') || stem.EndsWith('x') || stem.EndsWith('z') || stem.EndsWith('o') || stem.EndsWith("ch", StringComparison.Ordinal) || stem.EndsWith("sh", StringComparison.Ordinal)))
+            && (broad || stem.EndsWith('s') || stem.EndsWith('x') || stem.EndsWith('z') || stem.EndsWith('o') || stem.EndsWith("ch", StringComparison.Ordinal) || stem.EndsWith("sh", StringComparison.Ordinal)))
             yield return stem;
         if (tag.EndsWith('s') && tag.Length > 3) yield return tag[..^1];
         else
