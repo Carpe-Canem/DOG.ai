@@ -97,9 +97,9 @@
                   Intro="Draw asks the chat model to plan a picture of you from your description, then draws it." />
 }
 
-@if (_picked is { } picked)
+@if (_picked is not null)
 {
-    <AvatarCropper Picture="picked" OnDone="Cropped" OnCancel="() => _picked = null" />
+    <AvatarCropper Picture="_picked" OnDone="Cropped" OnCancel="() => _picked = null" />
 }
 
 @code {

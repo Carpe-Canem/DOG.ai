@@ -193,9 +193,9 @@
                   Pending="_portrait" People="@([(_c.Name.Trim(), _looks)])" Plan="PlanPortrait" OnUse="UseGeneratedAsync" OnClose="() => _making = false" />
 }
 
-@if (_cropping && _c.Image is { } fullPicture)
+@if (_cropping && _c.Image is not null)
 {
-    <AvatarCropper Picture="fullPicture" OnDone="CroppedAsync" OnCancel="() => _cropping = false" />
+    <AvatarCropper Picture="_c.Image" OnDone="CroppedAsync" OnCancel="() => _cropping = false" />
 }
 
 @code {

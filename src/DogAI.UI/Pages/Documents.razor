@@ -132,9 +132,9 @@ else
     </div>
 }
 
-@if (_open is { } openHit)
+@if (_open is not null)
 {
-    <PassageViewer ChunkId="@openHit.Chunk.Id" Similarity="@openHit.Similarity" OnClose="() => _open = null" />
+    <PassageViewer ChunkId="@_open.Chunk.Id" Similarity="@_open.Similarity" OnClose="() => _open = null" />
 }
 
 <AsideRegion Place="documents" Hideable="false" Title="Documents">

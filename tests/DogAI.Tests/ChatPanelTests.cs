@@ -172,6 +172,60 @@ public class ChatPanelTests
         Assert.True(withAside >= 6, $"only {withAside} pages with a side panel found");
     }
 
+    /// <summary>
+    /// A variable declared in a top-level <c>@if</c> ("_controls is { } controls") or a top-level <c>@{ }</c> belongs
+    /// to the whole page. Once a handler uses it, the compiler hangs every lambda of the page, the regions' content
+    /// included, off an object made anew on each render; the layout keys a region's content by that lambda, takes it
+    /// for new and rebuilds it. Seen on the Images page: its prompt boxes lost the focus after every key.
+    /// </summary>
+    [Fact]
+    public void A_page_that_fills_regions_declares_no_variable_at_its_top()
+    {
+        var ui = Path.Combine(SolutionRoot(), "src", "DogAI.UI");
+        var pages = 0;
+        foreach (var file in Directory.EnumerateFiles(ui, "*.razor", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)))
+        {
+            var lines = File.ReadAllLines(file);
+            if (!lines.Any(l => l.Contains("<SectionContent"))) continue;
+            pages++;
+            var name = Path.GetFileName(file);
+            for (var i = 0; i < lines.Length && !lines[i].StartsWith("@code", StringComparison.Ordinal); i++)
+                Assert.False(DeclaresAtTheTop(lines[i]),
+                    $"{name} line {i + 1} declares a variable for the whole page; test the field and declare the variable inside the block: {lines[i].Trim()}");
+        }
+        Assert.True(pages >= 14, $"only {pages} pages that fill regions found");
+    }
+
+    [Theory]
+    [InlineData("@if (!_kept && _ready && Missing() is null && _controls is { } controls && _card is { } card)", true)]
+    [InlineData("@if (_viewing is { Length: > 0 } viewed)", true)]
+    [InlineData("@if (_open is FoundPassage hit)", true)]
+    [InlineData("@if (int.TryParse(_typed, out var number))", true)]
+    [InlineData("@if (_map.TryGetValue(id, out string? name) && _ready)", true)]
+    [InlineData("@switch (_state is { } s ? s.Kind : 0)", true)]
+    [InlineData("@{ var shown = Session.Selected; }", true)]
+    [InlineData("@{", true)]
+    [InlineData("@if (_kept)", false)]
+    [InlineData("@if (!_kept && _ready && Missing() is null && _controls is not null && _card is not null)", false)]
+    [InlineData("@if (_count is > 0 and < 5 || _name is null or \"\")", false)]
+    [InlineData("@if (_open is not FoundPassage)", false)]
+    [InlineData("    @if (_error is { } error)", false)] // inside a block: it belongs to that block
+    [InlineData("else if (Missing() is { } missing)", false)] // an else's own statement: it does not reach the page
+    [InlineData("@foreach (var c in _checkpoints)", false)]
+    public void What_counts_as_a_variable_at_the_top_of_a_page(string line, bool declares) =>
+        Assert.Equal(declares, DeclaresAtTheTop(line));
+
+    private static bool DeclaresAtTheTop(string line)
+    {
+        if (line.StartsWith("@{", StringComparison.Ordinal)) return true;
+        if (!line.StartsWith("@if (", StringComparison.Ordinal) && !line.StartsWith("@switch (", StringComparison.Ordinal)) return false;
+        return Regex.IsMatch(line, @"\bis\s+\{[^{}]*\}\s+(?!and\b|or\b)[A-Za-z_]\w*")
+            || Regex.IsMatch(line, @"\bis\s+(?!not\b|null\b|var\b)[A-Za-z_][\w.<>?]*\s+(?!and\b|or\b|null\b)[A-Za-z_]\w*")
+            || Regex.IsMatch(line, @"\bis\s+var\s+[A-Za-z_]\w*")
+            || Regex.IsMatch(line, @"\bout\s+[A-Za-z_][\w.<>?]*\s+[A-Za-z_]\w*");
+    }
+
     private static string SolutionRoot()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);

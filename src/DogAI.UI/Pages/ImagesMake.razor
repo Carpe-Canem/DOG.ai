@@ -176,8 +176,14 @@ else
     </SectionContent>
 }
 
-@if (!_kept && _ready && Missing() is null && _controls is { } controls && _card is { } card)
+@if (!_kept && _ready && Missing() is null && _controls is not null && _card is not null)
 {
+    // Declared here, not as a pattern in the condition: a variable declared in a top-level if belongs to the whole
+    // page, and once a handler uses it, the content of every region (title, composer) hangs off an object made anew
+    // on each render. The layout then takes the content for new and rebuilds it: a box being typed in lost the focus
+    // after every key. A test checks every page that fills regions.
+    var controls = _controls;
+    var card = _card;
     <AsideRegion Place="images" Hideable="false" Title="Picture settings">
         <Fold Id="@ImagesPanels.Model" Title="@ImagesPanels.Title(ImagesPanels.Model)" Summary="@_checkpoint?.Name" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Model)" Level="4" Class="panel images-fold">
             <div class="kv"><span>Checkpoint</span><span id="images-model-name">@_checkpoint?.Name</span></div>
@@ -356,22 +362,22 @@ else
     <SavedPromptsBox Prompt="@Session.Prompt" Negative="@Session.Negative" OnPut="PutSaved" OnClose="() => _savedOpen = false" />
 }
 
-@if (_writerOpen && !_kept && _card is { } writeCard)
+@if (_writerOpen && !_kept && _card is not null)
 {
-    <PromptHelperBox Style="@writeCard.Style" Rating="@Catalog.Preferences.Rating" Root="@_root" Prompt="@Session.Prompt"
+    <PromptHelperBox Style="@_card.Style" Rating="@Catalog.Preferences.Rating" Root="@_root" Prompt="@Session.Prompt"
                      Blocked="@(Session.IsDrawing ? "Wait for the Draw to end: the chat model and the picture share the graphics card." : null)"
                      OnPut="PutWritten" OnClose="() => _writerOpen = false" />
 }
 
-@if (_tagsOpen && !_kept && _controls is { } checkControls)
+@if (_tagsOpen && !_kept && _controls is not null)
 {
-    <TagCheckBox Prompt="@Session.Prompt" Negative="@Session.Negative" Fine="@Fine(checkControls)" Root="@_root"
+    <TagCheckBox Prompt="@Session.Prompt" Negative="@Session.Negative" Fine="@Fine(_controls)" Root="@_root"
                  OnChange="b => Session.Type(b.Prompt, b.Negative)" OnClose="() => _tagsOpen = false" />
 }
 
-@if (_upscale is { } upscaling)
+@if (_upscale is not null)
 {
-    <UpscaleBox Source="upscaling" Root="@_root" Blocked="@UpscaleBlocked" AddToStrip="@(!_upscaleOfKept)"
+    <UpscaleBox Source="_upscale" Root="@_root" Blocked="@UpscaleBlocked" AddToStrip="@(!_upscaleOfKept)"
                 OnDone="Upscaled" OnKeep="KeepUpscaledAsync" OnClose="() => _upscale = null" />
 }
 
