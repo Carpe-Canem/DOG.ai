@@ -1,0 +1,170 @@
+@* "Write it for me…" on the Images section's Make tab (M16 step 4): the chat model turns the owner's sentence into a
+   prompt (PictureWriter.PromptAsync: schema, no thinking, a token limit, the answer checked; for tag checkpoints every tag
+   through the tag list). The result is shown here and goes into the prompt box only when the owner presses Replace or
+   Add, for them to change there. The sentence lives in ImagesSession (memory only); nothing here is written anywhere
+   or logged. Closing the dialog stops the job. *@
+@using DogAI.Engine.Images
+@implements IDisposable
+@inject PictureWriter Writer
+@inject ModelLauncher Launcher
+@inject EngineManager Engine
+@inject ISettingsStore SettingsStore
+@inject ExtraTags ExtraTagList
+@inject ImagesSession Session
+
+<Modal Title="Write it for me" Class="wide writer-box" OnClose="OnClose">
+    <div class="writer" id="writer">
+        <label class="field-block">
+            <span class="field-label">Describe the picture</span>
+            <textarea class="field" id="writer-sentence" rows="3" maxlength="@PictureWriter.MaxSentenceLength" disabled="@Working"
+                      placeholder="e.g. A knight resting by a campfire in a snowy forest at night"
+                      value="@Session.Sentence" @oninput="e => Session.Describe(e.Value?.ToString() ?? string.Empty)" @onkeydown="KeyAsync"></textarea>
+        </label>
+        <p class="small" id="writer-about">
+            The chat model writes @(Style == PromptStyle.Tags ? "tags for this checkpoint, each looked up in the tag list" : "a prompt in plain words for this checkpoint"),
+            keeping to the rating in Settings › Pictures (@PictureRatings.Title(Rating)). It adds no quality words. It uses the chat model in memory, else the default for General
+            (<a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName</a>).
+        </p>
+        <div class="row writer-row">
+            @if (Working)
+            {
+                <button class="btn" id="writer-cancel" @onclick="Cancel">Cancel</button>
+            }
+            else
+            {
+                <button class="btn primary" id="writer-write" disabled="@(Blocked is not null || string.IsNullOrWhiteSpace(Session.Sentence))"
+                        title="@(Blocked ?? "Ctrl+Enter")" @onclick="WriteAsync">@(_draft is null ? "Write it" : "Write it again")</button>
+            }
+            <span class="small" id="writer-status" role="status">@(Blocked ?? _status)</span>
+        </div>
+        @if (_error is { } error)
+        {
+            <div class="notice bad" id="writer-error"><span>@error</span></div>
+        }
+        @if (_draft is { } draft)
+        {
+            <div class="writer-result">
+                @if (draft.Moment.Length > 0)
+                {
+                    <p class="small" id="writer-moment">@draft.Moment</p>
+                }
+                <p class="writer-text" id="writer-result">@draft.Prompt</p>
+                @if (NotesText(draft.Notes) is { } notes)
+                {
+                    <p class="small" id="writer-notes">@notes</p>
+                }
+                <div class="row">
+                    <button class="btn primary" id="writer-add" disabled="@string.IsNullOrWhiteSpace(Prompt)" title="After what is in the prompt box, with a comma"
+                            @onclick="() => PutAsync(replace: false)">Add after the prompt</button>
+                    <button class="btn" id="writer-replace" title="In place of what is in the prompt box" @onclick="() => PutAsync(replace: true)">Replace the prompt</button>
+                </div>
+                <p class="small">You can change it in the prompt box before you draw. The negative prompt is not touched.</p>
+            </div>
+        }
+    </div>
+</Modal>
+
+@code {
+    [Parameter] public PromptStyle Style { get; set; }
+    [Parameter] public PictureRating Rating { get; set; }
+    [Parameter] public string? Root { get; set; }
+
+    /// <summary>What is in the prompt box now (Add is offered only when it holds something).</summary>
+    [Parameter] public string Prompt { get; set; } = "";
+
+    /// <summary>Why the model cannot be asked now (a Draw going on), or null.</summary>
+    [Parameter] public string? Blocked { get; set; }
+
+    /// <summary>The prompt the owner chose, and whether it replaces the box (else it goes after what is typed).</summary>
+    [Parameter] public EventCallback<(string Text, bool Replace)> OnPut { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private CancellationTokenSource? _cts;
+    private string? _status, _error;
+    private PromptDraft? _draft;
+
+    private bool Working => _cts is not null;
+
+    protected override void OnInitialized() => Engine.Changed += Refresh;
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task KeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && e.CtrlKey && !Working && Blocked is null && !string.IsNullOrWhiteSpace(Session.Sentence)) await WriteAsync();
+    }
+
+    private async Task WriteAsync()
+    {
+        if (Working || Blocked is not null) return;
+        _error = null;
+        var cts = new CancellationTokenSource();
+        _cts = cts;
+        try
+        {
+            await ExtraTagList.FollowAsync(Root);
+            if (!Engine.IsReady)
+            {
+                _status = "Loading the chat model…";
+                StateHasChanged();
+                bool ready;
+                try
+                {
+                    // Waits for a model a page is already loading, else loads the default for General.
+                    ready = await Launcher.EnsureReadyAsync(await SettingsStore.LoadAsync(), "general", cts.Token);
+                }
+                catch (ModelRefusedException e)
+                {
+                    _error = e.Message;
+                    return;
+                }
+                if (!ready)
+                {
+                    _error = "No chat model is loaded, and none is set as the default for General. Choose one in " + ModelsPlaces.LibraryName + ", or load one with the model button in General, then try again.";
+                    return;
+                }
+            }
+            cts.Token.ThrowIfCancellationRequested();
+            // A model set aside for pictures comes back with this request (it takes a few seconds).
+            _status = Engine.IsLoaded ? "The chat model is writing the prompt…" : "The chat model was set aside for pictures. It is loading again, then writes the prompt…";
+            StateHasChanged();
+            _draft = await Writer.PromptAsync(Session.Sentence, Style, Rating, TagList.Current, cts.Token);
+            _status = null;
+        }
+        catch (OperationCanceledException)
+        {
+            _status = "Cancelled.";
+        }
+        catch (Exception e) when (e is InvalidOperationException or EngineException)
+        {
+            _error = e.Message;
+            _status = null;
+        }
+        finally
+        {
+            if (ReferenceEquals(_cts, cts)) _cts = null;
+            cts.Dispose();
+        }
+    }
+
+    private void Cancel() => _cts?.Cancel();
+
+    private Task PutAsync(bool replace) => _draft is { } draft ? OnPut.InvokeAsync((draft.Prompt, replace)) : Task.CompletedTask;
+
+    /// <summary>What the tag check did to the model's tags, in one line; null when it changed nothing.</summary>
+    private static string? NotesText(TagNotes notes)
+    {
+        var parts = new List<string>();
+        // Worded as the picture maker's review says it.
+        if (notes.Corrected.Count > 0) parts.Add("Corrected to real tags: " + string.Join("; ", notes.Corrected.Select(c => $"{c.Written} → {c.Used}")) + ".");
+        if (notes.Dropped.Count > 0) parts.Add("Left out, not tags these checkpoints know: " + string.Join(", ", notes.Dropped) + ".");
+        return parts.Count == 0 ? null : string.Join(" ", parts);
+    }
+
+    public void Dispose()
+    {
+        Engine.Changed -= Refresh;
+        // Closing the dialog (or leaving the Make tab) stops the job.
+        _cts?.Cancel();
+    }
+}

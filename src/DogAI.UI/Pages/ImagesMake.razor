@@ -15,6 +15,7 @@
 @inject ISettingsStore SettingsStore
 @inject SdServerLocator PictureLocator
 @inject IDesktopShell Desktop
+@inject ExtraTags ExtraTagList
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 
@@ -151,6 +152,9 @@ else
             </label>
             <div class="images-send">
                 <button class="btn" id="images-saved" title="Saved prompts: put one in, or save what is typed" @onclick="() => _savedOpen = true">Saved prompts</button>
+                <button class="btn" id="images-write" title="The chat model turns a sentence into a prompt you can change" @onclick="() => _writerOpen = true">Write it for me…</button>
+                <button class="btn" id="images-check" disabled="@(CheckBlocked is not null)" title="@(CheckBlocked ?? "Look up every tag in the tag list; nothing changes unless you accept it")"
+                        @onclick="() => _tagsOpen = true">Check my tags</button>
                 <span class="small images-status" id="images-status" role="status">@StatusText</span>
                 @if (Session.IsDrawing)
                 {
@@ -212,9 +216,32 @@ else
                     </label>
                     <input class="field" type="number" step="0.05" min="-5" max="5" aria-label="@($"Strength of {row.Name}")" disabled="@(!row.On)"
                            value="@row.Strength.ToString(CultureInfo.InvariantCulture)" @onchange="e => StrengthAsync(controls, row, e)" />
+                    @if (row.On && !row.Missing)
+                    {
+                        var (chips, hidden) = Chips(row);
+                        <div class="images-chips" data-chips="@row.Path">
+                            @foreach (var c in chips)
+                            {
+                                var chip = c;
+                                var inPrompt = PromptPieces.Has(Session.Prompt, chip);
+                                <button type="button" class="images-chip @(inPrompt ? "in" : "")" data-chip="@chip" disabled="@inPrompt"
+                                        title="@(inPrompt ? "Already in the prompt" : $"Put “{chip}” into the prompt")" @onclick="() => InsertChip(chip)">
+                                    @(inPrompt ? "✓ " : "+ ")@chip
+                                </button>
+                            }
+                            @if (chips.Count == 0)
+                            {
+                                <span class="small images-chips-none">No trigger words are known for it.</span>
+                            }
+                            @if (hidden > 0)
+                            {
+                                <span class="small images-chips-hidden">@LoraChips.HiddenNote(hidden)</span>
+                            }
+                        </div>
+                    }
                 </div>
             }
-            <p class="small">Ticked LoRAs are used with their strength. Their trigger words are not added: type them into the prompt.</p>
+            <p class="small">Ticked LoRAs are used with their strength. Their trigger words are never added by themselves: click one to put it into the prompt.</p>
         </Fold>
 
         <Fold Id="@ImagesPanels.Size" Title="@ImagesPanels.Title(ImagesPanels.Size)" Summary="@ImagesPanels.SizeSummary(controls.Width, controls.Height)" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Size)" Level="4" Class="panel images-fold">
@@ -322,8 +349,21 @@ else
     <SavedPromptsBox Prompt="@Session.Prompt" Negative="@Session.Negative" OnPut="PutSaved" OnClose="() => _savedOpen = false" />
 }
 
+@if (_writerOpen && !_kept && _card is { } writeCard)
+{
+    <PromptHelperBox Style="@writeCard.Style" Rating="@Catalog.Preferences.Rating" Root="@_root" Prompt="@Session.Prompt"
+                     Blocked="@(Session.IsDrawing ? "Wait for the Draw to end: the chat model and the picture share the graphics card." : null)"
+                     OnPut="PutWritten" OnClose="() => _writerOpen = false" />
+}
+
+@if (_tagsOpen && !_kept && _controls is { } checkControls)
+{
+    <TagCheckBox Prompt="@Session.Prompt" Negative="@Session.Negative" Fine="@Fine(checkControls)" Root="@_root"
+                 OnChange="b => Session.Type(b.Prompt, b.Negative)" OnClose="() => _tagsOpen = false" />
+}
+
 @code {
-    private bool _ready, _keeping, _savedOpen;
+    private bool _ready, _keeping, _savedOpen, _writerOpen, _tagsOpen;
     private string? _root, _engine, _error, _note;
     private IReadOnlyList<ImageFile> _files = [];
     private List<ImageFile> _checkpoints = [];
@@ -361,6 +401,8 @@ else
         _root = (await SettingsStore.LoadAsync()).ImageFolder();
         if (_root is { } root)
         {
+            // The trigger chips leave out what the tag list in use leaves out: follow a full list added in this folder.
+            await ExtraTagList.FollowAsync(root);
             _files = await Task.Run(() => ImageLibrary.Scan(root));
             _checkpoints = Files(ImageFileKind.Checkpoint).ToList();
             var paths = _checkpoints.Select(c => c.RelativePath).ToList();
@@ -464,7 +506,7 @@ else
 
     // ── LoRAs ──
 
-    private sealed record LoraRow(string Path, string Name, bool On, double Strength, bool Missing);
+    private sealed record LoraRow(string Path, string Name, bool On, double Strength, bool Missing, ImageFile? File = null);
 
     /// <summary>Every installed LoRA (ticked or not), then ticked ones whose file is gone.</summary>
     private IEnumerable<LoraRow> LoraRows(ImagesControls controls)
@@ -474,10 +516,40 @@ else
         {
             var path = ImageModelCatalog.Normalise(file.RelativePath);
             var use = controls.Loras.FirstOrDefault(l => string.Equals(l.Path, path, StringComparison.OrdinalIgnoreCase));
-            yield return new LoraRow(path, file.Name, use is not null, use?.Strength ?? 1.0, false);
+            yield return new LoraRow(path, file.Name, use is not null, use?.Strength ?? 1.0, false, file);
         }
         foreach (var gone in controls.Loras.Where(l => !installed.Any(f => string.Equals(ImageModelCatalog.Normalise(f.RelativePath), l.Path, StringComparison.OrdinalIgnoreCase))))
             yield return new LoraRow(gone.Path, System.IO.Path.GetFileNameWithoutExtension(gone.Path), true, gone.Strength, true);
+    }
+
+    /// <summary>
+    /// A ticked LoRA's trigger words as chips: the words on its card in Models › On this PC › Pictures › LoRAs, else the ones
+    /// found in the file (cleaned first: they come from the file's maker).
+    /// </summary>
+    private (IReadOnlyList<string> Chips, int Hidden) Chips(LoraRow row) => row.File is { } file
+        ? LoraChips.For(Catalog.LoraFor(file.RelativePath, file.Verdict.Lora).TriggerWords, owners: Catalog.IsLoraChanged(file.RelativePath))
+        : ([], 0);
+
+    /// <summary>A chip was clicked: its word goes after what is typed (never twice). The only way a trigger word reaches the prompt.</summary>
+    private void InsertChip(string chip) => Session.Type(PromptPieces.Insert(Session.Prompt, chip), Session.Negative);
+
+    // ── Helpers: Write it for me…, Check my tags ──
+
+    /// <summary>Why Check my tags cannot be used now, or null.</summary>
+    private string? CheckBlocked =>
+        _card?.Style == PromptStyle.Sentences ? "This checkpoint reads plain sentences, not tags, so there are no tags to check."
+        : string.IsNullOrWhiteSpace(Session.Prompt) && string.IsNullOrWhiteSpace(Session.Negative) ? "Both boxes are empty."
+        : null;
+
+    /// <summary>What Check my tags leaves alone: quality and rating words, the card's own words, the ticked LoRAs' trigger words.</summary>
+    private ISet<string> Fine(ImagesControls controls) => TagCheck.Fine(_card, LoraRows(controls).Where(r => r.On && !r.Missing).SelectMany(r => Chips(r).Chips));
+
+    /// <summary>The helper's prompt, put in the box only because the owner pressed Replace or Add.</summary>
+    private void PutWritten((string Text, bool Replace) put)
+    {
+        Session.Type(put.Replace ? put.Text : SavedPicturePrompts.AddTo(Session.Prompt, put.Text), Session.Negative);
+        _writerOpen = false;
+        _note = "The prompt box holds the written prompt now. Change what you like, then Draw.";
     }
 
     private Task ToggleLoraAsync(ImagesControls controls, LoraRow row, bool on)

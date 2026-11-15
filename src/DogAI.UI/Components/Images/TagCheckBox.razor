@@ -1,0 +1,139 @@
+@* "Check my tags" on the Images section's Make tab (M16 step 4). Every piece of the two boxes is looked up in the tag
+   list in use (TagList.Current, after ExtraTags.FollowAsync); for each that is not a tag it offers the real tag, or taking
+   it out. Nothing changes unless the owner presses Change or Take it out (TagCheck.Accept), and then only that word:
+   every other character of the box stays as typed. The rules are TagCheck (Core). *@
+@using DogAI.Engine.Images
+@inject ExtraTags ExtraTagList
+
+<Modal Title="Check my tags" Class="wide tagcheck-box" OnClose="OnClose">
+    <div class="tagcheck" id="tagcheck">
+        @if (_tags is null)
+        {
+            <p class="small">Reading the tag list…</p>
+        }
+        else
+        {
+            <p class="small" id="tagcheck-about">
+                Each piece of the two boxes is looked up in DOG.ai’s tag list (@_tags.Count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) tags@(ExtraTagList.IsOn ? ", the full list included" : "")).
+                Nothing changes unless you press Change or Take it out.
+                <InfoButton About="what is left alone">Quality and rating words, this checkpoint’s own quality words and negative prompt, the ticked LoRAs’ trigger words, and what is not a plain tag (&lt;…&gt;, BREAK, brackets inside brackets) are left alone. Brackets and weights around a tag stay as you typed them.</InfoButton>
+            </p>
+            var offers = Shown();
+            @if (offers.Count == 0)
+            {
+                <p class="tagcheck-none" id="tagcheck-none">@(_left.Count > 0 ? "Nothing else to look at." : "Every tag in the two boxes is in the tag list.")</p>
+            }
+            else
+            {
+                @if (offers.Count(o => o.IsCorrection) > 1)
+                {
+                    <div class="row"><button class="btn" id="tagcheck-all" @onclick="() => ChangeAllAsync(offers)">Make every correction</button></div>
+                }
+                @foreach (var box in new[] { PromptBox.Prompt, PromptBox.Negative })
+                {
+                    var mine = offers.Where(o => o.Box == box).ToList();
+                    if (mine.Count == 0) continue;
+                    <h4 class="tagcheck-head">@(box == PromptBox.Prompt ? "Prompt" : "Negative prompt")</h4>
+                    <div class="tagcheck-list" id="@(box == PromptBox.Prompt ? "tagcheck-prompt" : "tagcheck-negative")">
+                        @foreach (var o in mine)
+                        {
+                            var offer = o;
+                            <div class="tagcheck-item" data-box="@(box == PromptBox.Prompt ? "prompt" : "negative")" data-key="@offer.Key">
+                                <span class="tagcheck-text">
+                                    <code>@offer.Written</code>
+                                    @if (offer.Use is { } use)
+                                    {
+                                        <span class="tagcheck-arrow" aria-hidden="true">→</span><code class="tagcheck-use">@use</code>
+                                    }
+                                    else
+                                    {
+                                        <span class="small">is not in the tag list@(offer.Only is { } only ? $" (only “{only}” is)" : "")</span>
+                                    }
+                                    @if (offer.Count > 1)
+                                    {
+                                        <span class="small">(written @offer.Count times)</span>
+                                    }
+                                </span>
+                                <span class="tagcheck-acts">
+                                    @if (offer.IsCorrection)
+                                    {
+                                        <button class="btn primary" data-act="change" @onclick="() => AcceptAsync(offer, change: true)">Change</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn" data-act="remove" @onclick="() => AcceptAsync(offer, change: false)">Take it out</button>
+                                    }
+                                    <button class="btn" data-act="leave" @onclick="() => Leave(offer)">Leave it</button>
+                                </span>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+            @if (_note is { } note)
+            {
+                <p class="small" id="tagcheck-note" role="status">@note</p>
+            }
+            <div class="row"><button class="btn" id="tagcheck-done" @onclick="OnClose">Done</button></div>
+        }
+    </div>
+</Modal>
+
+@code {
+    [Parameter] public string Prompt { get; set; } = "";
+    [Parameter] public string Negative { get; set; } = "";
+
+    /// <summary>The words left alone (<see cref="TagCheck.Fine"/>).</summary>
+    [Parameter, EditorRequired] public ISet<string> Fine { get; set; } = default!;
+
+    /// <summary>The image folder in use, so a full tag list added there is followed.</summary>
+    [Parameter] public string? Root { get; set; }
+
+    /// <summary>The two boxes after an accepted change.</summary>
+    [Parameter] public EventCallback<(string Prompt, string Negative)> OnChange { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private TagList? _tags;
+    private readonly HashSet<(PromptBox, string)> _left = [];
+    private string? _note;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ExtraTagList.FollowAsync(Root);
+        _tags = TagList.Current;
+    }
+
+    private List<TagOffer> Shown() => _tags is null ? [] :
+        [.. TagCheck.Offers(Prompt, PromptBox.Prompt, _tags, Fine).Concat(TagCheck.Offers(Negative, PromptBox.Negative, _tags, Fine))
+            .Where(o => !_left.Contains((o.Box, o.Key)))];
+
+    private async Task AcceptAsync(TagOffer offer, bool change)
+    {
+        if (_tags is null) return;
+        var (prompt, negative) = (Prompt, Negative);
+        if (offer.Box == PromptBox.Prompt) prompt = TagCheck.Accept(prompt, offer, change, _tags, Fine);
+        else negative = TagCheck.Accept(negative, offer, change, _tags, Fine);
+        _note = change ? $"Changed “{offer.Written}” to “{offer.Use}”." : $"Took “{offer.Written}” out.";
+        await OnChange.InvokeAsync((prompt, negative));
+    }
+
+    private async Task ChangeAllAsync(IReadOnlyList<TagOffer> offers)
+    {
+        if (_tags is null) return;
+        var (prompt, negative) = (Prompt, Negative);
+        var corrections = offers.Where(o => o.IsCorrection).ToList();
+        foreach (var offer in corrections)
+        {
+            if (offer.Box == PromptBox.Prompt) prompt = TagCheck.Accept(prompt, offer, true, _tags, Fine);
+            else negative = TagCheck.Accept(negative, offer, true, _tags, Fine);
+        }
+        _note = corrections.Count == 1 ? "Made 1 correction." : $"Made {corrections.Count} corrections.";
+        await OnChange.InvokeAsync((prompt, negative));
+    }
+
+    private void Leave(TagOffer offer)
+    {
+        _left.Add((offer.Box, offer.Key));
+        _note = null;
+    }
+}

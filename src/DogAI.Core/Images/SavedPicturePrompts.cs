@@ -132,6 +132,12 @@ public sealed class SavedPicturePrompts(IDocumentStore? documents = null)
     public static (string Prompt, string Negative) Add(string prompt, string negative, SavedPicturePrompt saved) =>
         (Join(prompt, saved.Prompt), Join(negative, saved.Negative));
 
+    /// <summary>
+    /// Text put after what is typed, as Add does: a comma between, what was typed left as typed, and nothing added when
+    /// the box already ends with exactly this text. Also used by the prompt helper's "Add after what is typed".
+    /// </summary>
+    public static string AddTo(string? typed, string added) => Join(typed, added);
+
     private static string Join(string? typed, string added)
     {
         typed ??= "";

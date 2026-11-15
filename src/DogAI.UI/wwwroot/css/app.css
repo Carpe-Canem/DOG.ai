@@ -663,6 +663,29 @@ button.cite:hover { border-color: var(--accent); }
 /* The fold's heading already says "Seed": the row's own label stays for screen readers only. */
 .images-fold .seed-row > .field-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .images-fold .seed-controls .field { flex: 1 1 100%; width: auto; min-width: 0; }
+/* Images helpers (M16 step 4): trigger chips under a ticked LoRA, Write it for me…, Check my tags. */
+.images-chips { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 0 0 4px 26px; }
+.images-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--text); font: inherit; font-size: .8em; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.images-chip:hover:not(:disabled), .images-chip:focus-visible { border-color: var(--accent); color: var(--accent); }
+.images-chip.in { color: var(--muted); cursor: default; background: transparent; }
+.images-chips-none, .images-chips-hidden { color: var(--muted); }
+.writer, .tagcheck { display: grid; gap: 10px; }
+.writer textarea { resize: vertical; font: inherit; line-height: 1.45; }
+.writer p, .tagcheck p { margin: 0; }
+.writer-row { align-items: center; flex-wrap: wrap; }
+.writer-row .small { flex: 1; min-width: 160px; }
+.writer-result { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: min(var(--r), 10px); background: var(--surface2); }
+.writer-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .95em; }
+.tagcheck-head { margin: 4px 0 0; font-size: .9em; color: var(--muted); }
+.tagcheck-list { display: grid; gap: 6px; }
+.tagcheck-item { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--line); border-radius: min(var(--r), 10px); background: var(--surface); }
+.tagcheck-text { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; overflow-wrap: anywhere; }
+.tagcheck-text code { white-space: pre-wrap; }
+.tagcheck-use { color: var(--ok); }
+.tagcheck-arrow { color: var(--muted); }
+.tagcheck-acts { flex: none; display: flex; gap: 6px; }
+.tagcheck-none { padding: 14px; text-align: center; border: 1px dashed var(--line); border-radius: min(var(--r), 10px); color: var(--muted); }
 .saved-save-row { display: flex; gap: 8px; }
 .saved-save-row .field { flex: 1; min-width: 0; }
 .saved-list { display: grid; gap: 6px; }
@@ -710,6 +733,7 @@ button.cite:hover { border-color: var(--accent); }
   .images-box { grid-template-columns: 1fr; gap: 2px; }
   .images-box > span { padding-top: 0; }
   .saved-item { flex-direction: column; align-items: stretch; }
+  .tagcheck-item { flex-direction: column; align-items: stretch; }
   .head-select { max-width: 150px; }
   .kept-tools .kept-find { flex-basis: 100%; }
   .kept-tools select { flex: 1 1 0; }

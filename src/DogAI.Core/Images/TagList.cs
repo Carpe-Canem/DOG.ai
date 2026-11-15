@@ -73,9 +73,10 @@ public sealed class TagList
 
     /// <summary>
     /// Other spellings in the source data that are wrong for pictures, found by reading what a chat model wrote:
-    /// "lean" (a build) is listed as another spelling of "leaning" (a pose). They are not used.
+    /// "lean" (a build) is listed as another spelling of "leaning" (a pose); "orange" and "oranges" (most often the colour) of
+    /// "orange (fruit)" (seen in M16 step 4: autumn leaves became fruit). They are not used.
     /// </summary>
-    private static readonly HashSet<string> NotASpelling = new(StringComparer.Ordinal) { "lean" };
+    private static readonly HashSet<string> NotASpelling = new(StringComparer.Ordinal) { "lean", "orange", "oranges" };
 
     public static TagList Empty { get; } = new();
 
@@ -205,7 +206,14 @@ public sealed class TagList
     /// describing word is unknown ("tattered cloak" → "cloak"). Empty when nothing real is close.
     /// An empty list knows nothing and keeps the tag as written.
     /// </summary>
-    public IReadOnlyList<string> Resolve(string written) => Resolve(written, out _);
+    public IReadOnlyList<string> Resolve(string written) => Resolve(written, out _, out _);
+
+    /// <summary>
+    /// <see cref="Resolve(string)"/>, saying also when only the thing itself was kept because its describing words are
+    /// unknown ("silvr hair" → "hair"). Right for the chat model's tags; for the owner's own words that is not a
+    /// correction, since it loses what they described ("Check my tags" says so instead of offering it).
+    /// </summary>
+    public IReadOnlyList<string> Resolve(string written, out bool thingOnly) => Resolve(written, out _, out thingOnly);
 
     /// <summary>
     /// True when something written is a tag this list leaves out on purpose, in any spelling, or contains one among its
@@ -215,7 +223,7 @@ public sealed class TagList
     /// </summary>
     public bool LeavesOut(string written)
     {
-        var real = Resolve(written, out var leftOut);
+        var real = Resolve(written, out var leftOut, out _);
         if (leftOut) return true;
         if (real.Count > 0 || _excluded.Count == 0) return false;
         // Unknown to the list. The tag check drops such a word anyway, but here it would stay: a left-out tag written
@@ -236,9 +244,10 @@ public sealed class TagList
         return false;
     }
 
-    private IReadOnlyList<string> Resolve(string written, out bool leftOut)
+    private IReadOnlyList<string> Resolve(string written, out bool leftOut, out bool thingOnly)
     {
         leftOut = false;
+        thingOnly = false;
         var tag = Normalise(written);
         if (tag.Length == 0) return [];
         if (IsEmpty) return [tag];
@@ -284,8 +293,10 @@ public sealed class TagList
         // a sentence, and only when the thing is a tag in its own right: another spelling is too weak a link here.
         if (words.Count is 2 or 3 && !words.Any(Sentence.Contains) && !words.Take(words.Count - 1).Any(Negations.Contains))
         {
+            thingOnly = true;
             if (words.Count == 3 && _tags.ContainsKey(words[^2] + " " + words[^1])) return [words[^2] + " " + words[^1]];
             if (words[^1].Length >= 3 && _tags.ContainsKey(words[^1])) return [words[^1]];
+            thingOnly = false;
         }
         return [];
     }
@@ -369,6 +380,9 @@ public sealed class TagList
     /// The most used real tag one slip away (two for long tags), or null. Never one that starts with another letter or
     /// swaps a colour, size or side word, or changes a whole short word: a wrong correction is worse than a dropped tag.
     /// </summary>
+    /// <summary>A tag with fewer posts than this is too rare to be what a short word one slip away meant (<see cref="Near"/>).</summary>
+    public const int RareBelow = 1000;
+
     private string? Near(string tag)
     {
         var allowed = tag.Length >= 12 ? 2 : tag.Length >= 6 ? 1 : 0;
@@ -387,6 +401,9 @@ public sealed class TagList
                 if (distance > allowed) continue;
                 var count = _tags[candidate];
                 if (distance > bestDistance || (distance == bestDistance && count <= bestCount)) continue;
+                // A short single word one slip from a rare tag is more likely another word than a typo ("center" is
+                // not "censer", 195 posts).
+                if (words.Length == 1 && tag.Length <= 7 && count < RareBelow) continue;
                 var other = candidate.Split(' ');
                 if (other.Length != words.Length) continue;
                 if (words.Where(Colours.Contains).Any(w => !other.Contains(w)) || other.Where(Colours.Contains).Any(w => !words.Contains(w))) continue;

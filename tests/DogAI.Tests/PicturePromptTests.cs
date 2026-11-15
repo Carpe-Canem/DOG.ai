@@ -271,6 +271,10 @@ public sealed class PicturePromptTests : IDisposable
             Assert.Empty(list.Resolve(junk));
         Assert.Equal(["aura"], list.Resolve("glowing aura")); // never "glowing fur"
         Assert.Empty(list.Resolve("lean"));                   // a build, not the pose "leaning" the source data files it under
+        Assert.Empty(list.Resolve("center"));                 // another word, not the rare tag "censer" (seen in M16 step 4)
+        Assert.Empty(list.Resolve("orange"));                 // the colour, not the fruit the source data files it under (M16 step 4)
+        Assert.Equal(["orange (fruit)"], list.Resolve("orange (fruit)"));
+        Assert.Equal(["jacket"], list.Resolve("jackett"));    // a slip into a common tag is still put right
         // No artists, characters or series: a name the model slips in is dropped.
         foreach (var name in new[] { "hatsune miku", "touhou", "twilight sparkle (mlp)" })
             Assert.False(list.Contains(name), name);

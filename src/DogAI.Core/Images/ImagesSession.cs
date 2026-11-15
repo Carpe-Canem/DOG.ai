@@ -65,6 +65,12 @@ public sealed class ImagesSession
     /// <summary>What is typed in the negative prompt box. Never saved.</summary>
     public string Negative { get; private set; } = "";
 
+    /// <summary>What was typed into "Write it for me…" (the prompt helper's sentence). Never saved.</summary>
+    public string Sentence { get; private set; } = "";
+
+    /// <summary>The helper's sentence as typed (the dialog tells it on every key, so closing and opening it again keeps it).</summary>
+    public void Describe(string sentence) => Sentence = sentence ?? "";
+
     /// <summary>True once the boxes were filled for this run of DOG.ai (they are filled only once).</summary>
     public bool Started { get; private set; }
 
