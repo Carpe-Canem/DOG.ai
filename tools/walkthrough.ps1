@@ -8,7 +8,8 @@
 #               @{ dialog = '<file path>'; title = '<dialog title>' }  fill in a Windows open/save dialog that the previous
 #                                                step opened (it types the path and presses Enter)
 #               @{ ok = 'window title' }         press OK in a Windows message box the previous step opened
-#               @{ press = 'ctrl+l' }            press a key in the page (ctrl/alt/shift + one letter)
+#               @{ press = 'ctrl+l' }            press a key in the page (ctrl/alt/shift + one letter, or 'esc'); it goes to
+#                                                whatever has the focus in the page, as a person's key would
 #               @{ adopt = 30 }                  DOG.ai restarted itself (Lock now, idle lock, restore): wait up to this many
 #                                                seconds for the old process to end and the new one to start, and follow it
 #               @{ lock = @( <lock steps> ) }    drive the lock screen of the (adopted) process, then reconnect to its page;
@@ -27,6 +28,11 @@
 #               @{ uiclick = 'Cancel' }          press the first button with this name in any of DOG.ai's windows (for example
 #                                                in the print preview), through UI Automation
 #               @{ procs = 'llama-server' }      print how many processes of that name are running (also in lock steps)
+#               @{ winsize = '1000x800' }        drop the fixed page size and resize DOG.ai's real window (outer size, in
+#                                                screen pixels); later shots show the page at its real size
+#               @{ mouse = '120,400' }           a real mouse click at these page coordinates (CSS pixels): it hits what
+#                                                is on top there and moves the focus, unlike a script .click();
+#                                                or mouse = '<css selector>' to click the middle of that element
 #   -DataDir  data folder for the run (default: a fresh temp folder, deleted afterwards)
 #   -OutDir   where screenshots are written (default: a temp folder, printed at the end)
 #   -Exe      run this DOG.ai.exe instead of the Debug build (for example publish\win-x64\app\DOG.ai.exe; point at the one
@@ -91,6 +97,7 @@ if (-not ('DogWalk.Win' -as [type])) {
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, string lParam);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+[DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 public delegate bool EnumProc(IntPtr hwnd, IntPtr lParam);
 [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc proc, IntPtr lParam);
@@ -373,8 +380,8 @@ function Press-Key($combo) {
     if ($parts -contains 'alt') { $mods += 1 }
     if ($parts -contains 'ctrl') { $mods += 2 }
     if ($parts -contains 'shift') { $mods += 8 }
-    $code = 'Key' + $key.ToUpper()
-    $vk = [int][char]$key.ToUpper()
+    if ($key -eq 'esc') { $key = 'Escape'; $code = 'Escape'; $vk = 27 }
+    else { $code = 'Key' + $key.ToUpper(); $vk = [int][char]$key.ToUpper() }
     Send 'Input.dispatchKeyEvent' @{ type = 'keyDown'; modifiers = $mods; key = $key; code = $code; windowsVirtualKeyCode = $vk } | Out-Null
     Send 'Input.dispatchKeyEvent' @{ type = 'keyUp'; modifiers = $mods; key = $key; code = $code; windowsVirtualKeyCode = $vk } | Out-Null
     "pressed $combo"
@@ -394,6 +401,36 @@ try {
             if (-not ($step.lock | Where-Object { $_.stay })) { Connect-Page }
         }
         if ($step.realkey) { Real-Key $step.realkey }
+        if ($step.winsize) {
+            # Stop pretending a page size and give DOG.ai's real window this outer size, so the page sees a real resize.
+            Send 'Emulation.clearDeviceMetricsOverride' @{} | Out-Null
+            $w = $A::RootElement.FindAll('Children', (ByPid)) | Select-Object -First 1
+            $h = [IntPtr]$w.Current.NativeWindowHandle
+            $rect = New-Object DogWalk.Win+RECT
+            [DogWalk.Win]::GetWindowRect($h, [ref]$rect) | Out-Null
+            $size = $step.winsize -split 'x'
+            [DogWalk.Win]::MoveWindow($h, $rect.Left, $rect.Top, [int]$size[0], [int]$size[1], $true) | Out-Null
+            Start-Sleep -Milliseconds 800
+            $r = Send 'Runtime.evaluate' @{ expression = "innerWidth + 'x' + innerHeight"; returnByValue = $true }
+            "window $($step.winsize); page now $($r.result.value)"
+        }
+        if ($step.mouse) {
+            # A real mouse click at page coordinates (CSS pixels): hit-tested and trusted, unlike a script .click(),
+            # so it lands on whatever is on top there and moves the focus as a person's click does.
+            if ($step.mouse -match '^\s*[\d.]+\s*,\s*[\d.]+\s*$') { $x, $y = $step.mouse -split ',' }
+            else {
+                # A CSS selector: click the middle of the first element it finds.
+                $sel = $step.mouse | ConvertTo-Json
+                $r = Send 'Runtime.evaluate' @{ expression = "(() => { const e = document.querySelector($sel); if (!e) return ''; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return (r.x + r.width / 2) + ',' + (r.y + r.height / 2); })()"; returnByValue = $true }
+                if (-not $r.result.value) { "MOUSE TARGET NOT FOUND: $($step.mouse)"; continue }
+                $x, $y = $r.result.value -split ','
+            }
+            foreach ($type in 'mouseMoved', 'mousePressed', 'mouseReleased') {
+                Send 'Input.dispatchMouseEvent' @{ type = $type; x = [double]$x; y = [double]$y; button = 'left'; clickCount = 1 } | Out-Null
+            }
+            Start-Sleep -Milliseconds 500
+            "clicked at $x,$y"
+        }
         if ($step.winshot) { Win-Shot $step.winshot }
         if ($step.trayclick) { Tray-Click }
         if ($step.uiclick) { Ui-Click $step.uiclick }

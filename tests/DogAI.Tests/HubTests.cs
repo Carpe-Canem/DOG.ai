@@ -111,6 +111,21 @@ public sealed class DownloadManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_refused_write_fails_with_words_that_name_the_folder_not_windows_wording()
+    {
+        Directory.CreateDirectory(Final + ".part"); // a folder where the partial file must go: Windows refuses the write
+        var manager = Manager();
+
+        var job = await manager.EnqueueAsync(Job());
+        await manager.IdleAsync();
+
+        Assert.Equal(DownloadStatus.Failed, job.Status);
+        Assert.Contains(_folder, job.Message);
+        Assert.DoesNotContain("Access to the path", job.Message);
+        Assert.Contains("Retry", job.Message);
+    }
+
+    [Fact]
     public async Task A_dropped_connection_resumes_from_the_partial_file()
     {
         var manager = Manager();

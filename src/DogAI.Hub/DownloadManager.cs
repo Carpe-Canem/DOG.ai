@@ -350,7 +350,7 @@ public sealed class DownloadManager : IDisposable
         catch (Exception e) when (e is HubException or HttpRequestException or IOException or HostNotAllowedException or UnauthorizedAccessException)
         {
             job.Status = DownloadStatus.Failed;
-            job.Message = e is HttpRequestException ? "The connection failed: " + e.Message : e.Message;
+            job.Message = FailureText(e, job.Folder);
         }
         finally
         {
@@ -417,6 +417,18 @@ public sealed class DownloadManager : IDisposable
     }
 
     private const string OfflineMessage = "Paused because DOG.ai went offline. Go online in the Models section to continue.";
+
+    /// <summary>
+    /// What the downloads list says about a failure. Windows' own "Access to the path '…' is denied" names the partial
+    /// file and not what to do, so a refused write gets words of its own; other messages are already the app's or plain.
+    /// </summary>
+    internal static string FailureText(Exception e, string folder) => e switch
+    {
+        UnauthorizedAccessException =>
+            $"Windows did not let DOG.ai write the file in {folder}. Check that the folder is not read-only and that nothing else is using the file, then Retry.",
+        HttpRequestException => "The connection failed: " + e.Message,
+        _ => e.Message,
+    };
 
     public void Dispose()
     {

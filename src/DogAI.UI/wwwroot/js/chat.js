@@ -229,6 +229,28 @@ export function drawerClosed() {
   if (lost && from instanceof HTMLElement && from.isConnected && from.offsetParent !== null) from.focus();
 }
 
+// A dialog (Modal) takes the focus when it opens, so its Escape works at once; unless something inside it already has
+// the focus (a search box that focuses itself). Closing puts the focus back on what had it, when the focus was lost
+// with the dialog. Dialogs opened from dialogs stack.
+const modalStack = [];
+export function modalOpened(box) {
+  if (!(box instanceof HTMLElement)) return;
+  const active = document.activeElement;
+  modalStack.push({ box, from: active instanceof HTMLElement && active !== document.body && !box.contains(active) ? active : null });
+  requestAnimationFrame(() => {
+    if (box.isConnected && !box.contains(document.activeElement)) box.focus({ preventScroll: true });
+  });
+}
+
+export function modalClosed(box) {
+  const i = modalStack.findIndex(m => m.box === box);
+  if (i < 0) return;
+  const [m] = modalStack.splice(i, 1);
+  const active = document.activeElement;
+  const lost = !(active instanceof HTMLElement) || active === document.body || !active.isConnected || box.contains(active);
+  if (lost && m.from instanceof HTMLElement && m.from.isConnected && m.from.offsetParent !== null) m.from.focus({ preventScroll: true });
+}
+
 export function showJumpChoice() {
   document.querySelector('.jump-item.on')?.scrollIntoView({ block: 'nearest' });
 }
