@@ -722,6 +722,18 @@ button.cite:hover { border-color: var(--accent); }
 .kept-acts { flex-wrap: wrap; }
 .kept-step { margin-left: auto; display: flex; gap: 6px; }
 .images-about p { margin: 0; }
+/* Upscale… (M16 step 5): the picture small beside the two ways, what the chosen way needs, then Upscale; for a kept
+   picture the result is shown here until it is kept or let go. */
+.upscale { display: grid; gap: 10px; }
+.upscale p { margin: 0; }
+.upscale-top { display: flex; gap: 12px; align-items: flex-start; }
+.upscale-thumb { flex: none; width: 96px; max-height: 144px; object-fit: contain; border-radius: min(var(--r), 8px); background: var(--surface2); }
+.upscale-ways { flex: 1; min-width: 0; display: grid; gap: 8px; justify-items: start; }
+.upscale-ways .seg { margin: 0; flex-wrap: wrap; }
+.upscale-row { align-items: center; flex-wrap: wrap; }
+.upscale-row .small { flex: 1; min-width: 160px; }
+.upscale-result { display: block; max-width: 100%; max-height: calc(100vh - 300px); min-height: 160px; margin: 0 auto; object-fit: contain; border-radius: min(var(--r), 12px); }
+#upscale-meta { text-align: center; overflow-wrap: anywhere; }
 /* Narrow: the strip gets thinner; only a very narrow window puts it under the picture. */
 @media (max-width: 520px) {
   .images-stage { flex-direction: column; }

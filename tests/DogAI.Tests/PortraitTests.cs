@@ -405,6 +405,20 @@ public sealed class PortraitTests : IDisposable
         public Task UnloadAsync(CancellationToken ct = default) { Model = null; return Task.CompletedTask; }
         public Task ReleaseAsync(CancellationToken ct = default) => Task.CompletedTask;
 
+        /// <summary>What was handed to an upscaler file, in order.</summary>
+        public List<ImageEnlarge> Enlarges { get; } = [];
+
+        /// <summary>An upscaler that enlarges four times, as Real-ESRGAN x4plus does.</summary>
+        public Task<ImageEnlarged> EnlargeAsync(ImageEnlarge request, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)
+        {
+            if (Model is null) throw new ImageEngineException("No picture model is loaded.");
+            Assert.Empty(request.Problems());
+            Enlarges.Add(request);
+            progress?.Report(new ImageProgress(CardCoordinator.Enlarging, null, null));
+            var size = WebpInfo.Read(request.Image)!.Value;
+            return Task.FromResult(new ImageEnlarged(KeptPictureTests.Webp(size.Width * 4, size.Height * 4, 300, 7), size.Width * 4, size.Height * 4, 4));
+        }
+
         public Task<ImageResult> DrawAsync(ImageRequest request, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)
         {
             if (Model is null) throw new ImageEngineException("No picture model is loaded.");

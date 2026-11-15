@@ -38,7 +38,8 @@ public static class ImageFolders
         Path.Combine(root, Checkpoints, checkpoint.Replace('/', Path.DirectorySeparatorChar)),
         Path.Combine(root, Loras),
         vae is not null ? Path.Combine(root, Vae, vae.Replace('/', Path.DirectorySeparatorChar)) : null,
-        prediction);
+        prediction,
+        Path.Combine(root, Upscalers));
 }
 
 /// <summary>What is saved: settings the owner changed, by file, and the checkpoint chosen to draw with.</summary>

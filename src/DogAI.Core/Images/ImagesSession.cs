@@ -219,6 +219,76 @@ public sealed class ImagesSession
         }
     }
 
+    /// <summary>True while the Draw in progress is an Upscale.</summary>
+    public bool IsUpscaling { get; private set; }
+
+    /// <summary>
+    /// Upscale: makes a larger picture from <paramref name="source"/> and returns it as a try, in memory like every
+    /// try. It counts as a Draw (one at a time; <see cref="Cancel"/> stops it; progress is reported the same way).
+    /// <see cref="UpscaleWay.Redraw"/> draws the picture again at <paramref name="scale"/> with its own model;
+    /// <see cref="UpscaleWay.Enlarge"/> hands the picture to the upscaler file <paramref name="upscaler"/> and keeps
+    /// the request it was drawn with.
+    /// </summary>
+    /// <param name="model">The picture's own model (a redraw loads it; enlarging uses whatever is chosen, else this).</param>
+    /// <param name="add">True to put the result into the strip (the Make tab); false to hand it back only (a kept picture).</param>
+    /// <exception cref="InvalidOperationException">Another Draw is in progress, or what was asked for cannot be done.</exception>
+    public async Task<ImagesTry> UpscaleAsync(IImageEngine engine, ImageModel model, UpscaleSource source, UpscaleWay way,
+        double scale, string? upscaler, bool add, CancellationToken ct = default)
+    {
+        var redraw = way == UpscaleWay.Redraw ? PictureUpscale.Redraw(source.Request, scale) : null;
+        if (redraw?.Problems() is { Count: > 0 } problems) throw new InvalidOperationException(string.Join(" ", problems));
+        if (redraw is { Seed: < 0 }) throw new InvalidOperationException("The picture's seed is not known, so it cannot be drawn again.");
+        if (redraw is null && !ImageEnlarge.IsUpscalerName(upscaler)) throw new InvalidOperationException("Choose an upscaler file.");
+        if (_cts is not null) throw new InvalidOperationException("A Draw is already in progress.");
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _cts = cts;
+        var run = ++_run;
+        try
+        {
+            IsUpscaling = true;
+            Of = 1;
+            Set(1, null, null);
+            var reporter = new Reporter(p =>
+            {
+                if (run != _run || _cts is null) return;
+                Progress = p;
+                if (p.Preview is { } preview) Preview = preview;
+                Changed?.Invoke();
+            });
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var checkpoint = ImageModelCatalog.Normalise(source.Checkpoint);
+            ImagesTry made;
+            if (redraw is not null)
+            {
+                if (engine.Model != model) await engine.LoadAsync(model, cts.Token).ConfigureAwait(false);
+                var result = await engine.DrawAsync(redraw with { Preview = true, PreviewEvery = 4 }, reporter, cts.Token).ConfigureAwait(false);
+                var image = result.Images[0];
+                var size = WebpInfo.Read(image);
+                made = new ImagesTry(add ? ++_number : 0, checkpoint, source.Vae, source.Prediction, redraw with { Seed = result.Seed },
+                    image, size?.Width ?? 0, size?.Height ?? 0, clock.Elapsed);
+            }
+            else
+            {
+                // Enlarging draws nothing, so the checkpoint in use stays; the engine only has to be running.
+                if (engine.Model is null) await engine.LoadAsync(model, cts.Token).ConfigureAwait(false);
+                var larger = await engine.EnlargeAsync(new ImageEnlarge(source.Image, upscaler!), reporter, cts.Token).ConfigureAwait(false);
+                made = new ImagesTry(add ? ++_number : 0, checkpoint, source.Vae, source.Prediction, source.Request with { Count = 1, Preview = false },
+                    larger.Image, larger.Width, larger.Height, clock.Elapsed);
+            }
+            if (add) Add(made);
+            return made;
+        }
+        finally
+        {
+            if (ReferenceEquals(_cts, cts)) _cts = null;
+            cts.Dispose();
+            IsUpscaling = false;
+            Set(0, null, null);
+            Of = 0;
+            Changed?.Invoke();
+        }
+    }
+
     private void Set(int drawing, ImageProgress? progress, byte[]? preview)
     {
         Drawing = drawing;
@@ -295,6 +365,7 @@ public static class ImagesPanels
             "guidance " + p.Guidance.ToString("0.##", CultureInfo.InvariantCulture),
         };
         if (p.Hires is { } h) parts.Add("hires ×" + h.Scale.ToString("0.##", CultureInfo.InvariantCulture));
+        if (PictureUpscale.EnlargedBy(p) is { } by) parts.Add($"enlarged ×{by}");
         if (p.Loras.Count > 0) parts.Add(p.Loras.Count == 1 ? "1 LoRA" : $"{p.Loras.Count} LoRAs");
         parts.Add(CheckpointName(p.Checkpoint));
         parts.Add("kept " + keptLocal.ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture));
@@ -330,12 +401,16 @@ public static class ImagesPanels
 
     /// <summary>The line of facts under the picture shown: "Try 3 · 832 × 1216 · seed 2817463950 · Euler, 28 steps · 31 s".</summary>
     public static string Meta(ImagesTry t) =>
-        $"Try {t.Number} · {t.ImageWidth} × {t.ImageHeight} · seed {t.Request.Seed.ToString(CultureInfo.InvariantCulture)} · " +
+        $"Try {t.Number} · {t.ImageWidth} × {t.ImageHeight} · " + (PictureUpscale.EnlargedBy(t) is { } by ? $"enlarged ×{by} · " : "") +
+        $"seed {t.Request.Seed.ToString(CultureInfo.InvariantCulture)} · " +
         $"{SamplerNames.Title(t.Request.Sampler)}, {t.Request.Steps} steps · {Seconds(t.Took)}" + (t.KeptId is null ? "" : " · kept");
 
     /// <summary>What a Draw in progress says: "Picture 2 of 4 · Drawing, step 12 of 28".</summary>
     public static string Doing(int drawing, int of, string? stage) =>
         (of > 1 ? $"Picture {drawing} of {of}" : "Picture") + (string.IsNullOrEmpty(stage) ? " · Starting…" : " · " + stage);
+
+    /// <summary>What an Upscale in progress says: "Upscale · Refining the enlarged picture, step 3 of 14…".</summary>
+    public static string Upscaling(string? stage) => "Upscale" + (string.IsNullOrEmpty(stage) ? " · Starting…" : " · " + stage);
 
     private static string Seconds(TimeSpan took) => took.TotalSeconds < 10
         ? took.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + " s"

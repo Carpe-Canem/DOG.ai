@@ -36,6 +36,9 @@ public sealed class ImageServer : IImageEngine, IDisposable
     private Process? _process;
     private SdApi? _api;
     private ImageModel? _runningModel;
+
+    /// <summary>The upscalers folder the running program was started with, or null when it was not given one.</summary>
+    private string? _upscalers;
     private CancellationTokenSource? _drawCancel;
     private DateTime _lastUse = DateTime.UtcNow;
     private int _busy;
@@ -265,12 +268,67 @@ public sealed class ImageServer : IImageEngine, IDisposable
         if (model.LoraFolder is { } loras) args.AddRange(["--lora-model-dir", loras]);
         if (model.VaePath is { } vae) args.AddRange(["--vae", vae]);
         if (model.Prediction == ImagePrediction.V) args.AddRange(["--prediction", "v"]);
+        // The engine opens every file at the top of this folder, so it is named only when DOG.ai allows all of them.
+        if (model.UpscalerFolder is { } upscalers) args.AddRange(["--hires-upscalers-dir", upscalers]);
         return args;
+    }
+
+    /// <summary>
+    /// Enlarges a picture with an upscaler file from the model's upscalers folder. The engine must be running for it
+    /// (it is started if needed), but the checkpoint is not read into graphics memory for this.
+    /// </summary>
+    public async Task<ImageEnlarged> EnlargeAsync(ImageEnlarge request, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)
+    {
+        if (request.Problems() is { Count: > 0 } problems) throw new ImageEngineException(string.Join(" ", problems));
+
+        await _drawing.WaitAsync(ct).ConfigureAwait(false);
+        Interlocked.Increment(ref _busy);
+        Changed?.Invoke();
+        try
+        {
+            SdApi api;
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var model = Model ?? throw new ImageEngineException("No picture model is loaded. Choose a checkpoint first.");
+                if (ImageLibrary.UpscalerFolderProblem(model.UpscalerFolder) is { } problem) throw new ImageEngineException(problem);
+                if (!File.Exists(Path.Combine(model.UpscalerFolder!, request.Upscaler + ".safetensors")))
+                    throw new ImageEngineException($"“{request.Upscaler}” is not at the top of the upscalers folder any more.");
+                // A program started before the folder could be handed over does not know it: start it again with it.
+                if (_upscalers is null) StopProcess();
+                api = await EnsureStartedLockedAsync(model, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+
+            progress?.Report(new ImageProgress(CardCoordinator.Enlarging, null, null));
+            try
+            {
+                return await api.EnlargeAsync(request, ct).ConfigureAwait(false);
+            }
+            catch (HttpRequestException)
+            {
+                await StopAsync().ConfigureAwait(false);
+                throw new ImageEngineException("The picture engine stopped while enlarging. Try again; it will be started again.");
+            }
+        }
+        finally
+        {
+            _lastUse = DateTime.UtcNow;
+            Interlocked.Decrement(ref _busy);
+            _drawing.Release();
+            Changed?.Invoke();
+        }
     }
 
     private async Task<SdApi> EnsureStartedLockedAsync(ImageModel model, CancellationToken ct)
     {
-        if (_api is { } ready && _process is { HasExited: false } && _runningModel == model) return ready;
+        // The upscalers folder is handed over only while every file at its top is one the engine may open. A program
+        // that was given it is stopped as soon as that is no longer so (a .pth dropped in), and starts again without.
+        var upscalers = ImageLibrary.UpscalerFolderProblem(model.UpscalerFolder) is null ? model.UpscalerFolder : null;
+        if (_api is { } ready && _process is { HasExited: false } && _runningModel == model && (_upscalers is null || upscalers is not null)) return ready;
         StopProcess();
         Check(model);
         IsStarting = true;
@@ -287,7 +345,7 @@ public sealed class ImageServer : IImageEngine, IDisposable
                 RedirectStandardError = true,
                 WorkingDirectory = Path.GetDirectoryName(exe)!,
             };
-            foreach (var arg in Arguments(model, port, BlankPage()))
+            foreach (var arg in Arguments(model with { UpscalerFolder = upscalers }, port, BlankPage()))
                 start.ArgumentList.Add(arg);
             EngineEnvironment.Clean(start);
 
@@ -317,6 +375,7 @@ public sealed class ImageServer : IImageEngine, IDisposable
             _api = api;
             Port = port;
             _runningModel = model;
+            _upscalers = upscalers;
             _lastUse = DateTime.UtcNow;
             Error = null;
             return api;
@@ -388,6 +447,7 @@ public sealed class ImageServer : IImageEngine, IDisposable
         _api = null;
         Port = null;
         _runningModel = null;
+        _upscalers = null;
         if (process is null) return;
         try
         {

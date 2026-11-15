@@ -320,7 +320,8 @@ public sealed class ImageModelsTests : IDisposable
         Assert.Empty(request.Problems());
 
         var model = ImageFolders.ModelFor(@"C:\m\image", "sub/il.safetensors", s with { Vae = "fix.safetensors", Prediction = ImagePrediction.V });
-        Assert.Equal(new ImageModel(@"C:\m\image\checkpoints\sub\il.safetensors", @"C:\m\image\loras", @"C:\m\image\vae\fix.safetensors", ImagePrediction.V), model);
+        Assert.Equal(new ImageModel(@"C:\m\image\checkpoints\sub\il.safetensors", @"C:\m\image\loras", @"C:\m\image\vae\fix.safetensors", ImagePrediction.V,
+            @"C:\m\image\upscalers"), model);
         Assert.StartsWith("1girl", ImagePrompt.TestSubject(PromptStyle.Tags));
         Assert.StartsWith("A woman", ImagePrompt.TestSubject(PromptStyle.Sentences));
     }

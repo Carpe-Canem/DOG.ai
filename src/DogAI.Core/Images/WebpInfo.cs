@@ -68,4 +68,42 @@ public readonly record struct WebpInfo(int Width, int Height, bool Lossless, boo
         if (width is not > 0 || height is not > 0 || lossless is null) return null;
         return new WebpInfo(width.Value, height.Value, lossless.Value, metadata);
     }
+
+    /// <summary>
+    /// The same picture with nothing but the picture in the file: a WebP in the extended format loses its EXIF, XMP and
+    /// colour-profile parts (the engine writes an XMP part into a picture it enlarges). A plain file comes back as it
+    /// is. Null when the bytes are not a WebP, or the file has transparency or animation, which cannot be dropped
+    /// without changing the picture.
+    /// </summary>
+    public static byte[]? PictureOnly(byte[] webp)
+    {
+        if (Read(webp) is null) return null;
+        if (!webp.AsSpan(12, 4).SequenceEqual("VP8X"u8)) return webp;
+        ReadOnlySpan<byte> data = webp;
+        (int At, int Length)? picture = null;
+        var at = 12;
+        while (at + 8 <= data.Length)
+        {
+            var name = data.Slice(at, 4);
+            var size = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(at + 4, 4));
+            if (size > (uint)(data.Length - at - 8)) return null;
+            if (name.SequenceEqual("VP8 "u8) || name.SequenceEqual("VP8L"u8))
+            {
+                if (picture is not null) return null;
+                picture = (at, 8 + (int)size);
+            }
+            else if (!name.SequenceEqual("VP8X"u8) && !name.SequenceEqual("ICCP"u8) && !name.SequenceEqual("EXIF"u8) && !name.SequenceEqual("XMP "u8))
+            {
+                return null;
+            }
+            at += 8 + (int)size + (int)(size & 1);
+        }
+        if (picture is not { } found) return null;
+        var plain = new byte[12 + found.Length + (found.Length & 1)];
+        "RIFF"u8.CopyTo(plain);
+        BinaryPrimitives.WriteUInt32LittleEndian(plain.AsSpan(4), (uint)(plain.Length - 8));
+        "WEBP"u8.CopyTo(plain.AsSpan(8));
+        data.Slice(found.At, found.Length).CopyTo(plain.AsSpan(12));
+        return Read(plain) is { HasMetadata: false } ? plain : null;
+    }
 }

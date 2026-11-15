@@ -14,11 +14,16 @@ public enum ImagePrediction
 /// <param name="CheckpointPath">Full path of a .safetensors checkpoint.</param>
 /// <param name="LoraFolder">The folder LoRAs are read from; <see cref="LoraUse.Path"/> is relative to it.</param>
 /// <param name="VaePath">A separate VAE file, or null for the one inside the checkpoint.</param>
+/// <param name="UpscalerFolder">
+/// The folder upscaler files are read from (<see cref="ImageEnlarge.Upscaler"/> names one at its top level), or null.
+/// The engine is pointed at it only while every file in it is one DOG.ai lets it open.
+/// </param>
 public sealed record ImageModel(
     string CheckpointPath,
     string? LoraFolder = null,
     string? VaePath = null,
-    ImagePrediction Prediction = ImagePrediction.Auto);
+    ImagePrediction Prediction = ImagePrediction.Auto,
+    string? UpscalerFolder = null);
 
 /// <summary>A LoRA used for one picture.</summary>
 /// <param name="Path">The file, relative to <see cref="ImageModel.LoraFolder"/> (for example "style/ink.safetensors").</param>
@@ -71,6 +76,29 @@ public sealed record ImageRequest(
     public const int MaxSteps = 150;
     public const int MaxCount = 8;
 
+    /// <summary>
+    /// Above this many pixels in its largest pass a picture is decoded in tiles (see <see cref="DecodesInTiles"/>).
+    /// It sits just above the largest picture drawn before M16 step 5 (Fine: 1280 × 1856), so those are drawn as they
+    /// always were and a kept one still redraws byte for byte.
+    /// </summary>
+    public const int TiledAbovePixels = 2_400_000;
+
+    /// <summary>
+    /// The size of the largest pass: the size asked for, or with a hires fix the enlarged size, which the engine rounds
+    /// up to a multiple of 64 (832 × 1216 at ×1.5 comes out 1280 × 1856).
+    /// </summary>
+    public (int Width, int Height) LargestPass => Hires is null ? (Width, Height) : (Enlarged(Width, Hires.Scale), Enlarged(Height, Hires.Scale));
+
+    /// <summary>A side after a hires fix at <paramref name="scale"/>, as the engine rounds it.</summary>
+    public static int Enlarged(int side, double scale) => (int)Math.Ceiling(side * scale / 64) * 64;
+
+    /// <summary>
+    /// True when the engine is told to turn the drawing into the picture (and back, for the hires fix) piece by piece.
+    /// Whole, that step's memory grows with the picture: 1280 × 1856 peaked at 16.1 GB, and 1664 × 2432 filled a 24 GB
+    /// card and did not finish in ten minutes. In tiles the same picture peaked at 8.7 GB (M16 step 5 trial).
+    /// </summary>
+    public bool DecodesInTiles => (long)LargestPass.Width * LargestPass.Height > TiledAbovePixels;
+
     /// <summary>What is wrong with the request in plain words, or nothing. Checked before anything reaches the engine.</summary>
     public IReadOnlyList<string> Problems()
     {
@@ -121,3 +149,34 @@ public sealed record ImageProgress(string Stage, int? Step, int? TotalSteps, int
 
 /// <summary>The finished pictures, in the requested format, with the seed of the first one.</summary>
 public sealed record ImageResult(IReadOnlyList<byte[]> Images, ImageFormat Format, long Seed);
+
+/// <summary>
+/// A picture to enlarge with an upscaler file (ESRGAN kind): the picture as it is, made larger. Nothing is drawn, so no
+/// prompt is sent and nothing in the picture changes.
+/// </summary>
+/// <param name="Image">The picture, as WebP.</param>
+/// <param name="Upscaler">The upscaler's file name without ".safetensors"; a file at the top of <see cref="ImageModel.UpscalerFolder"/>.</param>
+/// <param name="Quality">The WebP quality of the result.</param>
+public sealed record ImageEnlarge(byte[] Image, string Upscaler, int Quality = PictureFormat.Quality)
+{
+    /// <summary>The longest side the engine enlarges to.</summary>
+    public const int MaxSide = 8192;
+
+    /// <summary>What is wrong with the request in plain words, or nothing.</summary>
+    public IReadOnlyList<string> Problems()
+    {
+        var problems = new List<string>();
+        if (WebpInfo.Read(Image) is null) problems.Add("The picture to enlarge is not a WebP image.");
+        if (!IsUpscalerName(Upscaler)) problems.Add("The upscaler must be a file at the top of the upscalers folder.");
+        if (Quality is < 0 or > 100) problems.Add("Quality must be between 0 and 100.");
+        return problems;
+    }
+
+    /// <summary>A plain file name without a folder: the engine looks only at the top of the upscalers folder.</summary>
+    public static bool IsUpscalerName(string? name) =>
+        !string.IsNullOrWhiteSpace(name) && name.Length <= 200 && ImageRequest.IsSafeRelativePath(name) &&
+        name.IndexOfAny(['/', '\\']) < 0 && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+}
+
+/// <summary>An enlarged picture (WebP, nothing but the picture in it) with its size and how many times larger it is.</summary>
+public sealed record ImageEnlarged(byte[] Image, int Width, int Height, int Scale);

@@ -52,8 +52,8 @@
 
 @if (_kept)
 {
-    <KeptPictures Like="LikeFromKeptAsync" LikeBlocked="@(Session.IsDrawing ? "A Draw is going on in Make. Wait for it, or cancel it there." : null)"
-                  Drawing="@(Session.IsDrawing ? StatusText : null)" />
+    <KeptPictures @ref="_keptTab" Like="LikeFromKeptAsync" LikeBlocked="@(Session.IsDrawing ? "A Draw is going on in Make. Wait for it, or cancel it there." : null)"
+                  Upscale="UpscaleKept" UpscaleBlocked="@UpscaleBlocked" Drawing="@(Session.IsDrawing ? StatusText : null)" />
     <AsideRegion Place="images" Hideable="false" Title="Images">
         <section class="panel images-about" id="images-kept-about">
             <h4>Kept pictures</h4>
@@ -122,6 +122,8 @@ else
                 }
                 <button class="btn" id="images-use" disabled="@Session.IsDrawing" title="Put this picture’s prompt, checkpoint and settings back, seed included"
                         @onclick="() => UseSettingsAsync(shown)">Use these settings</button>
+                <button class="btn" id="images-upscale" disabled="@Session.IsDrawing" title="Make a larger picture from this one, as a new try beside it"
+                        @onclick="() => OpenUpscale(UpscaleSource.Of(shown), kept: false)">Upscale…</button>
                 <button class="btn" id="images-save" title="Save this picture as a WebP file" @onclick="() => SaveFileAsync(shown)">Save as a file…</button>
             </div>
         }
@@ -362,6 +364,12 @@ else
                  OnChange="b => Session.Type(b.Prompt, b.Negative)" OnClose="() => _tagsOpen = false" />
 }
 
+@if (_upscale is { } upscaling)
+{
+    <UpscaleBox Source="upscaling" Root="@_root" Blocked="@UpscaleBlocked" AddToStrip="@(!_upscaleOfKept)"
+                OnDone="Upscaled" OnKeep="KeepUpscaledAsync" OnClose="() => _upscale = null" />
+}
+
 @code {
     private bool _ready, _keeping, _savedOpen, _writerOpen, _tagsOpen;
     private string? _root, _engine, _error, _note;
@@ -372,6 +380,11 @@ else
     private ImagesControls? _controls;
     private SeedChoice _seed = SeedChoice.New;
     private IJSObjectReference? _module;
+
+    /// <summary>The picture the Upscale dialog is open for, and whether it is a kept picture (else a try).</summary>
+    private UpscaleSource? _upscale;
+    private bool _upscaleOfKept;
+    private KeptPictures? _keptTab;
 
     /// <summary>True on the Kept pictures tab (images/kept).</summary>
     private bool _kept;
@@ -448,7 +461,7 @@ else
             {
                 var stage = Session.Progress is { } p ? PictureWords.Of(p)
                     : Engine.State == EngineState.Loading ? "Waiting for the chat model to finish loading…" : null;
-                return ImagesPanels.Doing(Session.Drawing, Session.Of, stage);
+                return Session.IsUpscaling ? ImagesPanels.Upscaling(stage) : ImagesPanels.Doing(Session.Drawing, Session.Of, stage);
             }
             return _note is null ? "Sent exactly as typed." : null;
         }
@@ -620,23 +633,7 @@ else
         _error = null;
         try
         {
-            var picture = shown.ToKeep();
-            var (w, h) = PicturePreview.SizeFor(shown.ImageWidth, shown.ImageHeight);
-            string? previewNote = null;
-            try
-            {
-                _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/pictures.js");
-                // The browser adds a colour profile beside the picture: only the picture part is kept.
-                var preview = PicturePreview.Plain(await _module.InvokeAsync<byte[]>("toPreview", shown.Src, w, h));
-                if (PicturePreview.Problem(preview, shown.ImageWidth, shown.ImageHeight) is { } problem) previewNote = problem;
-                else picture.Preview = preview;
-            }
-            catch (JSException e)
-            {
-                previewNote = e.Message;
-            }
-            var row = await Pictures.AddAsync(picture);
-            Session.Kept(shown, row.Id);
+            var (_, previewNote) = await KeepRowAsync(shown);
             _note = "Kept inside DOG.ai." + (previewNote is null ? "" : " (No small preview was made for it: " + previewNote + ")");
         }
         catch (InvalidOperationException e)
@@ -646,6 +643,79 @@ else
         finally
         {
             _keeping = false;
+        }
+    }
+
+    /// <summary>Adds the row for a try, with its preview when one could be made. Returns the row and why there is no preview, if so.</summary>
+    private async Task<(Picture Row, string? PreviewNote)> KeepRowAsync(ImagesTry shown)
+    {
+        var picture = shown.ToKeep();
+        var (w, h) = PicturePreview.SizeFor(shown.ImageWidth, shown.ImageHeight);
+        string? previewNote = null;
+        try
+        {
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/pictures.js");
+            // The browser adds a colour profile beside the picture: only the picture part is kept.
+            var preview = PicturePreview.Plain(await _module.InvokeAsync<byte[]>("toPreview", shown.Src, w, h));
+            if (PicturePreview.Problem(preview, shown.ImageWidth, shown.ImageHeight) is { } problem) previewNote = problem;
+            else picture.Preview = preview;
+        }
+        catch (JSException e)
+        {
+            previewNote = e.Message;
+        }
+        var row = await Pictures.AddAsync(picture);
+        Session.Kept(shown, row.Id);
+        return (row, previewNote);
+    }
+
+    // ── Upscale ──
+
+    /// <summary>Why nothing can be upscaled now, or null: no picture engine, or a Draw going on (an Upscale is one too).</summary>
+    private string? UpscaleBlocked =>
+        _engine is null ? "The picture engine is not installed. Install it in " + ModelsPlaces.EnginesName + "."
+        : Session.IsDrawing && !Session.IsUpscaling ? "A Draw is going on in Make. Wait for it, or cancel it there."
+        : null;
+
+    private void OpenUpscale(UpscaleSource source, bool kept)
+    {
+        _upscale = source;
+        _upscaleOfKept = kept;
+        _error = null;
+    }
+
+    /// <summary>Kept pictures › Upscale…: the kept picture (read with its image) goes to the Upscale dialog.</summary>
+    private void UpscaleKept(Picture picture)
+    {
+        if (UpscaleSource.Of(picture) is { } source) OpenUpscale(source, kept: true);
+    }
+
+    /// <summary>An Upscale from the Make tab finished: the larger picture is a new try in the strip, beside the one it came from.</summary>
+    private void Upscaled(ImagesTry made)
+    {
+        _upscale = null;
+        _error = null;
+        _note = PictureUpscale.Done(made) + " It is a new try in the strip, beside the one it came from; Keep keeps it." + Afterwards();
+    }
+
+    /// <summary>
+    /// "Keep it" on the upscaled copy of a kept picture: a new row beside the original (which is not touched), then the
+    /// Kept pictures tab shows it. Returns what stopped it, or null.
+    /// </summary>
+    private async Task<string?> KeepUpscaledAsync(ImagesTry made)
+    {
+        try
+        {
+            var (row, _) = await KeepRowAsync(made);
+            _upscale = null;
+            if (_kept && _keptTab is not null) await _keptTab.ShowNewAsync(row.Id);
+            // Called by the dialog, not through an event of this page: say that the dialog is gone.
+            StateHasChanged();
+            return null;
+        }
+        catch (InvalidOperationException e)
+        {
+            return "The picture could not be kept: " + e.Message;
         }
     }
 

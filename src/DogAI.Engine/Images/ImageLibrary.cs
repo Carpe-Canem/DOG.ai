@@ -12,8 +12,12 @@ public sealed record ImageFile(string Folder, string RelativePath, string FullPa
     public string Name => Path.GetFileNameWithoutExtension(RelativePath);
     public ImageFileKind Kind => Verdict.Kind;
 
-    /// <summary>Usable from where it is: the right kind in the right folder.</summary>
-    public bool Usable => Misplaced is null && Kind is ImageFileKind.Checkpoint or ImageFileKind.Lora or ImageFileKind.Vae;
+    /// <summary>
+    /// Usable from where it is: the right kind in the right folder. An upscaler must also sit at the top of its folder
+    /// (the picture engine does not look inside its subfolders).
+    /// </summary>
+    public bool Usable => Misplaced is null &&
+        (Kind is ImageFileKind.Checkpoint or ImageFileKind.Lora or ImageFileKind.Vae || (Kind == ImageFileKind.Upscaler && !RelativePath.Contains('/')));
 }
 
 /// <summary>
@@ -73,6 +77,39 @@ public static class ImageLibrary
         var home = ImageFolders.For(verdict.Kind);
         var misplaced = home is not null && !string.Equals(home, folder, StringComparison.OrdinalIgnoreCase) ? home : null;
         return new ImageFile(folder, relative, path, info.Length, verdict, misplaced);
+    }
+
+    /// <summary>
+    /// The upscaler files Upscale can use: ESRGAN .safetensors files at the top of the upscalers folder (the picture
+    /// engine does not look inside its subfolders).
+    /// </summary>
+    public static IReadOnlyList<ImageFile> Upscalers(IEnumerable<ImageFile> files) =>
+        [.. files.Where(f => f.Kind == ImageFileKind.Upscaler && f.Usable && string.Equals(f.Folder, ImageFolders.Upscalers, StringComparison.OrdinalIgnoreCase))];
+
+    /// <summary>
+    /// Why the picture engine must not be pointed at this upscalers folder, in words for the owner, or null when it may.
+    /// The engine opens every .safetensors, .pth and .gguf file at the top of the folder it is given (seen in the M16
+    /// step 5 trial: each time it lists what it can do), and DOG.ai lets no program open the old pickle formats. So a
+    /// folder holding one is not handed over at all.
+    /// </summary>
+    public static string? UpscalerFolderProblem(string? folder)
+    {
+        if (folder is null || !Directory.Exists(folder)) return "There is no upscalers folder yet.";
+        try
+        {
+            var refused = Directory.EnumerateFiles(folder)
+                .Where(f => ImageFileRecognizer.RefusedExtensions.Contains(Path.GetExtension(f)))
+                .Select(Path.GetFileName)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return refused.Count == 0 ? null
+                : $"Move {refused[0]}{(refused.Count > 1 ? $" and {refused.Count - 1} more like it" : "")} out of the upscalers folder first. " +
+                  "The picture engine opens every file at the top of that folder, and DOG.ai does not let it open the old .pth-style formats: they can carry program code.";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return "The upscalers folder could not be read: " + e.Message;
+        }
     }
 
     /// <summary>What the file is. Never throws: a file that cannot be read is said to be unusable, with why.</summary>

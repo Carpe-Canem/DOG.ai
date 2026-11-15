@@ -112,6 +112,8 @@
         <div class="row kept-acts">
             <button class="btn primary" id="kept-like" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? "Its checkpoint, prompts and settings, seed included, go to the Make tab")"
                     @onclick="() => LikeAsync(viewed)">Make one like this</button>
+            <button class="btn" id="kept-upscale" disabled="@(UpscaleBlocked is not null || _busy)" title="@(UpscaleBlocked ?? "Make a larger picture from this one; it is kept as a new picture beside this one")"
+                    @onclick="() => UpscaleAsync(viewed)">Upscale…</button>
             <button class="btn" id="kept-save" disabled="@_busy" title="Save this picture as a WebP file" @onclick="() => SaveAsync(viewed)">Save as a file…</button>
             @if (_confirmRemove)
             {
@@ -143,6 +145,32 @@
 
     /// <summary>What a Draw going on in the Make tab says, or null.</summary>
     [Parameter] public string? Drawing { get; set; }
+
+    /// <summary>"Upscale…": hands the picture (with its image) to the page's Upscale dialog.</summary>
+    [Parameter] public EventCallback<Picture> Upscale { get; set; }
+
+    /// <summary>Why Upscale cannot be pressed now (no picture engine, a Draw in progress), or null.</summary>
+    [Parameter] public string? UpscaleBlocked { get; set; }
+
+    /// <summary>
+    /// A picture was kept from outside the grid (the upscaled copy of one of these): the grid is read again from the
+    /// newest and the new picture opens large.
+    /// </summary>
+    public async Task ShowNewAsync(long id)
+    {
+        await LoadCheckpointsAsync();
+        await LoadAsync(reset: true);
+        await OpenAsync(id);
+        _note = "Kept as a new picture. The one it was made from is still here.";
+        StateHasChanged();
+    }
+
+    /// <summary>The large view closes and the page's Upscale dialog opens for the picture.</summary>
+    private async Task UpscaleAsync(Picture picture)
+    {
+        Close();
+        await Upscale.InvokeAsync(picture);
+    }
 
     private const int FindDelayMs = 300;
 

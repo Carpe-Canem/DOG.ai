@@ -116,6 +116,8 @@ public sealed class SdApi(HttpClient http, int port)
             ["preview"] = request.Preview ? "proj" : "none",
             ["preview_interval"] = request.PreviewEvery,
         };
+        // A large picture is turned from the drawing into the picture piece by piece, or that step alone fills the card.
+        if (request.DecodesInTiles) body["vae_tiling_params"] = new JsonObject { ["enabled"] = true };
         if (request.ClipSkip is { } clipSkip) body["clip_skip"] = clipSkip;
         if (request.Quality is { } quality) body["output_compression"] = quality;
         if (request.Hires is { } hires)
@@ -212,6 +214,65 @@ public sealed class SdApi(HttpClient http, int port)
         }
     }
 
+    /// <summary>The upscaler files the engine found that can enlarge a picture (their names, without the extension).</summary>
+    public async Task<IReadOnlyList<string>> UpscalersAsync(CancellationToken ct = default)
+    {
+        var node = await GetJsonAsync("capabilities", ct).ConfigureAwait(false);
+        return (node?["upscalers"] as JsonArray ?? [])
+            .OfType<JsonObject>()
+            .Where(u => u["image_upscale"] is JsonValue v && v.TryGetValue<bool>(out var can) && can)
+            .Select(u => Text(u["name"]))
+            .OfType<string>()
+            .ToList();
+    }
+
+    /// <summary>The request body for enlarging a picture with an upscaler file.</summary>
+    public static JsonObject EnlargeBody(ImageEnlarge request) => new()
+    {
+        ["image"] = Convert.ToBase64String(request.Image),
+        // Always named: left out, the engine would take the first file it finds.
+        ["upscaler"] = request.Upscaler,
+        ["repeats"] = 1,
+        ["output_format"] = FormatName(ImageFormat.Webp),
+        ["output_compression"] = request.Quality,
+    };
+
+    /// <summary>
+    /// Enlarges a picture with an upscaler file. The engine answers when it is done (it is not a job: there is no
+    /// progress and nothing to cancel; giving up only stops the waiting). The engine writes an XMP part saying how many
+    /// times it enlarged; the picture comes back without it.
+    /// </summary>
+    public async Task<ImageEnlarged> EnlargeAsync(ImageEnlarge request, CancellationToken ct)
+    {
+        using var response = await http.PostAsync(_base + "upscale", JsonContent.Create(EnlargeBody(request)), ct).ConfigureAwait(false);
+        var node = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw new ImageEngineException(EnlargeRefusal(response.StatusCode, node, request.Upscaler));
+        return ParseEnlarged(node as JsonObject ?? []);
+    }
+
+    internal static ImageEnlarged ParseEnlarged(JsonObject node)
+    {
+        var image = (node["images"] as JsonArray ?? []).OfType<JsonObject>().Select(i => Text(i["b64_json"])).OfType<string>().Select(Decode).OfType<byte[]>().FirstOrDefault()
+            ?? throw new ImageEngineException("The picture engine finished but sent no picture.");
+        var plain = WebpInfo.PictureOnly(image)
+            ?? throw new ImageEngineException("The picture engine sent the enlarged picture in a form DOG.ai does not keep.");
+        var info = WebpInfo.Read(plain)!.Value;
+        return new ImageEnlarged(plain, info.Width, info.Height, Int(node["scale"]) ?? 0);
+    }
+
+    private static string EnlargeRefusal(HttpStatusCode status, JsonNode? node, string upscaler)
+    {
+        var message = Text((node as JsonObject)?["error"]) ?? "";
+        if (message.StartsWith("no compatible image upscaler", StringComparison.OrdinalIgnoreCase) ||
+            message.StartsWith("no RGB ESRGAN", StringComparison.OrdinalIgnoreCase) ||
+            message.Contains("could not be loaded", StringComparison.OrdinalIgnoreCase))
+            return $"The picture engine cannot use “{upscaler}” as an upscaler. It works with ESRGAN upscalers (for example Real-ESRGAN x4plus).";
+        if (message.Contains("must not exceed", StringComparison.OrdinalIgnoreCase))
+            return $"The enlarged picture would be larger than {ImageEnlarge.MaxSide} pixels a side, which is the most the picture engine makes.";
+        return Refusal(status, node);
+    }
+
     private static bool SameSpot(ImageProgress a, ImageProgress b) =>
         a.Stage == b.Stage && a.Step == b.Step && a.TotalSteps == b.TotalSteps && a.Pass == b.Pass;
 
@@ -283,7 +344,8 @@ public sealed class SdApi(HttpClient http, int port)
     private static string Refusal(HttpStatusCode status, JsonNode? node)
     {
         // Two shapes seen: {"code": "...", "error": "text"} and {"error": {"code": "...", "message": "text"}}.
-        var code = Text(node?["code"]) ?? Text(node?["error"]?["code"]);
+        // A third, from the upscale route: {"error": "text"} with no code (indexing a text value would throw).
+        var code = Text((node as JsonObject)?["code"]) ?? Text((node?["error"] as JsonObject)?["code"]);
         var message = node?["error"] switch
         {
             JsonObject o => Text(o["message"]),

@@ -44,6 +44,14 @@ public interface IImageEngine
     /// </summary>
     /// <exception cref="ImageEngineException">No checkpoint is loaded, the engine is missing or failed, or it refused the request.</exception>
     Task<ImageResult> DrawAsync(ImageRequest request, IProgress<ImageProgress>? progress = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Enlarges a picture with an upscaler file. It needs the engine running (so a checkpoint chosen) but draws nothing.
+    /// Cancelling <paramref name="ct"/> stops waiting; the engine finishes the enlargement by itself within seconds.
+    /// </summary>
+    /// <exception cref="ImageEngineException">No checkpoint is chosen, the upscaler cannot be used, or the engine refused.</exception>
+    Task<ImageEnlarged> EnlargeAsync(ImageEnlarge request, IProgress<ImageProgress>? progress = null, CancellationToken ct = default) =>
+        throw new ImageEngineException("This picture engine cannot enlarge pictures.");
 }
 
 /// <summary>A picture engine problem, said in plain words.</summary>

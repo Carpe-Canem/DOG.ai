@@ -34,5 +34,8 @@ public static class ImageDownloads
             "SDXL VAE (fp16 fix)", "A replacement VAE for checkpoints that give black or washed-out pictures. Most do not need it.", 334_641_162, "MIT"),
         new(ImageFolders.Loras, "stabilityai/stable-diffusion-xl-base-1.0", "sd_xl_offset_example-lora_1.0.safetensors", "sd_xl_offset_example-lora_1.0.safetensors",
             "SDXL offset LoRA", "Stability AI's small example LoRA: deeper darks and brighter lights.", 49_553_604, "CreativeML Open RAIL++-M"),
+        // Checked on Hugging Face on 2026-11-15 and tried on this PC (M16 step 5): the engine reads it as a .safetensors file.
+        new(ImageFolders.Upscalers, "Comfy-Org/Real-ESRGAN_repackaged", "RealESRGAN_x4plus.safetensors", "RealESRGAN_x4plus.safetensors",
+            "Real-ESRGAN x4plus", "An upscaler: Upscale in Images uses it to make a picture four times larger without drawing it again.", 66_857_836, "BSD 3-Clause"),
     ];
 }

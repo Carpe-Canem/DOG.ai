@@ -135,16 +135,25 @@ public static class PictureMemory
     /// and working memory that grows with the picture's size (about 4 GB per million pixels of the largest pass:
     /// 832×1216 peaked at 11.5 GB, the same with hires fix ×1.5 at 17 GB). It errs a little on the high side.
     /// </summary>
+    /// <remarks>
+    /// A picture large enough to be decoded in tiles (<see cref="ImageRequest.DecodesInTiles"/>) needs far less working
+    /// memory: about half a gigabyte per million pixels. Measured in the M16 step 5 trial above an idle model of 6.9 GB
+    /// (a 6.5 GB checkpoint): 1664×2432 peaked at 8.7 GB, 2112×3072 at 10.0 GB, 2496×3648 at 11.4 GB.
+    /// </remarks>
     public static long Need(long checkpointBytes, long loraBytes, ImageRequest request)
     {
         var file = checkpointBytes > 0 ? checkpointBytes : TypicalCheckpointBytes;
-        var megapixels = LargestSide(request.Width, request.Hires) * (double)LargestSide(request.Height, request.Hires) / 1_000_000.0;
-        return file + file / 4 + Math.Max(0, loraBytes) + (long)(megapixels * 4 * Gb);
+        var (width, height) = request.LargestPass;
+        var megapixels = width * (double)height / 1_000_000.0;
+        var perMegapixel = request.DecodesInTiles ? Gb / 2 : 4 * Gb;
+        return file + file / 4 + Math.Max(0, loraBytes) + (long)(megapixels * perMegapixel);
     }
 
-    /// <summary>A side of the largest pass. The engine rounds a hires fix size up to a multiple of 64 (832×1216 at ×1.5 came out 1280×1856).</summary>
-    private static int LargestSide(int side, HiresFix? hires) =>
-        hires is null ? side : (int)Math.Ceiling(side * hires.Scale / 64) * 64;
+    /// <summary>
+    /// What enlarging a picture with an upscaler file needs: it works through the picture in small pieces, so the
+    /// size of the picture does not matter. The trial measured half a gigabyte; this is twice that.
+    /// </summary>
+    public const long EnlargeNeed = Gb;
 
     /// <summary>
     /// True when a picture needing <paramref name="needBytes"/> fits beside everything that is on the card now. What the
@@ -182,6 +191,9 @@ public sealed class CardCoordinator : IImageEngine
 
     /// <summary>Progress stage while the chat model is taken out of graphics memory.</summary>
     public const string MakingRoom = "making_room";
+
+    /// <summary>Progress stage while an upscaler file enlarges a picture (the engine reports no steps for it).</summary>
+    public const string Enlarging = "enlarging";
 
     /// <summary>The names used on the screen and in <see cref="CardCleared"/>.</summary>
     public const string ChatName = "the chat model";
@@ -361,8 +373,43 @@ public sealed class CardCoordinator : IImageEngine
             try
             {
                 var model = _images.Model ?? throw new ImageEngineException(NoModel);
-                await MakeRoomAsync(model, request, progress, ct).ConfigureAwait(false);
+                var need = PictureMemory.Need(_fileSize(model.CheckpointPath), LoraBytes(model, request), request);
+                await MakeRoomAsync(need, "the picture", progress, ct).ConfigureAwait(false);
                 return await _images.DrawAsync(request, progress, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _turn.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _pictures);
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Enlarges a picture with an upscaler file. It takes its turn on the card like a picture, but needs so little
+    /// (<see cref="PictureMemory.EnlargeNeed"/>) that the chat model nearly always stays where it is.
+    /// </summary>
+    public async Task<ImageEnlarged> EnlargeAsync(ImageEnlarge request, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)
+    {
+        if (request.Problems() is { Count: > 0 } problems) throw new ImageEngineException(string.Join(" ", problems));
+        if (_images.Model is null) throw new ImageEngineException(NoModel);
+
+        Interlocked.Increment(ref _pictures);
+        Changed?.Invoke();
+        try
+        {
+            await SetAsidePageLoadAsync().ConfigureAwait(false);
+            if (_turn.CurrentCount == 0) progress?.Report(new ImageProgress(Waiting, null, null));
+            await _turn.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                if (_images.Model is null) throw new ImageEngineException(NoModel);
+                await MakeRoomAsync(PictureMemory.EnlargeNeed, "enlarging the picture", progress, ct).ConfigureAwait(false);
+                return await _images.EnlargeAsync(request, progress, ct).ConfigureAwait(false);
             }
             finally
             {
@@ -392,9 +439,10 @@ public sealed class CardCoordinator : IImageEngine
 
     private int _stoppedLoad;
 
-    private async Task MakeRoomAsync(ImageModel model, ImageRequest request, IProgress<ImageProgress>? progress, CancellationToken ct)
+    /// <param name="need">What the job is expected to need at its peak, in bytes.</param>
+    /// <param name="what">The job, for the log: "the picture", "enlarging the picture".</param>
+    private async Task MakeRoomAsync(long need, string what, IProgress<ImageProgress>? progress, CancellationToken ct)
     {
-        var need = PictureMemory.Need(_fileSize(model.CheckpointPath), LoraBytes(model, request), request);
         var stopped = Interlocked.Exchange(ref _stoppedLoad, 0) == 1;
         var guests = _guests.Any(g => g.HoldsMemory);
         if (!_chat.IsLoaded && !guests)
@@ -417,7 +465,7 @@ public sealed class CardCoordinator : IImageEngine
         if (PictureMemory.FitsBeside(now, need))
         {
             LastDecision = new CardDecision(CardChoice.KeptBoth, need, free);
-            Noted?.Invoke($"the picture needs about {Gb(need)} and {Gb(free)} is free ({Gb(now!.PictureBytes)} already held by the picture model), so the chat model stays loaded.");
+            Noted?.Invoke($"{what} needs about {Gb(need)} and {Gb(free)} is free ({Gb(now!.PictureBytes)} already held by the picture model), so the chat model stays loaded.");
             return;
         }
 
@@ -441,7 +489,7 @@ public sealed class CardCoordinator : IImageEngine
         LastDecision = new CardDecision(CardChoice.SetChatAside, need, free);
         Noted?.Invoke(now is null
             ? $"the graphics card could not be measured, so the chat model was set aside for the picture (it needs about {Gb(need)})."
-            : $"the picture needs about {Gb(need)} and only {Gb(free)} is free, so the chat model ({Gb(now.ChatBytes)}) was set aside. It loads again when it is next asked for.");
+            : $"{what} needs about {Gb(need)} and only {Gb(free)} is free, so the chat model ({Gb(now.ChatBytes)}) was set aside. It loads again when it is next asked for.");
     }
 
     /// <summary>

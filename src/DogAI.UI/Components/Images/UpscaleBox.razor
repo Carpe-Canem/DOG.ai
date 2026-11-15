@@ -1,0 +1,309 @@
+@* "Upscale…" in the Images section (M16 step 5), for a try on the Make tab and for a kept picture. Two ways, both tried
+   on this PC first (docs/PLAN.md): Redraw larger (the picture's own request again with a hires fix: from its seed, with
+   its checkpoint; no extra file) and Enlarge only (an ESRGAN upscaler file enlarges the picture as it is; nothing is
+   drawn). The result is a new picture beside the original, in memory like every try: on the Make tab it goes into the
+   strip; for a kept picture it is shown here and reaches the disk only when the owner presses Keep it. It runs through
+   ImagesSession (one Draw at a time; closing the dialog cancels it). *@
+@using DogAI.Engine.Images
+@implements IDisposable
+@inject ImagesSession Session
+@inject IImageEngine Card
+@inject CardCoordinator Coordinator
+@inject EngineManager Engine
+@inject IDesktopShell Desktop
+
+<Modal Title="Upscale" Class="upscale-box" OnClose="OnClose">
+    <div class="upscale" id="upscale">
+        @if (_result is { } made)
+        {
+            <img class="upscale-result" id="upscale-result" src="@made.Src" alt="The upscaled picture" />
+            <p class="small" id="upscale-meta">@PictureUpscale.ResultMeta(made)@(_after is null ? "" : "." + _after)</p>
+            @if (_error is { } keepError)
+            {
+                <div class="notice bad" id="upscale-error"><span>@keepError</span></div>
+            }
+            <div class="row upscale-row">
+                <button class="btn primary" id="upscale-keep" disabled="@_keeping" title="Keep it inside DOG.ai as a new picture; the original stays" @onclick="KeepAsync">Keep it</button>
+                <button class="btn" id="upscale-discard" disabled="@_keeping" title="Let it go; nothing was written anywhere" @onclick="OnClose">Discard</button>
+            </div>
+            <p class="small">It is in memory only until you keep it. The original picture is not changed.</p>
+        }
+        else
+        {
+            <div class="upscale-top">
+                <img class="upscale-thumb" id="upscale-thumb" src="@(Working && Session.Preview is { } live ? "data:image/png;base64," + Convert.ToBase64String(live) : _thumb)" alt="The picture" />
+                <div class="upscale-ways">
+                    <p class="small" id="upscale-now">The picture is @Source.ImageWidth × @Source.ImageHeight now@(PictureUpscale.EnlargedBy(Source.Request, Source.ImageWidth, Source.ImageHeight) is { } by ? $" (enlarged ×{by} by an upscaler file)" : "").</p>
+                    <div class="seg" role="group" aria-label="How to upscale">
+                        <button type="button" id="upscale-way-redraw" class="@(_way == UpscaleWay.Redraw ? "active" : "")" aria-pressed="@(_way == UpscaleWay.Redraw ? "true" : "false")"
+                                disabled="@Working" @onclick="() => Choose(UpscaleWay.Redraw)">@PictureUpscale.RedrawTitle</button>
+                        <button type="button" id="upscale-way-enlarge" class="@(_way == UpscaleWay.Enlarge ? "active" : "")" aria-pressed="@(_way == UpscaleWay.Enlarge ? "true" : "false")"
+                                disabled="@Working" @onclick="() => Choose(UpscaleWay.Enlarge)">@PictureUpscale.EnlargeTitle</button>
+                    </div>
+                    <p class="small" id="upscale-about">@(_way == UpscaleWay.Redraw ? PictureUpscale.RedrawAbout : PictureUpscale.EnlargeAbout)</p>
+                </div>
+            </div>
+
+            @if (_way == UpscaleWay.Redraw)
+            {
+                @if (_sizes.Count > 0)
+                {
+                    <label class="field-block">
+                        <span class="field-label">Redraw it at</span>
+                        <select class="field" id="upscale-size" disabled="@Working" @onchange="e => _scale = Scale(e)">
+                            @foreach (var s in _sizes)
+                            {
+                                <option value="@s.Scale.ToString(System.Globalization.CultureInfo.InvariantCulture)" selected="@(s.Scale == _scale)">@s.Label</option>
+                            }
+                        </select>
+                    </label>
+                    @if (Source.Request.Hires is not null)
+                    {
+                        <p class="small" id="upscale-from">× is counted from the size it was first drawn at (@Source.Request.Width × @Source.Request.Height).</p>
+                    }
+                }
+            }
+            else if (_upscalers.Count > 0)
+            {
+                <label class="field-block">
+                    <span class="field-label">Upscaler file</span>
+                    <select class="field" id="upscale-file" disabled="@Working" @onchange="e => _upscaler = e.Value?.ToString()">
+                        @foreach (var u in _upscalers)
+                        {
+                            <option value="@u.Name" selected="@(u.Name == _upscaler)">@PictureUpscale.UpscalerLabel(u.Name, u.Verdict.Enlarges)</option>
+                        }
+                    </select>
+                </label>
+                @if (Chosen?.Verdict.Enlarges is { } times)
+                {
+                    var (w, h) = PictureUpscale.Enlarged(Source.ImageWidth, Source.ImageHeight, times);
+                    <p class="small" id="upscale-becomes">It becomes @w × @h.</p>
+                }
+            }
+            else if (_ready)
+            {
+                <p class="small" id="upscale-none">@PictureUpscale.NoUpscaler</p>
+                <div class="row upscale-row">
+                    <button class="btn" id="upscale-folder" disabled="@(Root is null)" @onclick="OpenFolder">Open the upscalers folder</button>
+                    <button class="btn" id="upscale-look" @onclick="LookAsync">Look again</button>
+                    <a class="link-text small" id="upscale-get" href="@ModelsPlaces.Address(ModelsPlaces.GetPictures)">@ModelsPlaces.GetPicturesName has one to download</a>
+                </div>
+            }
+            @if (!_ready)
+            {
+                <p class="small" id="upscale-looking">Looking at the image models…</p>
+            }
+
+            @if (Why is { Length: > 0 } why && !Working)
+            {
+                <p class="small bad-text" id="upscale-why" role="alert">@why</p>
+            }
+            @if (_error is { } error)
+            {
+                <div class="notice bad" id="upscale-error"><span>@error</span></div>
+            }
+            <div class="row upscale-row">
+                @if (Working)
+                {
+                    <button class="btn" id="upscale-cancel" @onclick="Session.Cancel">Cancel</button>
+                }
+                else
+                {
+                    <button class="btn primary" id="upscale-go" disabled="@(!_ready || Why is not null)" @onclick="GoAsync">Upscale</button>
+                }
+                <span class="small" id="upscale-status" role="status">@StatusText</span>
+            </div>
+        }
+    </div>
+</Modal>
+
+@code {
+    /// <summary>The picture to upscale: a try (<see cref="UpscaleSource.Of(ImagesTry)"/>) or a kept picture.</summary>
+    [Parameter, EditorRequired] public UpscaleSource Source { get; set; } = null!;
+
+    /// <summary>The image models folder.</summary>
+    [Parameter] public string? Root { get; set; }
+
+    /// <summary>Why nothing can be upscaled now (no picture engine, a Draw going on), or null.</summary>
+    [Parameter] public string? Blocked { get; set; }
+
+    /// <summary>True on the Make tab: the result goes into the strip of tries and the dialog closes (<see cref="OnDone"/>).</summary>
+    [Parameter] public bool AddToStrip { get; set; }
+
+    [Parameter] public EventCallback<ImagesTry> OnDone { get; set; }
+
+    /// <summary>For a kept picture: keeps the result as a new row. Returns what stopped it, or null when it is kept.</summary>
+    [Parameter] public Func<ImagesTry, Task<string?>>? OnKeep { get; set; }
+
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private UpscaleWay _way = UpscaleWay.Redraw;
+    private IReadOnlyList<RedrawSize> _sizes = [];
+    private double _scale;
+    private IReadOnlyList<ImageFile> _files = [];
+    private IReadOnlyList<ImageFile> _upscalers = [];
+    private string? _upscaler, _folderProblem, _thumb, _error, _status, _after;
+    private bool _ready, _mine, _keeping;
+    private ImagesTry? _result;
+
+    private bool Working => _mine && Session.IsDrawing;
+
+    private ImageFile? Chosen => _upscalers.FirstOrDefault(u => u.Name == _upscaler);
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.Changed += Refresh;
+        Engine.Changed += Refresh;
+        _thumb = "data:image/webp;base64," + Convert.ToBase64String(Source.Image);
+        _sizes = PictureUpscale.RedrawSizes(Source.Request);
+        // Twice the first size when it can be had; else the smallest offered.
+        _scale = (_sizes.FirstOrDefault(s => s.Scale == 2) ?? _sizes.FirstOrDefault())?.Scale ?? 0;
+        await LookAsync();
+        // A picture that cannot be drawn again (its checkpoint is gone) can still be enlarged.
+        if (RedrawWhy is not null && EnlargeWhy is null) _way = UpscaleWay.Enlarge;
+        _ready = true;
+    }
+
+    /// <summary>Reads the image models folder: the upscaler files, and the files a redraw needs.</summary>
+    private async Task LookAsync()
+    {
+        var root = Root;
+        _files = root is null ? [] : await Task.Run(() => ImageLibrary.Scan(root));
+        _upscalers = ImageLibrary.Upscalers(_files);
+        var folder = root is null ? null : System.IO.Path.Combine(root, ImageFolders.Upscalers);
+        // A folder that is not there yet is only an empty one; a file the engine must not open is said.
+        _folderProblem = folder is not null && System.IO.Directory.Exists(folder) ? ImageLibrary.UpscalerFolderProblem(folder) : null;
+        if (Chosen is null) _upscaler = _upscalers.FirstOrDefault()?.Name;
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    private void Choose(UpscaleWay way)
+    {
+        _way = way;
+        _error = null;
+        _status = null;
+    }
+
+    private static double Scale(ChangeEventArgs e) =>
+        double.TryParse(e.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s) ? s : 0;
+
+    private bool Has(ImageFileKind kind, string path) => _files.Any(f => f.Usable && f.Kind == kind &&
+        string.Equals(ImageModelCatalog.Normalise(f.RelativePath), ImageModelCatalog.Normalise(path), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Why the way chosen cannot run, in words, or null.</summary>
+    private string? Why => Blocked ?? (_way == UpscaleWay.Redraw ? RedrawWhy : EnlargeWhy);
+
+    /// <summary>A redraw needs everything the picture was drawn with: its checkpoint, its VAE and its LoRAs.</summary>
+    private string? RedrawWhy =>
+        Root is null ? "No models folder is set."
+        : !Has(ImageFileKind.Checkpoint, Source.Checkpoint) ? $"Its checkpoint ({ImagesPanels.CheckpointName(Source.Checkpoint)}) is not in the checkpoints folder any more, so it cannot be drawn again. {PictureUpscale.EnlargeTitle} does not need it."
+        : Source.Vae is { } vae && !Has(ImageFileKind.Vae, vae) ? $"Its VAE ({ImagesPanels.CheckpointName(vae)}) is not in the vae folder any more, so it cannot be drawn again."
+        : (Source.Request.Loras ?? []).FirstOrDefault(l => !Has(ImageFileKind.Lora, l.Path)) is { } gone ? $"Its LoRA ({ImagesPanels.CheckpointName(gone.Path)}) is not in the loras folder any more, so it cannot be drawn again."
+        : _sizes.Count == 0 ? PictureUpscale.NoRedrawSize(Source.Request)
+        : null;
+
+    private string? EnlargeWhy =>
+        Root is null ? "No models folder is set."
+        : _folderProblem is { } folder ? folder
+        : _upscalers.Count == 0 ? "" // said by the part itself, with what to do
+        : Chosen is null ? "Choose an upscaler file."
+        : Chosen.Verdict.Enlarges is { } by && PictureUpscale.EnlargeProblem(Source.ImageWidth, Source.ImageHeight, by) is { } tooLarge ? tooLarge
+        : EngineModel() is null ? "Enlarging needs the picture engine running, and it starts only with a checkpoint. Put one in the checkpoints folder first."
+        : null;
+
+    /// <summary>The picture's own model (what a redraw loads).</summary>
+    private ImageModel OwnModel(string root) => ImageFolders.ModelFor(root, ImageModelCatalog.Normalise(Source.Checkpoint), Source.Vae, Source.Prediction);
+
+    /// <summary>
+    /// The model the engine runs with while enlarging: the one chosen now (nothing is reloaded), else the picture's own,
+    /// else any checkpoint there is. Enlarging does not read it into graphics memory.
+    /// </summary>
+    private ImageModel? EngineModel()
+    {
+        if (Root is not { } root) return null;
+        if (Card.Model is { } chosen) return chosen;
+        if (Has(ImageFileKind.Checkpoint, Source.Checkpoint)) return ImageFolders.ModelFor(root, ImageModelCatalog.Normalise(Source.Checkpoint), null, Source.Prediction);
+        return _files.FirstOrDefault(f => f.Usable && f.Kind == ImageFileKind.Checkpoint) is { } any
+            ? ImageFolders.ModelFor(root, ImageModelCatalog.Normalise(any.RelativePath), null, ImagePrediction.Auto) : null;
+    }
+
+    private string? StatusText
+    {
+        get
+        {
+            if (!Working) return _status;
+            var stage = Session.Progress is { } p ? PictureWords.Of(p)
+                : Engine.State == EngineState.Loading ? "Waiting for the chat model to finish loading…" : null;
+            return ImagesPanels.Upscaling(stage);
+        }
+    }
+
+    private async Task GoAsync()
+    {
+        if (Root is not { } root || Why is not null || Session.IsDrawing) return;
+        var (way, scale, upscaler) = (_way, _scale, _upscaler);
+        var model = way == UpscaleWay.Redraw ? OwnModel(root) : EngineModel();
+        if (model is null) return;
+        _error = null;
+        _status = null;
+        _mine = true;
+        try
+        {
+            ImageLibrary.Ensure(root);
+            var made = await Task.Run(() => Session.UpscaleAsync(Card, model, Source, way, scale, upscaler, AddToStrip));
+            _after = Coordinator.LastDecision?.Choice == CardChoice.SetChatAside ? " The chat model was set aside to make room; it loads again with your next message." : null;
+            if (AddToStrip) await OnDone.InvokeAsync(made);
+            else _result = made;
+        }
+        catch (OperationCanceledException)
+        {
+            _status = "Cancelled.";
+        }
+        catch (Exception e) when (e is ImageEngineException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _mine = false;
+        }
+    }
+
+    private async Task KeepAsync()
+    {
+        if (_result is not { } made || OnKeep is null) return;
+        _keeping = true;
+        _error = null;
+        try
+        {
+            _error = await OnKeep(made);
+        }
+        finally
+        {
+            _keeping = false;
+        }
+    }
+
+    private void OpenFolder()
+    {
+        if (Root is not { } root) return;
+        try
+        {
+            ImageLibrary.Ensure(root);
+            Desktop.OpenFolder(System.IO.Path.Combine(root, ImageFolders.Upscalers));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _error = "The folder could not be opened: " + e.Message;
+        }
+    }
+
+    public void Dispose()
+    {
+        Session.Changed -= Refresh;
+        Engine.Changed -= Refresh;
+        // Closing the dialog stops the Upscale it started (never a Draw of the Make tab's).
+        if (_mine) Session.Cancel();
+    }
+}

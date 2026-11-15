@@ -23,6 +23,10 @@ internal sealed class FakeSdServer : HttpMessageHandler
     public static readonly byte[] PreviewBytes = [0x89, (byte)'P', (byte)'N', (byte)'G', 9];
 
     public List<JsonObject> Started { get; } = [];
+
+    /// <summary>The bodies sent to the upscale route, and what it answers.</summary>
+    public List<JsonObject> Enlarged { get; } = [];
+    public (HttpStatusCode Status, string Body)? EnlargeAnswer { get; set; }
     public List<string> Requests { get; } = [];
     public int Steps { get; set; } = 3;
 
@@ -64,8 +68,15 @@ internal sealed class FakeSdServer : HttpMessageHandler
         if (request.Method == HttpMethod.Get && path == "/sdcpp/v1/capabilities")
             return Json(HttpStatusCode.OK, """
                 {"samplers":["euler","euler_a"],"schedulers":[{"name":"karras"}],
-                 "loras":[{"name":"Maid","path":"Maid_marian.safetensors","display_path":"Maid_marian.safetensors"}]}
+                 "loras":[{"name":"Maid","path":"Maid_marian.safetensors","display_path":"Maid_marian.safetensors"}],
+                 "upscalers":[{"name":"Lanczos","model":false,"image_upscale":false},{"name":"Latent","model":false,"image_upscale":false},
+                              {"name":"RealESRGAN_x4plus","model":true,"image_upscale":true},{"name":"junk","model":true,"image_upscale":false}]}
                 """);
+        if (request.Method == HttpMethod.Post && path == "/sdcpp/v1/upscale")
+        {
+            Enlarged.Add(JsonNode.Parse(await request.Content!.ReadAsStringAsync(ct))!.AsObject());
+            return EnlargeAnswer is { } answer ? Json(answer.Status, answer.Body) : new HttpResponseMessage(HttpStatusCode.NotFound);
+        }
         return new HttpResponseMessage(HttpStatusCode.NotFound);
     }
 
@@ -147,6 +158,16 @@ internal sealed class FakeImageEngine : IImageEngine
         IsRunning = false;
         Changed?.Invoke();
         return Task.CompletedTask;
+    }
+
+    /// <summary>Like the real engine: enlarging needs the program running, not the checkpoint in graphics memory.</summary>
+    public Task<ImageEnlarged> EnlargeAsync(ImageEnlarge request, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)
+    {
+        if (Model is null) throw new ImageEngineException("No picture model is loaded.");
+        lock (Events) Events.Add("enlarge");
+        progress?.Report(new ImageProgress(CardCoordinator.Enlarging, null, null));
+        var size = WebpInfo.Read(request.Image)!.Value;
+        return Task.FromResult(new ImageEnlarged(KeptPictureTests.Webp(size.Width * 4, size.Height * 4, 200), size.Width * 4, size.Height * 4, 4));
     }
 
     public async Task<ImageResult> DrawAsync(ImageRequest request, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)

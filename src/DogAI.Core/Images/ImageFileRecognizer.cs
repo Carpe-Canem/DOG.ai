@@ -65,7 +65,7 @@ public enum ImageFileKind
     /// <summary>A separate VAE.</summary>
     Vae,
 
-    /// <summary>A picture enlarger (ESRGAN kind). Not used by DOG.ai yet.</summary>
+    /// <summary>A picture enlarger (ESRGAN kind), used by Upscale in the Images section.</summary>
     Upscaler,
 
     /// <summary>A model file DOG.ai cannot use (another family, or not recognised). Shown, never hidden.</summary>
@@ -83,7 +83,9 @@ public enum ImageFileKind
 public sealed record LoraFacts(IReadOnlyList<string> Triggers, IReadOnlyList<string> CommonTags, ImageFamily? MadeFor, bool LyCoris);
 
 /// <summary>What DOG.ai made of one file. <see cref="Note"/> says it in plain words.</summary>
-public sealed record ImageFileVerdict(ImageFileKind Kind, string Note, ImageFamily? Family = null, bool VPrediction = false, LoraFacts? Lora = null);
+/// <param name="Enlarges">For an upscaler: how many times larger it makes a picture, when its header says.</param>
+public sealed record ImageFileVerdict(ImageFileKind Kind, string Note, ImageFamily? Family = null, bool VPrediction = false, LoraFacts? Lora = null,
+    int? Enlarges = null);
 
 /// <summary>
 /// Tells SDXL checkpoints, SDXL LoRAs, VAEs and upscalers apart by the tensor names in a file's header, and guesses the
@@ -163,7 +165,11 @@ public static class ImageFileRecognizer
         }
 
         if (keys.Contains("conv_first.weight") || (keys.Contains("model.0.weight") && keys.Any(k => k.StartsWith("model.1.sub.", StringComparison.Ordinal))))
-            return new ImageFileVerdict(ImageFileKind.Upscaler, "Upscaler (ESRGAN kind). DOG.ai does not use upscaler files yet.");
+        {
+            var by = UpscalerScale(header);
+            return new ImageFileVerdict(ImageFileKind.Upscaler,
+                $"Upscaler (ESRGAN kind{(by is { } n ? $", enlarges ×{n}" : "")}). Upscale in Images uses it from the top of the upscalers folder.", Enlarges: by);
+        }
 
         if (keys.Any(k => k.StartsWith("double_blocks.", StringComparison.Ordinal))) return Unusable("A Flux model. DOG.ai draws with SDXL checkpoints only for now.");
         if (keys.Any(k => k.StartsWith("down_blocks.", StringComparison.Ordinal) || k.StartsWith("text_model.", StringComparison.Ordinal)))
@@ -172,6 +178,16 @@ public static class ImageFileRecognizer
     }
 
     private static ImageFileVerdict Unusable(string note) => new(ImageFileKind.Unusable, note);
+
+    /// <summary>
+    /// How many times an ESRGAN file enlarges, told from its first layer: the network always enlarges four times, and
+    /// the ×2 and ×1 versions shrink the picture first, which shows as 12 or 48 input channels in place of 3. Null
+    /// when the file does not say (the older layout); the engine's answer after enlarging is what counts.
+    /// </summary>
+    private static int? UpscalerScale(SafetensorsHeader header) =>
+        header.Tensors.TryGetValue("conv_first.weight", out var first) && first.Length == 4
+            ? first[1] switch { 3 => 4, 12 => 2, 48 => 1, _ => null }
+            : null;
 
     private static bool IsLoraKey(string key) =>
         key.StartsWith("lora_", StringComparison.Ordinal) || key.Contains(".lora_down.", StringComparison.Ordinal) ||
