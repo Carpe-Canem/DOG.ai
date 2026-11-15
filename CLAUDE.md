@@ -117,7 +117,7 @@ Tests alone are not enough for UI work. Run the app and look.
 
 ```powershell
 pwsh tools/walkthrough.ps1 -Steps @(
-  @{ eval = "document.querySelector(`"a[href='settings']`").click()" },
+  @{ eval = "document.querySelector('#nav-settings').click()" },
   @{ eval = "document.querySelector(`"input[value='fireside']`").click()" },
   @{ shot = 'fireside-settings' })
 ```
