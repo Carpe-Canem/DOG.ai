@@ -1,20 +1,44 @@
-@* The button in a chat's or story's heading that hides or shows its whole side panel (remembered per place).
-   Not shown below 1050 px, where the side panel is hidden anyway. *@
+@* The side panel's button in a page's heading. Two buttons, and the width picks one:
+   - above 1050 px, #aside-toggle hides or shows the whole side panel (remembered per place); only where Hideable;
+   - at 1050 px and below, where the side panel is not beside the page, #aside-drawer opens it as a drawer over the
+     page (SidePanelDrawer, not remembered). Put this on every page that fills the aside region. *@
 @implements IDisposable
 @inject InterfaceMemory Memory
+@inject SidePanelDrawer Drawer
 
-<button type="button" class="btn icon aside-toggle" id="aside-toggle" aria-pressed="@(Shown ? "false" : "true")"
-        aria-label="@(Shown ? "Hide the side panel" : "Show the side panel")" title="@(Shown ? "Hide the side panel" : "Show the side panel")"
-        @onclick="ToggleAsync"><Icon Name="sidebar" Size="18" /></button>
+@if (Hideable)
+{
+    <button type="button" class="btn icon aside-toggle" id="aside-toggle" aria-pressed="@(Shown ? "false" : "true")"
+            aria-label="@(Shown ? "Hide the side panel" : "Show the side panel")" title="@(Shown ? "Hide the side panel" : "Show the side panel")"
+            @onclick="ToggleAsync"><Icon Name="sidebar" Size="18" /></button>
+}
+<button type="button" class="btn icon aside-drawer-btn" id="aside-drawer" aria-expanded="@(Drawer.Open ? "true" : "false")"
+        aria-label="@Label" title="@Label" @onclick="Drawer.Toggle"><Icon Name="sidebar" Size="18" /></button>
 
 @code {
     [Parameter, EditorRequired] public string Place { get; set; } = "";
+
+    /// <summary>Whether the owner can hide the side panel on wide screens (chats and stories). Models and Documents: no.</summary>
+    [Parameter] public bool Hideable { get; set; } = true;
+
+    /// <summary>What the narrow button says it opens, e.g. "Chat settings".</summary>
+    [Parameter] public string Label { get; set; } = "Open the side panel";
 
     private bool Shown => Memory.IsOpen(ChatPanels.AsideId(Place));
 
     private Task ToggleAsync() => Memory.SetOpenAsync(ChatPanels.AsideId(Place), !Shown);
 
-    protected override void OnInitialized() => Memory.Changed += Refresh;
+    protected override void OnInitialized()
+    {
+        Memory.Changed += Refresh;
+        Drawer.Changed += Refresh;
+    }
+
     private void Refresh() => _ = InvokeAsync(StateHasChanged);
-    public void Dispose() => Memory.Changed -= Refresh;
+
+    public void Dispose()
+    {
+        Memory.Changed -= Refresh;
+        Drawer.Changed -= Refresh;
+    }
 }

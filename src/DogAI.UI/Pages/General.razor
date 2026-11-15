@@ -13,7 +13,7 @@
             <h2>@(_conversation.Id == 0 ? "General" : _conversation.Title)</h2>
             <p>Questions, code and writing</p>
         </div>
-        <div class="head-tools"><ModelPicker /><AsideToggle Place="@ChatPanels.General" /></div>
+        <div class="head-tools"><ModelPicker /><AsideToggle Place="@ChatPanels.General" Label="Open chat settings" /></div>
     </div>
 </SectionContent>
 
@@ -131,7 +131,7 @@ else
 
 <SectionContent SectionName="composer"><ChatComposer Path="@_path" OnSend="SendAsync" /></SectionContent>
 
-<AsideRegion Place="@ChatPanels.General">
+<AsideRegion Place="@ChatPanels.General" Title="Chat settings">
     <AssistantPanel Conversation="@_conversation" OnApplied="SaveConversationAsync" />
     <DocumentsPanel Place="@ChatPanels.General" Conversation="@_conversation" Kind="general" EnsureConversation="EnsureSavedAsync" />
     <StylePanel Place="@ChatPanels.General" Value="@_conversation.PresetId" ValueChanged="SetPresetAsync" />

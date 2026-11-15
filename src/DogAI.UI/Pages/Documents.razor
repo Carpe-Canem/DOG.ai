@@ -11,6 +11,7 @@
             <h2>@(_collection?.Name ?? "Documents")</h2>
             <p>Collections of files that chats and stories can search</p>
         </div>
+        <div class="head-tools"><AsideToggle Place="documents" Hideable="false" Label="Open the search model panel" /></div>
     </div>
 </SectionContent>
 
@@ -136,14 +137,14 @@ else
     <PassageViewer ChunkId="@openHit.Chunk.Id" Similarity="@openHit.Similarity" OnClose="() => _open = null" />
 }
 
-<SectionContent SectionName="aside">
+<AsideRegion Place="documents" Hideable="false" Title="Documents">
     <SearchModelPanel />
     <Fold Id="documents-how" Title="How it works" Summary="Everything stays on this PC" OpenByDefault="false" Level="4" Class="panel side-panel">
         <p class="small">Each file is cut into passages of a few hundred words. The document search model turns every passage into numbers that capture its meaning, once.</p>
         <p class="small">When you send a message, the passages closest to it in meaning, or sharing its rare words, are sent to the model with your message. General chats cite them as [1], [2]; press a number to see the passage in its file.</p>
         <p class="small">Everything stays on this PC.</p>
     </Fold>
-</SectionContent>
+</AsideRegion>
 
 @code {
     [Parameter] public long? CollectionId { get; set; }

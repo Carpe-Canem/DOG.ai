@@ -2,9 +2,10 @@
 @implements IDisposable
 @inject AppearanceState Appearance
 @inject NavigationManager Nav
+@inject SidePanelDrawer Drawer
 
 @* Pages fill named regions (title, list, composer, aside) plus the body; the active skin decides where they go. *@
-<div class="shell skin-@Appearance.Skin" data-theme="@Appearance.EffectiveTheme" data-screen="@Screen">
+<div class="@ShellClass" data-theme="@Appearance.EffectiveTheme" data-screen="@Screen">
     <CascadingValue Name="Screen" Value="@Screen">
         @switch (Appearance.Skin)
         {
@@ -22,9 +23,12 @@
     <LinkGuard />
     <LockKey />
     <JumpBox />
+    <AsideDrawer />
 </div>
 
 @code {
+    private string ShellClass => $"shell skin-{Appearance.Skin}{(Drawer.Open ? " drawer-open" : "")}";
+
     /// <summary>First segment of the current route, or "home" at the root.</summary>
     private string Screen
     {
@@ -38,6 +42,7 @@
     protected override void OnInitialized()
     {
         Appearance.Changed += Refresh;
+        Drawer.Changed += Refresh;
         Nav.LocationChanged += OnLocationChanged;
     }
 
@@ -47,6 +52,7 @@
     public void Dispose()
     {
         Appearance.Changed -= Refresh;
+        Drawer.Changed -= Refresh;
         Nav.LocationChanged -= OnLocationChanged;
     }
 }

@@ -254,6 +254,7 @@ public partial class App : Application
         services.AddSingleton(sp => new DogAI.Core.Library.LibraryCatalog(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton(sp => new DogAI.Core.Images.ImageModelCatalog(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton(sp => new InterfaceMemory(sp.GetRequiredService<IDocumentStore>()));
+        services.AddSingleton<SidePanelDrawer>();
         services.AddSingleton<ChatService>();
         services.AddSingleton<DogAI.Core.Search.QuickJumpIndex>();
         services.AddSingleton<DogAI.Core.Search.JumpKey>();

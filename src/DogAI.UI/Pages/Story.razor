@@ -23,7 +23,7 @@
             <ModelPicker Mode="story" />
             @if (_story is not null)
             {
-                <AsideToggle Place="@ChatPanels.Story" />
+                <AsideToggle Place="@ChatPanels.Story" Label="Open story settings" />
             }
         </div>
     </div>
@@ -114,7 +114,7 @@ else
         }
     </SectionContent>
 
-    <AsideRegion Place="@ChatPanels.Story">
+    <AsideRegion Place="@ChatPanels.Story" Title="Story settings">
         <SidePanel Place="@ChatPanels.Story" Panel="@ChatPanels.StoryInfo" Title="Story" Summary="@(Interactive ? "Interactive adventure" : "Written story")">
             @if (_story.Bible.Premise.Trim().Length > 0)
             {

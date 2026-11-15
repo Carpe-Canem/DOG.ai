@@ -21,6 +21,10 @@
             <p>@Group.Title · @Place.Subtitle</p>
         </div>
         <div class="online-switch">
+            @if (HasAside)
+            {
+                <AsideToggle Place="models" Hideable="false" Label="@($"Open {AsideTitle.ToLowerInvariant()}")" />
+            }
             <DownloadsTray @bind-Open="_trayOpen" />
             <span class="offline @(Gate.IsOnline ? "on" : "")"><i class="dot"></i>@(Gate.IsOnline ? "Online" : "Offline")</span>
             @if (Gate.IsOnline)
@@ -99,9 +103,9 @@ else
     }
 }
 
-@if (ShowsHardware || ShowsCard || ShowsConnection)
+@if (HasAside)
 {
-    <SectionContent SectionName="aside">
+    <AsideRegion Place="models" Hideable="false" Title="Models">
         @if (ShowsHardware)
         {
             <div class="panel" id="hardware-panel">
@@ -144,7 +148,7 @@ else
         {
             <ConnectionPanel WithToken="@(Place.Group == ModelsPlaces.Get)" />
         }
-    </SectionContent>
+    </AsideRegion>
 }
 
 @code {
@@ -169,6 +173,14 @@ else
     private bool ShowsHardware => Place.Id is ModelsPlaces.Recommended or ModelsPlaces.Browse or ModelsPlaces.Library;
     private bool ShowsCard => ShowsHardware || Place.Id == ModelsPlaces.GetPictures || (Place.Id == ModelsPlaces.Pictures && PicturePart != ModelsPlaces.Tags);
     private bool ShowsConnection => Place.Group == ModelsPlaces.Get || Place.Id == ModelsPlaces.Engines || (Place.Id == ModelsPlaces.Pictures && PicturePart == ModelsPlaces.Tags);
+
+    private bool HasAside => ShowsHardware || ShowsConnection || (ShowsCard && Ctx.Hardware.MainGpu is not null);
+
+    /// <summary>What the side panel holds on this tab, for the button that opens it as a drawer (below 1050 px).</summary>
+    private string AsideTitle =>
+        ShowsHardware ? (ShowsConnection ? "Hardware and connection" : "Hardware")
+        : ShowsCard ? (ShowsConnection ? "Graphics memory and connection" : "Graphics memory")
+        : "Connection";
 
     private string GroupAddress(ModelsGroup group) =>
         ModelsPlaces.Address(_lastIn.GetValueOrDefault(group.Id) ?? group.Places[0].Id);

@@ -196,6 +196,39 @@ export function jumpClosed(restore) {
   if (restore && from instanceof HTMLElement && from.isConnected) from.focus();
 }
 
+// Below 1050 px the side panel is a drawer over the page (AsideDrawer). Escape closes it, unless something opened
+// over it or inside it (a dialog, a "⋯" menu, the downloads list) is there to take that Escape first; so does the
+// window growing past 1050 px, where the side panel sits beside the page again.
+let drawerTarget = null;
+let drawerCameFrom = null;
+export function drawerOpened(dotnet) {
+  drawerTarget = dotnet;
+  const active = document.activeElement;
+  drawerCameFrom = active instanceof HTMLElement && active !== document.body && !active.closest('.aside')
+    ? active : document.getElementById('aside-drawer');
+  if (!document._dogDrawer) {
+    document._dogDrawer = true;
+    document.addEventListener('keydown', e => {
+      if (!drawerTarget || e.key !== 'Escape' || e.defaultPrevented) return;
+      if (document.querySelector('.modal-back, .menu-pop, .tray-pop')) return;
+      drawerTarget.invokeMethodAsync('Close');
+    });
+    matchMedia('(max-width: 1050px)').addEventListener('change', e => {
+      if (!e.matches && drawerTarget) drawerTarget.invokeMethodAsync('Close');
+    });
+  }
+  requestAnimationFrame(() => document.getElementById('aside-close')?.focus());
+}
+
+export function drawerClosed() {
+  drawerTarget = null;
+  const from = drawerCameFrom;
+  drawerCameFrom = null;
+  const active = document.activeElement;
+  const lost = !(active instanceof HTMLElement) || active === document.body || !active.isConnected || !!active.closest('.aside');
+  if (lost && from instanceof HTMLElement && from.isConnected && from.offsetParent !== null) from.focus();
+}
+
 export function showJumpChoice() {
   document.querySelector('.jump-item.on')?.scrollIntoView({ block: 'nearest' });
 }

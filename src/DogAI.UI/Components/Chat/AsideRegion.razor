@@ -1,18 +1,42 @@
-@* Fills the "aside" region with a chat's or story's side panels, unless the owner hid the side panel (AsideToggle).
-   Hidden, the region is not filled at all, so it collapses and the chat gets the room. *@
+@* Fills the "aside" region with a page's side panels. Use it for every page with a side panel (and AsideToggle in
+   its heading). Where Hideable (chats and stories), a side panel the owner hid is not filled at all, so the region
+   collapses and the chat gets the room; the drawer below 1050 px (SidePanelDrawer) still fills it while open.
+   The drawer's head (#aside-close) is part of the region and shows only while the drawer is open. *@
 @implements IDisposable
 @inject InterfaceMemory Memory
+@inject SidePanelDrawer Drawer
 
-@if (Memory.IsOpen(ChatPanels.AsideId(Place)))
+@if (!Hideable || Drawer.Open || Memory.IsOpen(ChatPanels.AsideId(Place)))
 {
-    <SectionContent SectionName="aside">@ChildContent</SectionContent>
+    <SectionContent SectionName="aside">
+        <div class="drawer-head">
+            <span class="drawer-title">@Title</span>
+            <button type="button" class="btn icon" id="aside-close" aria-label="Close the side panel" title="Close (Esc)" @onclick="Drawer.Close"><Icon Name="close" Size="18" /></button>
+        </div>
+        @ChildContent
+    </SectionContent>
 }
 
 @code {
     [Parameter, EditorRequired] public string Place { get; set; } = "";
+    [Parameter] public bool Hideable { get; set; } = true;
+
+    /// <summary>The drawer's heading, e.g. "Chat settings".</summary>
+    [Parameter] public string Title { get; set; } = "Side panel";
+
     [Parameter] public RenderFragment? ChildContent { get; set; }
 
-    protected override void OnInitialized() => Memory.Changed += Refresh;
+    protected override void OnInitialized()
+    {
+        Memory.Changed += Refresh;
+        Drawer.Changed += Refresh;
+    }
+
     private void Refresh() => _ = InvokeAsync(StateHasChanged);
-    public void Dispose() => Memory.Changed -= Refresh;
+
+    public void Dispose()
+    {
+        Memory.Changed -= Refresh;
+        Drawer.Changed -= Refresh;
+    }
 }

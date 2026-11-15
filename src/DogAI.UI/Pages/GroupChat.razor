@@ -36,7 +36,7 @@
             <ModelPicker Mode="characters" />
             @if (_conversation.Id != 0)
             {
-                <AsideToggle Place="@ChatPanels.Group" />
+                <AsideToggle Place="@ChatPanels.Group" Label="Open chat settings" />
             }
         </div>
     </div>
@@ -130,7 +130,7 @@ else
                       Placeholder="@(Members.Count == 0 ? "Add a member in the side panel first." : $"Message {Everyone}. Enter sends, Shift+Enter adds a line.")" />
     </SectionContent>
 
-    <AsideRegion Place="@ChatPanels.Group">
+    <AsideRegion Place="@ChatPanels.Group" Title="Chat settings">
         <SidePanel Place="@ChatPanels.Group" Panel="@ChatPanels.Members" Title="Members" Summary="@(Members.Count == 0 ? "None" : Everyone)">
             @for (var i = 0; i < _members.Count; i++)
             {

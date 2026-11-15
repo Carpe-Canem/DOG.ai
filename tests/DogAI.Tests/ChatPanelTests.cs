@@ -135,6 +135,43 @@ public class ChatPanelTests
         Assert.Equal(EditorTabs.Story(StoryKind.Interactive).Count, Regex.Matches(story, "class=\"editor-tab\"").Count);
     }
 
+    [Fact]
+    public void The_narrow_drawer_opens_and_closes_without_touching_the_hidden_side_panel()
+    {
+        var drawer = new SidePanelDrawer();
+        var changes = 0;
+        drawer.Changed += () => changes++;
+        Assert.False(drawer.Open);
+        drawer.Close();
+        Assert.Equal(0, changes);
+        drawer.Show();
+        drawer.Show();
+        Assert.True(drawer.Open);
+        Assert.Equal(1, changes);
+        drawer.Toggle();
+        Assert.False(drawer.Open);
+        Assert.Equal(2, changes);
+    }
+
+    [Fact]
+    public void Every_page_with_a_side_panel_can_open_it_in_a_narrow_window()
+    {
+        // Below 1050 px the side panel is reached only through the drawer: AsideRegion carries its head and the
+        // AsideToggle in the page's heading carries the button that opens it. A bare aside would be out of reach.
+        var pages = Path.Combine(SolutionRoot(), "src", "DogAI.UI", "Pages");
+        var withAside = 0;
+        foreach (var file in Directory.EnumerateFiles(pages, "*.razor"))
+        {
+            var text = File.ReadAllText(file);
+            var name = Path.GetFileName(file);
+            Assert.DoesNotContain("SectionName=\"aside\"", text);
+            if (!text.Contains("<AsideRegion")) continue;
+            withAside++;
+            Assert.True(text.Contains("<AsideToggle"), $"{name} has a side panel but no button to open it");
+        }
+        Assert.True(withAside >= 6, $"only {withAside} pages with a side panel found");
+    }
+
     private static string SolutionRoot()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);

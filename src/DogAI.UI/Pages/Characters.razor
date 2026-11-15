@@ -32,7 +32,7 @@
             <ModelPicker Mode="characters" />
             @if (_conversation.Id != 0 && _character is not null)
             {
-                <AsideToggle Place="@ChatPanels.Character" />
+                <AsideToggle Place="@ChatPanels.Character" Label="Open chat settings" />
             }
         </div>
     </div>
@@ -151,7 +151,7 @@ else
         <ChatComposer Path="@_path" OnSend="SendAsync" Impersonate="ImpersonateAsync" Placeholder="@($"Message {_character.Name}. Enter sends, Shift+Enter adds a line.")" />
     </SectionContent>
 
-    <AsideRegion Place="@ChatPanels.Character">
+    <AsideRegion Place="@ChatPanels.Character" Title="Chat settings">
         <RoleplayPanels Conversation="@_conversation" Path="@_path" Personas="@_personas" Persona="@_persona" PersonaChanged="p => _persona = p"
                         CharacterName="@_character.Name" Streaming="@Streaming" />
         <SidePanel Place="@ChatPanels.Character" Panel="@ChatPanels.ThisChat" Title="This chat">
