@@ -75,7 +75,11 @@ public readonly record struct WebpInfo(int Width, int Height, bool Lossless, boo
     /// is. Null when the bytes are not a WebP, or the file has transparency or animation, which cannot be dropped
     /// without changing the picture.
     /// </summary>
-    public static byte[]? PictureOnly(byte[] webp)
+    /// <param name="described">
+    /// True (the default) to drop EXIF and XMP parts too. False when only a colour profile may be dropped: a file that
+    /// carries a description of any kind then gives null, for the caller to refuse.
+    /// </param>
+    public static byte[]? PictureOnly(byte[] webp, bool described = true)
     {
         if (Read(webp) is null) return null;
         if (!webp.AsSpan(12, 4).SequenceEqual("VP8X"u8)) return webp;
@@ -92,7 +96,7 @@ public readonly record struct WebpInfo(int Width, int Height, bool Lossless, boo
                 if (picture is not null) return null;
                 picture = (at, 8 + (int)size);
             }
-            else if (!name.SequenceEqual("VP8X"u8) && !name.SequenceEqual("ICCP"u8) && !name.SequenceEqual("EXIF"u8) && !name.SequenceEqual("XMP "u8))
+            else if (!name.SequenceEqual("VP8X"u8) && !name.SequenceEqual("ICCP"u8) && !(described && (name.SequenceEqual("EXIF"u8) || name.SequenceEqual("XMP "u8))))
             {
                 return null;
             }

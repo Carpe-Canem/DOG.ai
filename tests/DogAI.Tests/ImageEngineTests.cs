@@ -314,6 +314,25 @@ public class SdApiTests
     }
 
     [Fact]
+    public void A_hires_fix_never_says_finishing_between_its_two_drawings()
+    {
+        static ImageProgress At(string stage, int pass = 1) => new(stage, null, null, pass);
+        string[] Said(bool hires, params ImageProgress[] told)
+        {
+            var passes = new SdApi.HiresPasses(hires);
+            return [.. told.Select(t => passes.Told(t).Stage)];
+        }
+
+        // The engine decodes the first drawing before it enlarges it: that is on the way to the enlarged picture.
+        Assert.Equal(["conditioning", "sampling", "upscaling", "upscaling", "vae_encode", "sampling", "decoding", "done"],
+            Said(true, At("conditioning"), At("sampling"), At("decoding"), At("upscaling"), At("vae_encode"), At("sampling", 2), At("decoding", 2), At("done", 2)));
+        // The same whatever pass number the engine gives the last decoding.
+        Assert.Equal(["sampling", "upscaling", "sampling", "decoding"], Said(true, At("sampling"), At("decoding"), At("sampling", 2), At("decoding")));
+        // A picture without a hires fix is told as the engine tells it.
+        Assert.Equal(["conditioning", "sampling", "decoding", "done"], Said(false, At("conditioning"), At("sampling"), At("decoding"), At("done")));
+    }
+
+    [Fact]
     public async Task Draws_reports_each_step_once_and_returns_the_pictures_in_order()
     {
         var server = new FakeSdServer { Steps = 4 };

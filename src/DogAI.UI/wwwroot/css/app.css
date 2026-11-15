@@ -107,6 +107,9 @@ html, body { margin: 0; height: 100%; background: #16181c; }
 .kv > :last-child { text-align: right; overflow-wrap: anywhere; }
 
 .status { display: flex; gap: 18px; padding: 4px 14px; font: .78em var(--mono); color: var(--muted); border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; }
+/* In a narrow window the model's line gives way (with an ellipsis), so the speed and the memory figure stay whole. */
+.status > span { flex: none; }
+.status > span:first-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .offline { display: inline-flex; align-items: center; gap: 6px; font-size: .8em; color: var(--muted); white-space: nowrap; }
 .offline .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .offline.on { color: var(--ok); }
@@ -659,6 +662,7 @@ button.cite:hover { border-color: var(--accent); }
 .images-lora { display: grid; grid-template-columns: 1fr 76px; gap: 8px; align-items: center; padding: 3px 0; }
 .images-lora label.check { min-width: 0; }
 .images-lora-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.images-lora-gone { flex: none; white-space: nowrap; }
 .images-fold #images-reset-sampling { margin-top: 8px; }
 /* The fold's heading already says "Seed": the row's own label stays for screen readers only. */
 .images-fold .seed-row > .field-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -714,7 +718,11 @@ button.cite:hover { border-color: var(--accent); }
 .kept-empty .icon { color: var(--accent); }
 .kept-foot { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; }
 .kept-foot:empty { display: none; }
-.kept-view .picture-large { max-height: calc(100vh - 390px); min-height: 160px; }
+/* The large view fits the window whatever its facts and buttons take (two lines of facts and two rows of buttons in a
+   narrow window, more in Playhouse): the picture is the one part that gives way, down to 160 px. */
+.kept-view .modal-body { display: flex; flex-direction: column; }
+.kept-view .modal-body > * { flex: none; }
+.kept-view .modal-body > .picture-large { flex: 0 1 auto; min-height: 160px; object-fit: contain; }
 .kept-meta { margin: 0; text-align: center; overflow-wrap: anywhere; }
 .kept-prompts { display: grid; gap: 8px; }
 .kept-text { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 6.6em; overflow-y: auto; font-size: .92em;

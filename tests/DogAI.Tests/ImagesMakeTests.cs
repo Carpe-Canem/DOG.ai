@@ -159,6 +159,52 @@ public sealed class ImagesMakeTests
     }
 
     [Fact]
+    public async Task The_strip_can_be_read_while_a_picture_is_added_to_it()
+    {
+        // The page reads the tries while the thread that drew a picture adds it (seen in the app: "Collection was
+        // modified" took the page down). A list handed out never changes afterwards.
+        var engine = new PortraitTests.WebpEngine();
+        var session = new ImagesSession();
+        await Draw(session, engine, "first", "", ImagesControls.StartFor(Card) with { Count = 2 });
+
+        var held = session.Tries;
+        using var reading = held.GetEnumerator();
+        Assert.True(reading.MoveNext());
+        await Draw(session, engine, "more", "", ImagesControls.StartFor(Card) with { Count = 8 });
+        var kept = session.Kept(session.Tries[0], 7);
+        session.Unkept(7);
+        Assert.True(reading.MoveNext());
+        Assert.False(reading.MoveNext());
+        Assert.Equal(2, held.Count);
+        Assert.Equal(10, session.Tries.Count);
+        Assert.Equal(7, kept.KeptId);
+
+        // Reading from one thread while another draws: no reader ever fails.
+        using var stop = new CancellationTokenSource();
+        var reading2 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var reader = Task.Run(() =>
+        {
+            var seen = 0L;
+            while (!stop.IsCancellationRequested)
+            {
+                foreach (var t in session.Tries) seen += t.Number > 0 ? 1 : 0;
+                _ = session.Selected;
+                reading2.TrySetResult();
+            }
+            return seen;
+        });
+        // The draws below take a moment only: they begin once the reader is going, or it could miss them all.
+        await reading2.Task;
+        for (var i = 0; i < 6; i++) await Task.Run(() => Draw(session, engine, "again", "", ImagesControls.StartFor(Card) with { Count = 8 }));
+        stop.Cancel();
+        Assert.True(await reader > 0);
+        Assert.Equal(ImagesSession.Max, session.Tries.Count);
+        session.Clear();
+        Assert.Empty(session.Tries);
+        Assert.Null(session.Selected);
+    }
+
+    [Fact]
     public void The_boxes_are_filled_once_per_run_and_keep_what_is_typed()
     {
         var session = new ImagesSession();

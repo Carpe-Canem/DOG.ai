@@ -278,22 +278,33 @@ public static class LoraChips
     /// the owner's only when the card was saved and the word is not one the file gave: the card's editor starts filled
     /// with the file's words, so a card saved for its strength alone still holds them, and they are cleaned as the file's.
     /// </summary>
-    public static (IReadOnlyList<string> Chips, int Hidden) ForLora(string? cardWords, bool cardSaved, IReadOnlyList<string>? fileWords, TagList? tags = null)
+    /// <param name="max">How many words at most. The chips take <see cref="Max"/>; a LoRA's row in Models shows them all.</param>
+    public static (IReadOnlyList<string> Chips, int Hidden) ForLora(string? cardWords, bool cardSaved, IReadOnlyList<string>? fileWords, TagList? tags = null, int max = Max)
     {
         var fromFile = (fileWords ?? []).Select(TagList.Normalise).ToHashSet(StringComparer.Ordinal);
-        return For(cardWords, word => cardSaved && !fromFile.Contains(TagList.Normalise(word)), tags);
+        return For(Words(cardWords), word => cardSaved && !fromFile.Contains(TagList.Normalise(word)), tags, max);
     }
 
     /// <summary>The chips, and how many words from the file were not shown.</summary>
     /// <param name="owners">True when the words were typed by the owner on the LoRA's card (Models › On this PC › Pictures › LoRAs).</param>
     public static (IReadOnlyList<string> Chips, int Hidden) For(string? triggerWords, bool owners, TagList? tags = null) =>
-        For(triggerWords, _ => owners, tags);
+        For(Words(triggerWords), _ => owners, tags, Max);
 
-    private static (IReadOnlyList<string> Chips, int Hidden) For(string? triggerWords, Func<string, bool> ownersWord, TagList? tags)
+    /// <summary>
+    /// Words read from a LoRA file (its training tags), cleaned for showing: all that may be shown, and how many were not.
+    /// A word is taken whole, commas included.
+    /// </summary>
+    public static (IReadOnlyList<string> Words, int Hidden) FromFile(IEnumerable<string>? fileWords, TagList? tags = null) =>
+        For(fileWords ?? [], _ => false, tags, int.MaxValue);
+
+    private static IEnumerable<string> Words(string? triggerWords) =>
+        (triggerWords ?? "").Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static (IReadOnlyList<string> Chips, int Hidden) For(IEnumerable<string> words, Func<string, bool> ownersWord, TagList? tags, int max)
     {
         var chips = new List<string>();
         var hidden = 0;
-        foreach (var raw in (triggerWords ?? "").Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var raw in words)
         {
             var word = raw.Trim();
             if (word.Length == 0 || chips.Contains(word, StringComparer.OrdinalIgnoreCase)) continue;
@@ -307,7 +318,7 @@ public static class LoraChips
                 hidden++;
                 continue;
             }
-            if (chips.Count < Max) chips.Add(word);
+            if (chips.Count < max) chips.Add(word);
         }
         return (chips, hidden);
     }

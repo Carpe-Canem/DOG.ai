@@ -200,6 +200,7 @@
         : !Has(ImageFileKind.Checkpoint, Source.Checkpoint) ? $"Its checkpoint ({ImagesPanels.CheckpointName(Source.Checkpoint)}) is not in the checkpoints folder any more, so it cannot be drawn again. {PictureUpscale.EnlargeTitle} does not need it."
         : Source.Vae is { } vae && !Has(ImageFileKind.Vae, vae) ? $"Its VAE ({ImagesPanels.CheckpointName(vae)}) is not in the vae folder any more, so it cannot be drawn again."
         : (Source.Request.Loras ?? []).FirstOrDefault(l => !Has(ImageFileKind.Lora, l.Path)) is { } gone ? $"Its LoRA ({ImagesPanels.CheckpointName(gone.Path)}) is not in the loras folder any more, so it cannot be drawn again."
+        : Source.Request.Seed < 0 ? "Its seed is not known, so it cannot be drawn again."
         : _sizes.Count == 0 ? PictureUpscale.NoRedrawSize(Source.Request)
         : null;
 
@@ -241,7 +242,7 @@
 
     private async Task GoAsync()
     {
-        if (Root is not { } root || Why is not null || Session.IsDrawing) return;
+        if (Root is not { } root || Why is not null || Session.IsDrawing || _mine) return;
         var (way, scale, upscaler) = (_way, _scale, _upscaler);
         var model = way == UpscaleWay.Redraw ? OwnModel(root) : EngineModel();
         if (model is null) return;

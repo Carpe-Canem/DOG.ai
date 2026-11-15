@@ -74,9 +74,10 @@ public sealed class TagList
     /// <summary>
     /// Other spellings in the source data that are wrong for pictures, found by reading what a chat model wrote:
     /// "lean" (a build) is listed as another spelling of "leaning" (a pose); "orange" and "oranges" (most often the colour) of
-    /// "orange (fruit)" (seen in M16 step 4: autumn leaves became fruit). They are not used.
+    /// "orange (fruit)" (seen in M16 step 4: autumn leaves became fruit); "canopy" (of a tree or a bed) of
+    /// "canopy (aircraft)" (seen in M16 step 6: a fox under a tree got an aircraft's canopy). They are not used.
     /// </summary>
-    private static readonly HashSet<string> NotASpelling = new(StringComparer.Ordinal) { "lean", "orange", "oranges" };
+    private static readonly HashSet<string> NotASpelling = new(StringComparer.Ordinal) { "lean", "orange", "oranges", "canopy" };
 
     public static TagList Empty { get; } = new();
 

@@ -484,6 +484,13 @@ public sealed class ImagesCoreTests : IDisposable
         // Pressed twice, it is not added twice.
         var once = SavedPicturePrompts.Add("1girl", "lowres", saved);
         Assert.Equal(once, SavedPicturePrompts.Add(once.Prompt, once.Negative, saved));
+        // Nor when it is the whole box, or stands on a line of its own.
+        Assert.Equal("blurry", SavedPicturePrompts.AddTo("blurry", "blurry"));
+        Assert.Equal("lowres,\nblurry ", SavedPicturePrompts.AddTo("lowres,\nblurry ", "blurry"));
+        // A box that only ends with the same letters does not hold it yet: "ultra detailed" is not "detailed".
+        Assert.Equal("ultra detailed, detailed", SavedPicturePrompts.AddTo("ultra detailed", "detailed"));
+        Assert.Equal("1girl, big hat, hat", PromptPieces.Insert("1girl, big hat", "hat"));
+        Assert.Equal(("dark forest, forest, dappled sunlight", "not blurry, blurry"), SavedPicturePrompts.Add("dark forest", "not blurry", saved with { Prompt = "forest, dappled sunlight" }));
     }
 
     [Fact]
@@ -768,6 +775,37 @@ public sealed class ImagesCoreTests : IDisposable
             Assert.NotNull(await store.GetAsync(2));
             Assert.NotNull(await store.GetAsync(kept.Id));
         }
+    }
+
+    [Fact]
+    public async Task Going_back_to_before_previews_drops_only_the_preview_and_keeps_pictures_and_their_rules()
+    {
+        var paths = Install("back");
+        await using var services = Open(paths);
+        await services.MigrateDogDatabaseAsync();
+        var store = services.GetRequiredService<IPictureStore>();
+        var kept = Kept("1girl, forest", seed: 5);
+        kept.Preview = KeptPictureTests.Webp(263, 384, 500);
+        var id = (await store.AddAsync(kept)).Id;
+        var image = (await store.ImageAsync(id))!;
+
+        await using var db = await services.GetRequiredService<IDbContextFactory<DogDbContext>>().CreateDbContextAsync();
+        await db.GetService<IMigrator>().MigrateAsync("20261115125214_ModelMemory");
+
+        var connection = db.Database.GetDbConnection();
+        await connection.OpenAsync();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info('Pictures') ORDER BY cid";
+        var columns = new List<string>();
+        await using (var reader = await command.ExecuteReaderAsync())
+            while (await reader.ReadAsync()) columns.Add(reader.GetString(0));
+        Assert.DoesNotContain("Preview", columns);
+        Assert.Equal("Image", columns[^1]);
+        // The three rules that take an owner's pictures along are still there, and so is the picture.
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('IX_Pictures_OwnerKind_OwnerId', 'Pictures_message_ad', 'Pictures_character_ad', 'Pictures_persona_ad', 'Pictures')";
+        Assert.Equal(5L, await command.ExecuteScalarAsync());
+        command.CommandText = "SELECT Image FROM Pictures WHERE Id = " + id;
+        Assert.Equal(image, (byte[])(await command.ExecuteScalarAsync())!);
     }
 
     [Fact]

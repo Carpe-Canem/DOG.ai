@@ -178,13 +178,15 @@ public sealed class SdApi(HttpClient http, int port)
         var id = await StartAsync(Body(request, seed), ct).ConfigureAwait(false);
         ImageProgress? lastReported = null;
         (int? Step, int Pass)? lastPreview = null;
+        var passes = new HiresPasses(request.Hires is not null);
         try
         {
             while (true)
             {
                 var job = await JobAsync(id, ct).ConfigureAwait(false);
-                if (progress is not null && job.Progress is { } now)
+                if (progress is not null && job.Progress is { } told)
                 {
+                    var now = passes.Told(told);
                     var preview = job.Preview is not null && lastPreview != (job.PreviewStep, job.PreviewPass) ? job.Preview : null;
                     if (preview is not null) lastPreview = (job.PreviewStep, job.PreviewPass);
                     if (preview is not null || lastReported is null || !SameSpot(lastReported, now))
@@ -271,6 +273,29 @@ public sealed class SdApi(HttpClient http, int port)
         if (message.Contains("must not exceed", StringComparison.OrdinalIgnoreCase))
             return $"The enlarged picture would be larger than {ImageEnlarge.MaxSide} pixels a side, which is the most the picture engine makes.";
         return Refusal(status, node);
+    }
+
+    /// <summary>
+    /// For a picture with a hires fix: between the end of the first drawing and the start of the second the engine
+    /// reports that it is decoding, which reads as "Finishing the picture…" when the picture is only half way. Whatever
+    /// it reports in that gap is passed on as "upscaling" (the enlarging it is on the way to). A picture without a
+    /// hires fix, and everything after the second drawing began, is passed on as it is.
+    /// </summary>
+    internal sealed class HiresPasses(bool hires)
+    {
+        private bool _drew, _refining;
+
+        public ImageProgress Told(ImageProgress now)
+        {
+            if (!hires) return now;
+            if (now.Stage == "sampling")
+            {
+                _drew = true;
+                if (now.Pass > 1) _refining = true;
+                return now;
+            }
+            return _drew && !_refining && now.Stage is not ("upscaling" or "vae_encode") ? now with { Stage = "upscaling" } : now;
+        }
     }
 
     private static bool SameSpot(ImageProgress a, ImageProgress b) =>

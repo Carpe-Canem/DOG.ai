@@ -162,6 +162,30 @@ public sealed class ImagesHelpersTests
     }
 
     [Fact]
+    public void A_loras_row_in_Models_shows_every_word_cleaned_the_same_way()
+    {
+        var tags = TagList.Of("smile").Excluding(TagFingerprints.OfHashes([TagFingerprints.Of("hidden thing")]));
+
+        // The row is not limited to eight chips: a card with many words of the owner's shows them all.
+        var twelve = string.Join(", ", Enumerable.Range(1, 12).Select(i => "word" + i));
+        var (all, none) = LoraChips.ForLora(twelve, cardSaved: true, fileWords: [], tags, max: int.MaxValue);
+        Assert.Equal(12, all.Count);
+        Assert.Equal(0, none);
+
+        // The file's words on the row: cleaned as the chips are, with the count of what is not shown.
+        string[] fileWords = ["mychar_v2", @"C:\Users\maker\set", "hidden thing", "glowy style"];
+        var (row, hidden) = LoraChips.ForLora(string.Join(", ", fileWords), cardSaved: false, fileWords, tags, max: int.MaxValue);
+        Assert.Equal(["mychar_v2", "glowy style"], row);
+        Assert.Equal(2, hidden);
+
+        // The "most common training tags" of a file are a list, each taken whole (a comma inside one does not split it).
+        var (common, left) = LoraChips.FromFile(["smile", "hidden thing", "looking at viewer", "d:/sets/one", "a, b", "smile"], tags);
+        Assert.Equal(["smile", "looking at viewer", "a, b"], common);
+        Assert.Equal(2, left);
+        Assert.Empty(LoraChips.FromFile(null, tags).Words);
+    }
+
+    [Fact]
     public void A_chip_goes_after_what_is_typed_and_never_twice()
     {
         Assert.Equal("mychar_v2", PromptPieces.Insert("", "mychar_v2"));

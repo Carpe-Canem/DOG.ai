@@ -2,7 +2,7 @@
 @inject EngineManager Engine
 @inject HardwareProbe Probe
 
-<span>@Text</span>
+<span title="@Text">@Text</span>
 @if (Engine.IsLoaded && Engine.LastTokensPerSecond > 0)
 {
     <span>@Engine.LastTokensPerSecond.ToString("0.0") tok/s</span>

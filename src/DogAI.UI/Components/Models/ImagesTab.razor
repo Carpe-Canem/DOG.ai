@@ -197,11 +197,12 @@
         {
             var l = file;
             var settings = Catalog.LoraFor(l.RelativePath, l.Verdict.Lora);
+            var (words, hidden) = ShownWords(l, settings);
             <div class="model has-fit image-file" data-file="@l.RelativePath">
                 <div class="li-text">
                     <div class="model-name">@l.Name</div>
                     <div class="model-meta">@l.Verdict.Note · @Sizes.Gb(l.SizeBytes) · strength @settings.Strength.ToString("0.##")</div>
-                    <div class="model-meta">Trigger words: @(settings.TriggerWords.Length > 0 ? settings.TriggerWords : "none")</div>
+                    <div class="model-meta lora-words">Trigger words: @(words.Count > 0 ? string.Join(", ", words) : "none")@(hidden > 0 ? " · " + LoraChips.HiddenNote(hidden) : "")</div>
                 </div>
                 <div class="actions">
                     <button class="btn" aria-expanded="@(_open == l.FullPath ? "true" : "false")" @onclick="() => ToggleLora(l, settings)">Settings</button>
@@ -219,11 +220,11 @@
                             <input class="field" type="number" step="0.05" min="-5" max="5" @bind="ld.Strength" />
                             <span class="small">1 is the LoRA as trained. Detail and style LoRAs often look best between 0.4 and 0.8.</span>
                         </label>
-                        @if (l.Verdict.Lora is { CommonTags.Count: > 0 } facts)
+                        @if (l.Verdict.Lora is { CommonTags.Count: > 0 } facts && LoraChips.FromFile(facts.CommonTags) is { Words.Count: > 0 } common)
                         {
                             <div class="field-block wide-field">
                                 <span class="field-label">Most common training tags</span>
-                                <div class="chips">@foreach (var tag in facts.CommonTags) {<span class="chip">@tag</span>}</div>
+                                <div class="chips lora-common">@foreach (var tag in common.Words) {<span class="chip">@tag</span>}</div>
                             </div>
                         }
                         @if (_cardError is not null)
@@ -451,13 +452,24 @@
         _draft = settings;
     }
 
+    /// <summary>
+    /// A LoRA's trigger words as this screen shows them: words that came from the file are cleaned as the chips in Images
+    /// are (<see cref="LoraChips"/>: no paths, addresses, overlong words or left-out tags), the owner's own stay as typed.
+    /// </summary>
+    private (IReadOnlyList<string> Words, int Hidden) ShownWords(ImageFile l, LoraSettings settings) =>
+        LoraChips.ForLora(settings.TriggerWords, Catalog.IsLoraChanged(l.RelativePath), l.Verdict.Lora?.Triggers, max: int.MaxValue);
+
+    /// <summary>The card's editor starts with the words the row shows, so Save keeps what was seen.</summary>
+    private LoraDraft DraftOf(ImageFile l, LoraSettings settings) =>
+        new() { TriggerWords = string.Join(", ", ShownWords(l, settings).Words), Strength = settings.Strength };
+
     private void ToggleLora(ImageFile l, LoraSettings settings)
     {
         _cardError = null;
         _draft = null;
         if (_open == l.FullPath) { Close(); return; }
         _open = l.FullPath;
-        _loraDraft = new LoraDraft { TriggerWords = settings.TriggerWords, Strength = settings.Strength };
+        _loraDraft = DraftOf(l, settings);
     }
 
     private void Close()
@@ -506,8 +518,7 @@
     private async Task ResetLoraAsync(ImageFile l)
     {
         await Catalog.ResetLoraAsync(l.RelativePath);
-        var settings = Catalog.LoraFor(l.RelativePath, l.Verdict.Lora);
-        _loraDraft = new LoraDraft { TriggerWords = settings.TriggerWords, Strength = settings.Strength };
+        _loraDraft = DraftOf(l, Catalog.LoraFor(l.RelativePath, l.Verdict.Lora));
         _cardError = null;
     }
 

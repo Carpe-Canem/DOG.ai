@@ -146,7 +146,5 @@ public static class PictureUpscale
         return string.Join(" · ", parts);
     }
 
-    private static string Seconds(TimeSpan took) => took.TotalSeconds < 10
-        ? took.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + " s"
-        : Math.Round(took.TotalSeconds).ToString(CultureInfo.InvariantCulture) + " s";
+    private static string Seconds(TimeSpan took) => ImagesPanels.Seconds(took);
 }

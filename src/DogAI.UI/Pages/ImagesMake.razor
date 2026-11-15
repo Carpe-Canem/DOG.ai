@@ -214,7 +214,12 @@ else
                 <div class="images-lora" data-lora="@row.Path">
                     <label class="check">
                         <input type="checkbox" checked="@row.On" @onchange="e => ToggleLoraAsync(controls, row, e.Value is true)" />
-                        <span class="images-lora-name">@row.Name@(row.Missing ? " (not found)" : "")</span>
+                        <span class="images-lora-name" title="@row.Name">@row.Name</span>
+                        @if (row.Missing)
+                        {
+                            @* Its own piece, so a long name gives way and these words stay whole. *@
+                            <span class="images-lora-gone small bad-text">(not found)</span>
+                        }
                     </label>
                     <input class="field" type="number" step="0.05" min="-5" max="5" aria-label="@($"Strength of {row.Name}")" disabled="@(!row.On)"
                            value="@row.Strength.ToString(CultureInfo.InvariantCulture)" @onchange="e => StrengthAsync(controls, row, e)" />
@@ -495,6 +500,8 @@ else
         try
         {
             await Memory.SaveAsync(_checkpoint.RelativePath, _card, next);
+            // As remembered: hires numbers nobody set follow a changed step count at once, not only after a restart.
+            _controls = Memory.For(_checkpoint.RelativePath, _card);
         }
         catch (InvalidOperationException e)
         {
@@ -539,9 +546,21 @@ else
     /// A ticked LoRA's trigger words as chips: the words on its card in Models › On this PC › Pictures › LoRAs, else the ones
     /// found in the file (cleaned first: they come from the file's maker).
     /// </summary>
-    private (IReadOnlyList<string> Chips, int Hidden) Chips(LoraRow row) => row.File is { } file
-        ? LoraChips.ForLora(Catalog.LoraFor(file.RelativePath, file.Verdict.Lora).TriggerWords, Catalog.IsLoraChanged(file.RelativePath), file.Verdict.Lora?.Triggers)
-        : ([], 0);
+    private (IReadOnlyList<string> Chips, int Hidden) Chips(LoraRow row)
+    {
+        if (row.File is not { } file) return ([], 0);
+        var words = Catalog.LoraFor(file.RelativePath, file.Verdict.Lora).TriggerWords;
+        var saved = Catalog.IsLoraChanged(file.RelativePath);
+        var tags = TagList.Current;
+        // The page renders on every key and every progress report, and cleaning a file's words looks each one up in
+        // the tag list: done once per LoRA, again only when its card or the tag list in use changes.
+        if (_chips.TryGetValue(row.Path, out var held) && held.Words == words && held.Saved == saved && ReferenceEquals(held.Tags, tags)) return held.Chips;
+        var chips = LoraChips.ForLora(words, saved, file.Verdict.Lora?.Triggers, tags);
+        _chips[row.Path] = (words, saved, tags, chips);
+        return chips;
+    }
+
+    private readonly Dictionary<string, (string Words, bool Saved, TagList Tags, (IReadOnlyList<string> Chips, int Hidden) Chips)> _chips = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>A chip was clicked: its word goes after what is typed (never twice). The only way a trigger word reaches the prompt.</summary>
     private void InsertChip(string chip) => Session.Type(PromptPieces.Insert(Session.Prompt, chip), Session.Negative);
@@ -595,19 +614,22 @@ else
 
     private async Task DrawAsync()
     {
-        if (_controls is not { } controls || _checkpoint is null || _card is null || _root is null || Problems.Count > 0) return;
+        // A second click that arrives before the page has drawn Cancel in Draw's place starts nothing.
+        if (_controls is not { } controls || _checkpoint is null || _card is null || _root is null || Problems.Count > 0 || _starting || Session.IsDrawing) return;
+        _starting = true;
         _error = null;
         _note = null;
         var request = ImagesDraw.Request(Session.Prompt, Session.Negative, controls);
         var model = ImagesDraw.Model(_root, _checkpoint.RelativePath, _card, controls);
         var (checkpoint, vae, prediction, root) = (_checkpoint.RelativePath, controls.Sampling.Vae, _card.Prediction, _root);
         var clock = System.Diagnostics.Stopwatch.StartNew();
+        var chatWasIn = Engine.IsLoaded;
         var drawn = 0;
         try
         {
             ImageLibrary.Ensure(root);
             drawn = await Task.Run(() => Session.DrawAsync(Card, model, checkpoint, vae, prediction, request));
-            _note = (drawn == 1 ? $"Drawn in {clock.Elapsed.TotalSeconds:0.0} seconds." : $"{drawn} pictures drawn in {clock.Elapsed.TotalSeconds:0} seconds.") + Afterwards();
+            _note = (drawn == 1 ? $"Drawn in {clock.Elapsed.TotalSeconds:0.0} seconds." : $"{drawn} pictures drawn in {clock.Elapsed.TotalSeconds:0} seconds.") + Afterwards(chatWasIn);
         }
         catch (OperationCanceledException)
         {
@@ -617,10 +639,21 @@ else
         {
             _error = e.Message;
         }
+        finally
+        {
+            _starting = false;
+        }
     }
 
-    private string Afterwards() =>
-        (Coordinator.LastDecision?.Choice == CardChoice.SetChatAside ? " The chat model was set aside to make room; it loads again with your next message." : "") +
+    private bool _starting;
+
+    /// <param name="chatWasIn">
+    /// Whether the chat model was in memory before the Draw. With several pictures the coordinator's last decision is the
+    /// last picture's, which finds the chat model already set aside by the first.
+    /// </param>
+    private string Afterwards(bool chatWasIn = false) =>
+        (Coordinator.LastDecision?.Choice == CardChoice.SetChatAside || (chatWasIn && Engine.State == EngineState.Resting)
+            ? " The chat model was set aside to make room; it loads again with your next message." : "") +
         (Session.Dropped ? $" Only the last {ImagesSession.Max} tries are held; the oldest were let go." : "");
 
     /// <summary>

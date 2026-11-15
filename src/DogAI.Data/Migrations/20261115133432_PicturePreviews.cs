@@ -86,10 +86,9 @@ namespace DogAI.Data.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            // The image stays last; only the preview goes.
-            migrationBuilder.DropColumn(
-                name: "Preview",
-                table: "Pictures");
+            // The image stays last; only the preview goes. Dropped by SQLite itself, in place: EF's DropColumn would
+            // rebuild the table, and renaming the rebuilt table fails while the three triggers on other tables name it.
+            migrationBuilder.Sql("ALTER TABLE \"Pictures\" DROP COLUMN \"Preview\";");
         }
     }
 }

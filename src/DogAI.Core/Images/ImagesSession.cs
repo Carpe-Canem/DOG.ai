@@ -51,7 +51,11 @@ public sealed class ImagesSession
     /// </summary>
     public const int Max = 32;
 
+    // A picture is added from the thread that drew it while the page may be drawing the strip. So the list is changed
+    // only under _gate, and readers get a copy that never changes (Tries); a List read while it is changed throws.
+    private readonly object _gate = new();
     private readonly List<ImagesTry> _tries = [];
+    private volatile IReadOnlyList<ImagesTry> _shown = [];
     private int _number;
     private CancellationTokenSource? _cts;
     private int _run;
@@ -74,11 +78,19 @@ public sealed class ImagesSession
     /// <summary>True once the boxes were filled for this run of DOG.ai (they are filled only once).</summary>
     public bool Started { get; private set; }
 
-    public IReadOnlyList<ImagesTry> Tries => _tries;
+    /// <summary>The tries, oldest first, as they are now: a list of its own that later changes do not touch.</summary>
+    public IReadOnlyList<ImagesTry> Tries => _shown;
 
     /// <summary>The try shown large: the one picked, else the newest.</summary>
-    public ImagesTry? Selected => _selected is { } s && _tries.Contains(s) ? s : _tries.LastOrDefault();
-    private ImagesTry? _selected;
+    public ImagesTry? Selected
+    {
+        get
+        {
+            var (all, picked) = (_shown, _selected);
+            return picked is not null && all.Contains(picked) ? picked : all.LastOrDefault();
+        }
+    }
+    private volatile ImagesTry? _selected;
 
     /// <summary>True when the last picture added had to let an old try go.</summary>
     public bool Dropped { get; private set; }
@@ -125,10 +137,14 @@ public sealed class ImagesSession
     /// <summary>Marks a try as kept, so Keep is not offered twice for it.</summary>
     public ImagesTry Kept(ImagesTry kept, long id)
     {
-        var index = _tries.IndexOf(kept);
         var marked = kept with { KeptId = id };
-        if (index >= 0) _tries[index] = marked;
-        if (ReferenceEquals(_selected, kept)) _selected = marked;
+        lock (_gate)
+        {
+            var index = _tries.IndexOf(kept);
+            if (index >= 0) _tries[index] = marked;
+            if (ReferenceEquals(_selected, kept)) _selected = marked;
+            _shown = [.. _tries];
+        }
         Changed?.Invoke();
         return marked;
     }
@@ -140,13 +156,17 @@ public sealed class ImagesSession
     public bool Unkept(long id)
     {
         var any = false;
-        for (var i = 0; i < _tries.Count; i++)
+        lock (_gate)
         {
-            if (_tries[i].KeptId != id) continue;
-            var was = _tries[i];
-            _tries[i] = was with { KeptId = null };
-            if (ReferenceEquals(_selected, was)) _selected = _tries[i];
-            any = true;
+            for (var i = 0; i < _tries.Count; i++)
+            {
+                if (_tries[i].KeptId != id) continue;
+                var was = _tries[i];
+                _tries[i] = was with { KeptId = null };
+                if (ReferenceEquals(_selected, was)) _selected = _tries[i];
+                any = true;
+            }
+            if (any) _shown = [.. _tries];
         }
         if (any) Changed?.Invoke();
         return any;
@@ -155,8 +175,12 @@ public sealed class ImagesSession
     /// <summary>Lets every try go (nothing kept is touched: kept pictures are in the database).</summary>
     public void Clear()
     {
-        _tries.Clear();
-        _selected = null;
+        lock (_gate)
+        {
+            _tries.Clear();
+            _selected = null;
+            _shown = [];
+        }
         Changed?.Invoke();
     }
 
@@ -175,11 +199,9 @@ public sealed class ImagesSession
         ImageRequest request, CancellationToken ct = default)
     {
         if (request.Problems() is { Count: > 0 } problems) throw new InvalidOperationException(string.Join(" ", problems));
-        if (_cts is not null) throw new InvalidOperationException("A Draw is already in progress.");
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _cts = cts;
-        var run = ++_run;
         var singles = ImagesDraw.Singles(request);
+        var cts = Take(ct);
+        var run = ++_run;
         var drawn = 0;
         try
         {
@@ -211,7 +233,7 @@ public sealed class ImagesSession
         }
         finally
         {
-            if (ReferenceEquals(_cts, cts)) _cts = null;
+            Interlocked.CompareExchange(ref _cts, null, cts);
             cts.Dispose();
             Set(0, null, null);
             Of = 0;
@@ -239,9 +261,7 @@ public sealed class ImagesSession
         if (redraw?.Problems() is { Count: > 0 } problems) throw new InvalidOperationException(string.Join(" ", problems));
         if (redraw is { Seed: < 0 }) throw new InvalidOperationException("The picture's seed is not known, so it cannot be drawn again.");
         if (redraw is null && !ImageEnlarge.IsUpscalerName(upscaler)) throw new InvalidOperationException("Choose an upscaler file.");
-        if (_cts is not null) throw new InvalidOperationException("A Draw is already in progress.");
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _cts = cts;
+        var cts = Take(ct);
         var run = ++_run;
         try
         {
@@ -280,13 +300,26 @@ public sealed class ImagesSession
         }
         finally
         {
-            if (ReferenceEquals(_cts, cts)) _cts = null;
+            Interlocked.CompareExchange(ref _cts, null, cts);
             cts.Dispose();
             IsUpscaling = false;
             Set(0, null, null);
             Of = 0;
             Changed?.Invoke();
         }
+    }
+
+    /// <summary>
+    /// Takes the one place a Draw or an Upscale has. Checked and taken in one step: two calls that arrive together
+    /// (they come from pool threads) cannot both get it.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Another Draw is in progress.</exception>
+    private CancellationTokenSource Take(CancellationToken ct)
+    {
+        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (Interlocked.CompareExchange(ref _cts, cts, null) is null) return cts;
+        cts.Dispose();
+        throw new InvalidOperationException("A Draw is already in progress.");
     }
 
     private void Set(int drawing, ImageProgress? progress, byte[]? preview)
@@ -299,14 +332,18 @@ public sealed class ImagesSession
 
     private void Add(ImagesTry next)
     {
-        Dropped = false;
-        _tries.Add(next);
-        while (_tries.Count > Max && _tries.FindIndex(t => !ReferenceEquals(t, next) && !ReferenceEquals(t, _selected)) is var i and >= 0)
+        lock (_gate)
         {
-            _tries.RemoveAt(i);
-            Dropped = true;
+            Dropped = false;
+            _tries.Add(next);
+            while (_tries.Count > Max && _tries.FindIndex(t => !ReferenceEquals(t, next) && !ReferenceEquals(t, _selected)) is var i and >= 0)
+            {
+                _tries.RemoveAt(i);
+                Dropped = true;
+            }
+            _selected = next;
+            _shown = [.. _tries];
         }
-        _selected = next;
         Changed?.Invoke();
     }
 
@@ -412,7 +449,8 @@ public static class ImagesPanels
     /// <summary>What an Upscale in progress says: "Upscale · Refining the enlarged picture, step 3 of 14…".</summary>
     public static string Upscaling(string? stage) => "Upscale" + (string.IsNullOrEmpty(stage) ? " · Starting…" : " · " + stage);
 
-    private static string Seconds(TimeSpan took) => took.TotalSeconds < 10
+    /// <summary>How long something took, as the Images section writes it: "8.8 s", "25 s".</summary>
+    public static string Seconds(TimeSpan took) => took.TotalSeconds < 10
         ? took.TotalSeconds.ToString("0.0", CultureInfo.InvariantCulture) + " s"
         : Math.Round(took.TotalSeconds).ToString(CultureInfo.InvariantCulture) + " s";
 }

@@ -144,8 +144,19 @@ public sealed class SavedPicturePrompts(IDocumentStore? documents = null)
         if (string.IsNullOrWhiteSpace(added)) return typed;
         if (string.IsNullOrWhiteSpace(typed)) return added;
         var head = typed.TrimEnd().TrimEnd(',').TrimEnd();
-        if (head.EndsWith(Piece(added), StringComparison.Ordinal)) return typed;
+        if (EndsWithPiece(head, Piece(added))) return typed;
         return head.Length == 0 ? added : head + ", " + added.TrimStart().TrimStart(',').TrimStart();
+    }
+
+    /// <summary>
+    /// True when the box ends with exactly this text as its own piece: the whole box, or after a comma or a line break.
+    /// Ending with the same letters is not enough ("ultra detailed" does not already hold "detailed").
+    /// </summary>
+    private static bool EndsWithPiece(string head, string piece)
+    {
+        if (piece.Length == 0 || !head.EndsWith(piece, StringComparison.Ordinal)) return false;
+        var before = head[..^piece.Length].TrimEnd(' ', '\t');
+        return before.Length == 0 || before[^1] is ',' or '\n' or '\r';
     }
 
     private static string Piece(string text) => text.Trim().Trim(',').Trim();
