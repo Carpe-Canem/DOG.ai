@@ -3,7 +3,7 @@
 ## Status (updated 2026-11-15)
 
 - **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 (characters, lore, memory, group chat), M4 (Story), M5 (Documents), M6 (Voice), M7 (Polish), M8 (Locked data), M9 (Pictures), M10 (Defaults and Settings), M11 (Models section), M12 (Chats and editors), **M13 (Quick-jump and final pass)**. The tidy-up (M10 to M13) is finished.
-- **Next:** no milestone is planned. The follow-ups are done: the side panel below 1050 px (piece A), replies that are thinking only, and the checks that need a download (below), and the "ended by itself" note, now seen in the app. Nothing is open.
+- **Next:** **M14 (Quick fixes)**, then M15 (Graphics memory and downloads), then M16 (Images section), planned 2026-11-15 from the owner's six ideas; see "M14 to M16". M16's layout is chosen (B, Canvas, with a Kept pictures tab) and it has six steps. The earlier follow-ups are done: the side panel below 1050 px (piece A), replies that are thinking only, and the checks that need a download (below), and the "ended by itself" note, now seen in the app. Nothing is open.
 - **"Ended by itself" seen in the app (2026-11-15).** First probed outside the app (llama-server from winget on 127.0.0.1, `--jinja`, 8,192, thinking on, two tries per prompt). Qwen3.5 9B The Defiant Fable (Q8_0): "reply with nothing", a system instruction to write nothing, three example turns with a one-space answer, and "emit your end-of-turn token" all got an answer ("391", a stray `<|endoftext|>`), but "Then your whole reply must be exactly one space character and nothing else" ended with an empty answer and finish reason `stop` on one of two tries. In the app (Debug build, throwaway data folder, `D:\dogai-b` holding one hard link to that model, General default, context 8,192, General thinking on) the same message worked on the first try: a folded Thinking block and "No answer: the model thought for 189 tokens and then stopped without writing one. Press Regenerate to try again, or turn off Let the model think in General in Settings › Chats and stories." (`data-reason="ended"`, 189 tokens · 77.6 tok/s, no advice to raise the context size). Looked at in Workbench dark only. `D:\DOG.ai` had 1,443 files and the same total size before and after; `D:\dogai-b` was created for this run (it did not exist) and is left empty. No code changed.
 - **Follow-up checks after piece B (2026-11-15). Done, with one left open.** `D:\DOG.ai` had 1,443 files and the same total size before and after; the model link was removed afterwards. Debug build, throwaway data folder `D:\dogai-b\data`, models folder `D:\dogai-b\models` holding one hard link to Huihui Qwen3.5 9B, context size 8,192; no code changed in the app.
   - *Stopped while thinking, works.* A character chat (Tobin) and a group chat (Mara and Tobin), with "Let the model think in character and group chats" switched on: Stop pressed 6 s into the reply, while it was still thinking. Both showed "Stopped while the model was still thinking, so there is no answer. Press Regenerate to write it again." under a folded Thinking block (`data-reason="stopped"`). In the group chat the round ended there: Tobin was not asked, nothing was still writing 4 s later. Looked at in Workbench dark.
@@ -569,7 +569,114 @@ Each ends with a runnable app, passing tests, and a git commit.
 | M12 ✅ | Chats and editors | Collapsible chat side panels; voice buttons only when they can work; character and story editors in tabs (details below) |
 | M13 ✅ | Quick-jump and final pass | Ctrl+K to jump anywhere; help text trimmed on the remaining screens; whole-app check (details below) |
 
+| M14 | Quick fixes | Keep or randomise the seed in Edit and redraw; Settings and Search buttons go back on a second click (details below) |
+| M15 | Graphics memory and downloads | Unload everything button; the document search model let go sooner; downloads allowed for models that are too large; a mark for chat models that fit beside the picture model (details below) |
+| M16 | Images section | A section of its own for making pictures, with the feel of automatic1111. Design choice first, then its own steps (details below) |
+
 Possible later additions, not planned: local OpenAI-compatible API for other tools, image understanding.
+
+## M14 to M16: The owner's six ideas (planned 2026-11-15)
+
+The owner's list, numbered in the order given:
+
+1. Edit in the picture maker should let the owner keep or randomise the seed.
+2. Clicking Settings a second time returns to the screen the owner was on (a chat, a story…); the same for Search.
+3. A new section, Images, devoted to making pictures, with the feel of automatic1111.
+4. An Unload button under "Graphics memory" that unloads all models.
+5. Every model can be downloaded, even one that will not fit; models small enough to sit in memory beside the picture model are marked.
+6. The document search model is unloaded when it is not being used.
+
+Order: the two small ones first (M14), then the memory work (M15), because the Images section (M16) leans on both: it reuses the seed control and makes the card busier than any screen so far.
+
+### M14: Quick fixes (ideas 1, 2)
+
+1. **Seed in Edit and redraw.** Today Edit always keeps the seed and Try again always takes a new one (`PictureMaker.razor`). Edit gets a seed row: the number (editable), **Keep** (the default, as now) and **New seed**. Build it as a small shared component, since the Images section needs the same control. A kept picture redrawn with a new seed is a new try; the kept one is not touched until Use.
+2. **Settings and Search go back.** The three shells link straight to `settings` and `search`. A small Core service remembers the last address that was neither; clicking the button while already there (any `settings/<category>`, or Search) returns to it, and with nothing remembered goes to the look's start page. The button's tooltip says "Back to …" while it would go back. Escape is left alone (dialogs and the drawer use it). Ctrl+K keeps working as now.
+
+Checks: both in all three looks, dark and light; back from Settings into a chat, a group chat, a story, a character editor with unsaved typing (it must still be there, or the owner is warned as today), and Models.
+
+### M15: Graphics memory and downloads (ideas 4, 5, 6)
+
+1. **Unload everything** (`#unload-all`) under "Graphics memory" in the Models side panel: the chat model (through `ModelLauncher.UnloadByUserAsync`, so it is the owner's unload and nothing brings it back until asked), the picture model (`ImageServer`), the document search model (`EmbeddingServer`) and any speech model that holds graphics memory. It takes a card turn like every other change to the card; while a reply or a picture is being made it is disabled and says why. The readout updates afterwards.
+2. **The document search model is let go sooner.** It already stops by itself, but only after 10 minutes unused (`EmbeddingServer.IdleStop`). New: 2 minutes, like the picture model; at once when the card needs the room (a chat model load or a picture that would not fit otherwise); and never while indexing or a search is running. The Documents side panel says whether it is in memory.
+3. **Download anything.** `DownloadButton` is disabled for a model judged "Too large for this PC" (Recommended, Browse). It becomes enabled, with the warning kept visible beside it and one confirmation naming the size and why it will not run here. Loading such a model stays refused as today.
+4. **"Fits beside pictures" mark.** A chat model whose need at the chosen context size, plus the picture model's need (`PictureMemory`, for the checkpoint in use at Standard), fits the card gets a chip on Recommended, Browse and On this PC › Chat models, with one line of explanation behind an ⓘ. Logic in Core with tests; "How fit is judged" in the side panel gains a line. No chip when there is no picture engine or checkpoint.
+
+Checks: real models on a throwaway folder of hard links; graphics memory read before and after Unload everything; a picture drawn in a chat with a marked model (the chat model must not be set aside) and with an unmarked one (it must be).
+
+### M16: Images section (idea 3). Design first
+
+**What is settled already** (follows from M9, not up for choice): it draws through `CardCoordinator`; pictures that are tried stay in memory and only kept ones reach the disk, in the `Pictures` table (so they are encrypted with the lock, in backups, and follow a portable move); checkpoints, LoRAs, VAE and their settings come from `ImageModelCatalog`; prompts are never logged; all three looks, dark and light; a place in the navigation, in Ctrl+K and a colour in Playhouse.
+
+**Controls every design has:** prompt, negative prompt, checkpoint, LoRAs with strengths, sampler, steps, guidance, width and height (with the Tall / Square / Wide shortcuts), seed (the M14 control), hires fix, how many pictures, Draw and Cancel, and for each result: keep, redraw, reuse its settings, save as a file.
+
+**Four layouts to choose from:**
+
+- **A. Classic.** The automatic1111 page: both prompt boxes across the top with Draw beside them; controls bottom left; the picture and a strip of tries bottom right; LoRAs as a fold under the prompts. Most familiar; the busiest screen in the app and the weakest in a narrow window.
+- **B. Canvas.** The picture fills the page. The prompt boxes sit at the bottom where the chat box is; every control is in the side panel as folds (Model, LoRAs, Size, Sampling, Seed), which becomes the drawer below 1050 px. Uses the regions every look already has, so it needs the least new styling. Kept pictures are a second tab.
+- **C. Sessions.** Like chats: the list holds picture sessions; the page is a feed of what each prompt produced, newest last; the prompt box is at the bottom and controls are in the side panel. Good for working on one idea over many tries; needs a new table for sessions, and decides what a "session" keeps.
+- **D. Gallery first.** The section opens on a grid of kept pictures (filter by checkpoint, search the prompt). "New picture" or "Make one like this" opens the workspace (layout B) over it. Best if the point is the collection; one more click before drawing.
+
+Recommended: **B, with D's gallery as its second tab.** It is the automatic1111 controls in this app's own layout, and the only one that works at every window width without new rules.
+
+**To decide before the steps are planned:**
+
+1. The layout (A to D, or a mix).
+2. Prompts: typed raw as in automatic1111, or with the tag check offered (a "check my tags" button; never automatic).
+3. Whether the rating words from Settings › Pictures are added here, or the prompt is sent exactly as typed.
+4. A helper where the chat model turns a sentence into a prompt (the M9 planner), or none.
+5. Several pictures per Draw: one after another with the tries strip, or a grid.
+6. Kept pictures: only inside DOG.ai (encrypted with the lock), with "Save as a file" per picture, or also a folder DOG.ai writes to.
+7. Later extras that would change the layout if wanted: image-to-image, inpainting, upscaling a kept picture.
+
+**Decided by the owner (2026-11-15):**
+
+- Point 1, the layout: **B, Canvas, with a Kept pictures tab** (chosen from wireframes of the four). Mock-up in the three looks, dark and light, both tabs: `docs/mockups/images-section.html` (open it in a browser; it is a drawing, not app code).
+- Points 2 and 3, prompts: sent exactly as typed, as in automatic1111. A "Check my tags" button offers corrections; nothing is changed or added automatically, rating words included.
+- Point 4: yes, a prompt helper (the chat model turns a sentence into a prompt the owner can then edit).
+- Point 5: yes, several pictures per Draw, one after another into the tries strip.
+- Point 6: kept pictures live only inside DOG.ai (the `Pictures` table), with "Save as a file" per picture. No output folder.
+- Point 7: upscaling a kept picture is in from the start. Image-to-image and inpainting are not.
+
+**The screen (layout B).** Address `images` (Make) and `images/kept`; a fifth entry in the navigation between Story and Models, in Ctrl+K, on Playhouse's home screen, with its own Playhouse colour (`--c-images`, amber in the mock-up).
+
+- *Make.* The picture fills the page with the strip of tries beside it; under it one line of facts (size, seed, sampler, steps, time) and **Keep**, **Use these settings**, **Upscale…**, **Save as a file…**. The prompt and negative prompt boxes sit where the chat box is, with **Write it for me…** (the prompt helper), **Check my tags**, **Cancel** and **Draw**. The header has the two tabs, the checkpoint button and the side panel button.
+- *Side panel* (`AsideRegion`, folds with one-line summaries, a drawer below 1050 px): Model (checkpoint, VAE), LoRAs (tick and strength; a LoRA's trigger words shown as chips that insert into the prompt on a click, never by themselves), Size (Tall / Square / Wide and width, height), Sampling (sampler, scheduler, steps, guidance, clip skip), Seed (the M14 control), Hires fix, Pictures per Draw (1 to 8, `ImageRequest.MaxCount`).
+- *Kept pictures.* A grid, newest first, with a box that finds words in the prompt and filters for checkpoint and shape. A picture opens large with **Make one like this** (its settings and seed go to Make), **Upscale…**, **Save as a file…** and **Remove**.
+
+**Rules the steps follow** (defaults chosen here; say so to change one):
+
+- A new control starts from the checkpoint's own settings card and is then remembered (in `InterfaceMemory`'s way: one JSON document of its own, not `AppSettings`). **The prompt boxes are not remembered across a restart**: a prompt reaches the disk only inside a kept picture's row, the M9 rule.
+- **Saved prompts, so common ones are not typed again** (owner asked, 2026-11-15; like automatic1111's styles). A saved prompt is a name with a prompt and a negative prompt, kept only because the owner pressed Save: one JSON document in the settings store (inside the database, under the lock, in backups), edited like the chat prompt library. A **Saved prompts** button beside the boxes lists them; one click puts a saved prompt in (**Replace**) or adds it to what is typed (**Add**), and **Save these as…** stores what is in the boxes now. One of them can be marked **Start with this**, and the boxes then start filled with it after a restart. With none marked, the boxes start with the chosen checkpoint's own quality words and negative prompt from its settings card (`QualityBefore`, `QualityAfter`, `Negative`), as visible, editable text. Storage and logic in step 1; the button and list in step 2.
+- Kept pictures get a new owner kind (`PictureOwners.Images`) with no one-row limit. The tab lists only these; portraits and story or chat pictures stay where they are.
+- The grid needs small previews. They are made in memory and stored in the picture's own row (a new column, so inside the database and under the lock), never as files.
+- Nothing is added to what is typed: no quality words, no rating words, no LoRA triggers. `PictureLogFilter.Sending` is still told before every request, and everything draws through `CardCoordinator`.
+- Save as a file goes through `IDesktopShell.SaveFileAsync`, so the one-time plain-export note shows while locked.
+
+### M16 steps, and which model to use for each
+
+One step per session, each ending in a build, passing tests, a look at the app, this plan's Status updated and a commit, then the hand-over. M14 and M15 come first.
+
+| # | Step | Delivers | Model / effort |
+|---|---|---|---|
+| 1 | **Core and storage** | The raw request (typed values to `ImageRequest`, nothing added), the remembered controls, the `Images` owner kind, the preview column and its migration, listing and searching kept pictures a page at a time. Tests; lock, backup, restore and portable checks for the new column; removed-data check. No screen yet. | Fable 5.2, high |
+| 2 | **Make** | The section, navigation, Ctrl+K, Playhouse colour; the Make tab with every control, Draw and Cancel, progress, several pictures per Draw, the tries strip (`PictureTries`), Use these settings, Keep. Real pictures drawn. All three looks, dark and light; the drawer at 700 and 1000 px. | Opus 5.5, high |
+| 3 | **Kept pictures** | The grid with previews, find and filters, the large view, Make one like this, Save as a file, Remove. All three looks, dark and light. | Opus 5.5, high |
+| 4 | **Helpers** | Write it for me (a DOG.ai model job like the planner: schema, no thinking, answer checked, result put in the box for the owner to edit; the chat model comes back through `EnsureReadyAsync`), Check my tags (`TagList.Current`; offers each change, applies only what is accepted), LoRA trigger chips. | Opus 5.5, high |
+| 5 | **Upscale** | A trial first: what the picture engine can do to an existing picture (an upscaler file such as ESRGAN, or only a hires redraw from the seed), and what each costs in graphics memory and time. Then Upscale… on a try and on a kept picture, kept as a new picture beside the original. `PictureMemory` taught the larger sizes. | Fable 5.2, high |
+| 6 | **Finish** | Leak check as in M9 step 9 (marker words in prompts and negative prompts, tried and kept, plain and locked), the published portable build, `/code-review high`, every Images screen in three looks dark and light and narrow, `CLAUDE.md` ("How the Images section works"). | Fable 5.2, xhigh |
+
+Why this split: steps 1, 5 and 6 are where a wrong judgement costs most (private pictures and prompts on disk, what the engine can really do, the last look). Steps 2 to 4 reuse what M9 built (the picture maker, `MessagePictures`, the planner, the tag list).
+
+### Sessions, and which model to use (M14 to M16)
+
+| # | Milestone | Model / effort |
+|---|---|---|
+| M14 | Quick fixes | Opus 5.5, high |
+| M15 | Graphics memory and downloads | Fable 5.2, high |
+| M16 | Images section | Six steps, each with its own; see "M16 steps" |
+
+Why: M14 repeats patterns the code has. M15 changes who holds the graphics card and when, where a wrong judgement leaves a model stuck or a picture waiting.
 
 ## M10 to M13: A tidier interface (planned 2026-11-14; all four done 2026-11-14)
 

@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DOG.ai Images section mock-up</title>
+<style>
+/* Mock-up only. Colours, fonts and radii are copied from the tokens in src/DogAI.UI/wwwroot/css/app.css. */
+body { margin: 0; padding: 20px; background: #101114; color: #e6e8eb; font: 14px "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+.bar { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.bar b { font-weight: 600; }
+.pick { display: inline-flex; border: 1px solid #3a3f48; border-radius: 8px; overflow: hidden; }
+.pick button { background: none; color: #aab1bd; border: 0; padding: 7px 14px; font: inherit; cursor: pointer; }
+.pick button.on { background: #f2a93b; color: #1a1206; }
+.note { color: #8d95a2; margin: 0 0 18px; max-width: 900px; }
+h2 { font-size: 15px; font-weight: 600; margin: 26px 0 8px; }
+.scroll { overflow-x: auto; border-radius: 10px; }
+
+.skin-workbench { --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; --read: var(--ui); --fs: 13px; --r: 6px;
+  --bg: #16181c; --surface: #1c1f24; --surface2: #262a31; --line: #2f343c; --text: #e6e8eb; --muted: #8d95a2; --accent: #f2a93b; --ink: #1a1206; }
+.light .skin-workbench { --bg: #f3f4f6; --surface: #fff; --surface2: #e9ebef; --line: #d7dbe1; --text: #1b1e23; --muted: #5d6673; --accent: #a35f00; --ink: #fff; }
+.skin-fireside { --ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; --read: Georgia, Cambria, "Times New Roman", serif; --fs: 14px; --r: 10px;
+  --bg: #1c1713; --surface: #241e19; --surface2: #30281f; --line: #3d3229; --text: #ede4d8; --muted: #a69886; --accent: #e08a5c; --ink: #1c1713; }
+.light .skin-fireside { --bg: #f5efe4; --surface: #fbf7ef; --surface2: #ece3d3; --line: #dccfba; --text: #2b241d; --muted: #75675a; --accent: #a8481f; --ink: #fff; }
+.skin-playhouse { --ui: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; --read: var(--ui); --fs: 15px; --r: 18px;
+  --bg: #16132b; --surface: #201c3b; --surface2: #2c2752; --line: #3a3468; --text: #f4f1ff; --muted: #aaa4d1; --accent: #ffb35c; --ink: #12102a; }
+.light .skin-playhouse { --bg: #f2efff; --surface: #fff; --surface2: #ece8ff; --line: #d9d2f6; --text: #211c3c; --muted: #655f88; --accent: #a85a00; --ink: #fff; }
+
+.shell { min-width: 1080px; height: 750px; background: var(--bg); color: var(--text); font: var(--fs) var(--ui); overflow: hidden; }
+.shell * { box-sizing: border-box; }
+.nav-btn { color: var(--muted); display: flex; align-items: center; gap: 6px; border-radius: var(--r); white-space: nowrap; }
+.nav-btn.active { color: var(--text); }
+.dot { width: 18px; height: 18px; border: 1.5px solid currentColor; border-radius: 5px; flex: none; }
+.center { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.head h3 { margin: 0; font-size: 1.15em; font-weight: 600; }
+.tabs { display: flex; gap: 4px; }
+.tab { padding: 5px 12px; border-radius: var(--r); color: var(--muted); cursor: pointer; border: 1px solid transparent; }
+.tab.on { color: var(--text); background: var(--surface2); border-color: var(--line); }
+.head-tools { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: var(--r); padding: 5px 11px; font: inherit; white-space: nowrap; }
+.btn.primary { background: var(--accent); color: var(--ink); border-color: var(--accent); font-weight: 600; }
+.btn.quiet { color: var(--muted); }
+.main { flex: 1; min-height: 0; padding: 14px 18px 8px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.stage { flex: 1; min-height: 0; display: flex; gap: 14px; align-items: stretch; }
+.stage svg { height: 100%; width: auto; border-radius: var(--r); display: block; }
+.tries { display: flex; flex-direction: column; gap: 8px; }
+.tries svg { height: 74px; border-radius: calc(var(--r) / 2); opacity: .75; }
+.tries svg.on { outline: 2px solid var(--accent); opacity: 1; }
+.meta { color: var(--muted); font-size: .9em; }
+.acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.composer-wrap { padding: 8px 18px 12px; }
+.composer { border: 1px solid var(--line); background: var(--surface); border-radius: var(--r); padding: 8px 10px; display: grid; gap: 6px; }
+.field { display: grid; grid-template-columns: 76px 1fr; gap: 8px; align-items: start; }
+.field label { color: var(--muted); font-size: .88em; padding-top: 5px; }
+.box { background: var(--bg); border: 1px solid var(--line); border-radius: calc(var(--r) / 1.5); padding: 5px 8px; min-height: 30px; line-height: 1.45; }
+.box.two { min-height: 50px; }
+.box i { color: var(--muted); font-style: normal; }
+.send { display: flex; gap: 8px; align-items: center; }
+.send .grow { flex: 1; color: var(--muted); font-size: .88em; }
+.status { border-top: 1px solid var(--line); padding: 4px 16px; color: var(--muted); font-size: .85em; display: flex; gap: 16px; }
+.aside { overflow: hidden; padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+.fold { border-bottom: 1px solid var(--line); padding-bottom: 9px; display: grid; gap: 6px; }
+.fold-name { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: .82em; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.fold-name span { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sel { background: var(--bg); border: 1px solid var(--line); border-radius: calc(var(--r) / 1.5); padding: 4px 8px; display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; overflow: hidden; }
+.two-up { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.seg span { flex: 1; text-align: center; padding: 4px 0; color: var(--muted); }
+.seg span.on { background: var(--surface2); color: var(--text); }
+.lora { display: flex; justify-content: space-between; gap: 6px; }
+.lora em { color: var(--muted); font-style: normal; }
+.small { color: var(--muted); font-size: .86em; }
+.gallery { display: none; flex: 1; min-height: 0; padding: 14px 18px; flex-direction: column; gap: 12px; }
+.g-tools { display: flex; gap: 8px; align-items: center; }
+.g-tools .box { flex: 1; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; overflow: hidden; flex: 1; min-height: 0; align-content: start; grid-auto-rows: max-content; }
+.grid svg { width: 100%; height: auto; border-radius: calc(var(--r) / 1.5); display: block; }
+.kept .make { display: none; }
+.kept .gallery { display: flex; }
+.kept .aside .fold:not(.about) { display: none; }
+.aside .about { display: none; }
+.kept .aside .about { display: grid; }
+
+.skin-workbench { display: flex; }
+.skin-workbench .rail { flex: none; width: 64px; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 6px; }
+.skin-workbench .nav-btn { flex-direction: column; gap: 3px; font-size: 10px; width: 54px; padding: 8px 0; }
+.skin-workbench .nav-btn.active { background: var(--surface2); box-shadow: inset 2px 0 0 var(--accent); }
+.skin-workbench .rail .foot { margin-top: auto; display: grid; gap: 6px; }
+.skin-workbench .aside { flex: none; width: 290px; background: var(--surface); border-left: 1px solid var(--line); }
+
+.skin-fireside, .skin-playhouse { display: flex; flex-direction: column; }
+.top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.top .word { font-weight: 600; }
+.top .nav { display: flex; }
+.top .tools { justify-self: end; display: flex; gap: 12px; color: var(--muted); }
+.body { flex: 1; min-height: 0; display: flex; }
+.skin-fireside .top { padding: 10px 24px; border-bottom: 1px solid var(--line); }
+.skin-fireside .word { font: 600 1.25em var(--read); }
+.skin-fireside .nav-btn { border-radius: 0; padding: 8px 14px; border-bottom: 2px solid transparent; }
+.skin-fireside .nav-btn .dot { display: none; }
+.skin-fireside .nav-btn.active { border-bottom-color: var(--accent); font-weight: 600; }
+.skin-fireside .head { border: 0; flex-direction: column; gap: 8px; padding: 18px 20px 0; position: relative; }
+.skin-fireside .head h3 { font: 600 1.6em var(--read); }
+.skin-fireside .head-tools { position: absolute; right: 16px; top: 18px; }
+.skin-fireside .btn, .skin-fireside .seg, .skin-fireside .tab { border-radius: 999px; }
+.skin-fireside .aside { flex: none; width: 250px; padding: 24px 22px 12px 6px; font-size: .88em; }
+.skin-fireside .fold { border-bottom: 0; border-top: 1px solid var(--line); padding: 9px 0 0; }
+.skin-fireside .fold-name { font: italic 1.15em var(--read); text-transform: none; letter-spacing: 0; color: var(--text); }
+.skin-fireside .fold-name span { font: .8em var(--ui); color: var(--muted); align-self: center; }
+.skin-fireside .composer { border-radius: 20px; padding: 10px 14px; max-width: 760px; margin: 0 auto; }
+.skin-fireside .status { display: none; }
+
+.skin-playhouse { background: radial-gradient(900px 500px at 85% -10%, color-mix(in srgb, var(--accent) 22%, transparent), transparent), var(--bg); }
+.skin-playhouse .top { padding: 12px 18px; }
+.skin-playhouse .word { font-weight: 800; font-size: 1.15em; }
+.skin-playhouse .top .nav { background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+.skin-playhouse .nav-btn { border-radius: 999px; padding: 7px 13px; font-weight: 600; }
+.skin-playhouse .nav-btn .dot { display: none; }
+.skin-playhouse .nav-btn.active { background: var(--accent); color: var(--ink); }
+.skin-playhouse .body { gap: 14px; padding: 0 18px 18px; }
+.skin-playhouse .center, .skin-playhouse .aside { background: var(--surface); border: 1px solid var(--line); border-radius: 22px; }
+.skin-playhouse .aside { flex: none; width: 290px; }
+.skin-playhouse .head { border: 0; padding: 14px 20px 0; }
+.skin-playhouse .head h3 { font-size: 1.25em; font-weight: 800; }
+.skin-playhouse .btn, .skin-playhouse .seg, .skin-playhouse .tab { border-radius: 999px; }
+.skin-playhouse .tab.on { background: var(--accent); color: var(--ink); border-color: var(--accent); }
+.skin-playhouse .composer { border-radius: 22px; background: var(--surface2); padding: 10px 14px; }
+.skin-playhouse .status { display: none; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <b>Images section, layout B</b>
+  <span class="pick" id="theme"><button class="on" data-v="dark">Dark</button><button data-v="light">Light</button></span>
+  <span class="pick" id="tab"><button class="on" data-v="make">Make</button><button data-v="kept">Kept pictures</button></span>
+</div>
+<p class="note">A mock-up, not the app: nothing here draws. The switches above change all three looks. The picture is a stand-in. Below 1050 px the side panel becomes the drawer, as on every other screen.</p>
+
+<h2>Workbench</h2>
+<div class="scroll"><div class="shell skin-workbench" data-skin="workbench"></div></div>
+<h2>Fireside</h2>
+<div class="scroll"><div class="shell skin-fireside" data-skin="fireside"></div></div>
+<h2>Playhouse</h2>
+<div class="scroll"><div class="shell skin-playhouse" data-skin="playhouse"></div></div>
+
+<script>
+const sky = ['#f6b26b', '#7fb2e5', '#b39ddb', '#ef9a9a', '#80cbc4', '#ffcc80', '#90caf9', '#ce93d8', '#a5d6a7', '#f48fb1'];
+function pic(i, cls) {
+  const s = sky[i % sky.length], shift = (i * 37) % 120;
+  return `<svg class="${cls || ''}" viewBox="0 0 208 304" role="img" aria-label="Stand-in picture ${i + 1}">
+    <rect width="208" height="304" fill="${s}"/>
+    <circle cx="${60 + shift}" cy="${70 + (i % 3) * 14}" r="26" fill="#fff3d6"/>
+    <polygon points="0,220 60,150 120,210 170,160 208,200 208,304 0,304" fill="#5d6d7e"/>
+    <polygon points="0,250 80,200 150,245 208,225 208,304 0,304" fill="#34495e"/>
+    <rect x="${84 + (i % 2) * 20}" y="150" width="18" height="60" fill="#2c3e50"/><rect x="${78 + (i % 2) * 20}" y="140" width="30" height="14" fill="#2c3e50"/>
+  </svg>`;
+}
+const nav = ['General', 'Characters', 'Story', 'Images', 'Models']
+  .map(n => `<span class="nav-btn${n === 'Images' ? ' active' : ''}"><span class="dot"></span><span>${n}</span></span>`).join('');
+const center = `
+<section class="center">
+  <header class="head">
+    <h3>Images</h3>
+    <div class="tabs"><span class="tab on" data-tab="make">Make</span><span class="tab" data-tab="kept">Kept pictures</span></div>
+    <div class="head-tools"><span class="btn quiet">Illustrious XL ▾</span><span class="btn quiet">◨</span></div>
+  </header>
+  <div class="main make">
+    <div class="stage">${pic(0)}<div class="tries">${pic(1)}${pic(2)}${pic(0, 'on')}${pic(3)}</div></div>
+    <div class="meta">Try 3 of 4 · 832 × 1216 · seed 2817463950 · Euler, 28 steps · 31 s</div>
+    <div class="acts"><span class="btn primary">Keep</span><span class="btn">Use these settings</span><span class="btn">Upscale…</span><span class="btn">Save as a file…</span></div>
+  </div>
+  <div class="composer-wrap make">
+    <div class="composer">
+      <div class="field"><label>Prompt</label><div class="box two">masterpiece, best quality, castle on a cliff, sunset, dramatic clouds, wide shot</div></div>
+      <div class="field"><label>Negative</label><div class="box">lowres, bad anatomy, watermark, text</div></div>
+      <div class="send"><span class="btn">Write it for me…</span><span class="btn">Check my tags</span><span class="grow">Sent exactly as typed.</span><span class="btn quiet">Cancel</span><span class="btn primary">Draw</span></div>
+    </div>
+  </div>
+  <div class="gallery">
+    <div class="g-tools"><div class="box"><i>Find by words in the prompt</i></div><span class="btn">Checkpoint: all ▾</span><span class="btn">Shape: all ▾</span><span class="btn">Newest first ▾</span></div>
+    <div class="grid">${Array.from({ length: 18 }, (_, i) => pic(i)).join('')}</div>
+    <div class="meta">18 kept pictures. Click one to see it large: Make one like this · Upscale… · Save as a file… · Remove.</div>
+  </div>
+  <footer class="status"><span>Picture model in memory · 7.9 GB</span><span>Chat model set aside</span></footer>
+</section>`;
+const aside = `
+<aside class="aside">
+  <div class="fold"><div class="fold-name">Model <span>Illustrious XL</span></div><div class="sel"><span>Illustrious XL v2.0</span><span>▾</span></div><div class="sel"><span>VAE: the checkpoint's own</span><span>▾</span></div></div>
+  <div class="fold"><div class="fold-name">LoRAs <span>2 on</span></div><div class="lora"><span>☑ Watercolour style</span><em>0.80</em></div><div class="lora"><span>☑ Detail tweaker</span><em>0.50</em></div><div class="lora"><span>☐ Flat colour</span><em>1.00</em></div></div>
+  <div class="fold"><div class="fold-name">Size <span>832 × 1216</span></div><div class="seg"><span class="on">Tall</span><span>Square</span><span>Wide</span></div><div class="two-up"><div class="sel"><span>Width 832</span></div><div class="sel"><span>Height 1216</span></div></div></div>
+  <div class="fold"><div class="fold-name">Sampling <span>Euler · 28 steps</span></div><div class="two-up"><div class="sel"><span>Euler</span><span>▾</span></div><div class="sel"><span>Steps 28</span></div></div><div class="two-up"><div class="sel"><span>Guidance 5.5</span></div><div class="sel"><span>Clip skip 2</span></div></div></div>
+  <div class="fold"><div class="fold-name">Seed <span>New each time</span></div><div class="sel"><span>2817463950</span></div><div class="seg"><span>Keep</span><span class="on">New each time</span></div></div>
+  <div class="fold"><div class="fold-name">Hires fix <span>Off ▸</span></div></div>
+  <div class="fold"><div class="fold-name">Pictures per Draw <span>4</span></div><div class="small">Drawn one after another into the strip.</div></div>
+  <div class="fold about"><div class="fold-name">Kept pictures</div><div class="small">Kept inside DOG.ai, and locked with the rest when the lock is on. A picture leaves only through Save as a file.</div></div>
+</aside>`;
+for (const shell of document.querySelectorAll('.shell')) {
+  shell.innerHTML = shell.dataset.skin === 'workbench'
+    ? `<nav class="rail">${nav}<div class="foot"><span class="nav-btn"><span class="dot"></span><span>Search</span></span><span class="nav-btn"><span class="dot"></span><span>Settings</span></span></div></nav>${center}${aside}`
+    : `<header class="top"><span class="word">DOG.ai</span><div class="nav">${nav}</div><div class="tools"><span>Search</span><span>Settings</span><span>Offline</span></div></header><div class="body">${center}${aside}</div>`;
+}
+function choose(group, apply) {
+  document.getElementById(group).addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    for (const o of b.parentElement.children) o.classList.toggle('on', o === b);
+    apply(b.dataset.v);
+  });
+}
+function showTab(v) {
+  for (const s of document.querySelectorAll('.shell')) s.classList.toggle('kept', v === 'kept');
+  for (const t of document.querySelectorAll('.tab')) t.classList.toggle('on', t.dataset.tab === v);
+  for (const b of document.querySelectorAll('#tab button')) b.classList.toggle('on', b.dataset.v === v);
+}
+choose('theme', v => document.body.classList.toggle('light', v === 'light'));
+choose('tab', showTab);
+document.addEventListener('click', e => { const t = e.target.closest('.tab'); if (t) showTab(t.dataset.tab); });
+</script>
+</body>
+</html>
