@@ -124,6 +124,8 @@ public partial class App : Application
             await _services.GetRequiredService<PresetCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Library.LibraryCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Images.ImageModelCatalog>().LoadAsync();
+            await _services.GetRequiredService<DogAI.Core.Images.ImagesMemory>().LoadAsync();
+            await _services.GetRequiredService<DogAI.Core.Images.SavedPicturePrompts>().LoadAsync();
             await _services.GetRequiredService<InterfaceMemory>().LoadAsync();
 
             var window = new MainWindow(_services);
@@ -258,6 +260,8 @@ public partial class App : Application
         services.AddSingleton<PresetCatalog>();
         services.AddSingleton(sp => new DogAI.Core.Library.LibraryCatalog(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton(sp => new DogAI.Core.Images.ImageModelCatalog(sp.GetRequiredService<IDocumentStore>()));
+        services.AddSingleton(sp => new DogAI.Core.Images.ImagesMemory(sp.GetRequiredService<IDocumentStore>()));
+        services.AddSingleton(sp => new DogAI.Core.Images.SavedPicturePrompts(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton(sp => new InterfaceMemory(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton<SidePanelDrawer>();
         services.AddSingleton<ReturnPlace>();

@@ -45,7 +45,7 @@ public static class DataServices
     }
 }
 
-public sealed class SqliteSettingsStore(IDbContextFactory<DogDbContext> factory) : ISettingsStore, IDocumentStore
+public sealed class SqliteSettingsStore(IDbContextFactory<DogDbContext> factory, DatabaseTidy? tidy = null) : ISettingsStore, IDocumentStore
 {
     private const string Key = "app";
 
@@ -75,8 +75,12 @@ public sealed class SqliteSettingsStore(IDbContextFactory<DogDbContext> factory)
         var json = JsonSerializer.Serialize(value);
         var entry = await db.Settings.FirstOrDefaultAsync(s => s.Key == key, ct);
         if (entry is null) db.Settings.Add(new SettingEntry { Key = key, Json = json });
+        else if (entry.Json == json) return;
         else entry.Json = json;
         await db.SaveChangesAsync(ct);
+        // What a document said before is removed data (a saved prompt that was deleted, a token that was taken out):
+        // the database overwrites it, and the log file beside the database is emptied soon, as after any delete.
+        if (entry is not null) tidy?.Deleted();
     }
 }
 

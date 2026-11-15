@@ -27,6 +27,9 @@ public sealed class RemovedDataTests : IDisposable
     private static readonly byte[] RemovedImage = Encoding.ASCII.GetBytes("\u0001REMOVED-PICTURE-BYTES-CASSOWARY\u0002");
     private static readonly byte[] KeptImage = Encoding.ASCII.GetBytes("\u0001KEPT-PICTURE-BYTES-TAMARIN\u0002");
 
+    private static readonly byte[] RemovedPreview = Encoding.ASCII.GetBytes("\u0001REMOVED-PREVIEW-BYTES-AXOLOTL\u0002");
+    private static readonly byte[] KeptPreview = Encoding.ASCII.GetBytes("\u0001KEPT-PREVIEW-BYTES-NUMBAT\u0002");
+
     private readonly string _root = Path.Combine(Path.GetTempPath(), "dogai-removed-" + Guid.NewGuid().ToString("N"));
 
     public void Dispose()
@@ -67,12 +70,23 @@ public sealed class RemovedDataTests : IDisposable
     private static long LogFileSize(AppPaths paths) =>
         File.Exists(paths.DatabaseFile + "-wal") ? new FileInfo(paths.DatabaseFile + "-wal").Length : 0;
 
+    /// <summary>
+    /// Looks through the folder twice. While DOG.ai runs, the tidy-up can move pages from the log file into the database
+    /// between the reading of one and the other, so a single look can miss what is there; two looks cannot both miss it.
+    /// </summary>
+    private static bool Twice(Func<bool> look)
+    {
+        if (look()) return true;
+        Thread.Sleep(50);
+        return look();
+    }
+
     private static bool Holds(string folder, byte[] bytes) =>
-        Directory.GetFiles(folder, "*", SearchOption.AllDirectories).Any(file => Bytes(file).AsSpan().IndexOf(bytes) >= 0);
+        Twice(() => Directory.GetFiles(folder, "*", SearchOption.AllDirectories).Any(file => Bytes(file).AsSpan().IndexOf(bytes) >= 0));
 
     /// <summary>True if the word can be read in any file under the folder, in capitals or small letters, as UTF-8 or UTF-16.</summary>
     private static bool HoldsWord(string folder, string word) =>
-        Directory.GetFiles(folder, "*", SearchOption.AllDirectories).Any(file => HoldsWord(Bytes(file), word));
+        Twice(() => Directory.GetFiles(folder, "*", SearchOption.AllDirectories).Any(file => HoldsWord(Bytes(file), word)));
 
     private static bool HoldsWord(byte[] bytes, string word)
     {
@@ -95,6 +109,9 @@ public sealed class RemovedDataTests : IDisposable
             Width = 832, Height = 1216, Seed = 5, Steps = 20, Sampler = "euler_a", Guidance = 5.5,
         };
     }
+
+    /// <summary>A preview for <see cref="PictureWith"/> pictures (the same shape, small) with a marker inside it.</summary>
+    private static byte[] PreviewWith(byte[] marker) => KeptPictureTests.Webp(263, 384, filler: 3000, seed: marker[9], marker: marker);
 
     private static async Task<long> AddChat(IServiceProvider services, string word)
     {
@@ -146,6 +163,84 @@ public sealed class RemovedDataTests : IDisposable
         // The one that was not removed is untouched.
         Assert.True(Holds(paths.Root, KeptImage));
         Assert.Equal(PictureWith(KeptImage, Stays).Image, await store.ImageAsync(kept.Id));
+    }
+
+    [Fact]
+    public async Task A_removed_picture_of_the_images_section_takes_its_preview_and_both_prompts_off_the_disk()
+    {
+        var paths = Install("a");
+        await using var services = Open(paths);
+        await services.MigrateDogDatabaseAsync();
+        var store = services.GetRequiredService<IPictureStore>();
+        var gone = PictureWith(RemovedImage, Removed, PictureOwners.Images);
+        gone.NegativePrompt = $"lowres, {Removed}NEGATIVE";
+        gone.Preview = PreviewWith(RemovedPreview);
+        var stays = PictureWith(KeptImage, Stays, PictureOwners.Images);
+        stays.Preview = PreviewWith(KeptPreview);
+        var removed = await store.AddAsync(gone);
+        var kept = await store.AddAsync(stays);
+        // A second one whose preview is given later, as the grid does for pictures kept without one.
+        var later = await store.AddAsync(PictureWith(RemovedImage, Removed, PictureOwners.Images));
+        await store.SetPreviewAsync(later.Id, PreviewWith(RemovedPreview));
+        Assert.True(Holds(paths.Root, RemovedPreview));
+        Assert.True(HoldsWord(paths.Root, Removed + "NEGATIVE"));
+
+        await store.DeleteAsync(removed.Id);
+        await store.DeleteAsync(later.Id);
+        await Settled(services);
+
+        Assert.False(Holds(paths.Root, RemovedPreview));
+        Assert.False(Holds(paths.Root, RemovedImage));
+        Assert.False(HoldsWord(paths.Root, Removed));
+        // The one that was not removed is whole, preview included, and still found by its prompt.
+        Assert.True(Holds(paths.Root, KeptPreview));
+        Assert.Equal(PreviewWith(KeptPreview), await store.PreviewAsync(kept.Id));
+        Assert.Equal(kept.Id, Assert.Single((await store.PageAsync(PictureQuery.Images(Stays))).Pictures).Id);
+        Assert.Empty((await store.PageAsync(PictureQuery.Images(Removed))).Pictures);
+    }
+
+    [Fact]
+    public async Task A_replaced_preview_is_gone_from_every_database_file_while_dog_ai_is_still_running()
+    {
+        var paths = Install("a");
+        await using var services = Open(paths);
+        await services.MigrateDogDatabaseAsync();
+        var store = services.GetRequiredService<IPictureStore>();
+        var picture = PictureWith(KeptImage, Stays, PictureOwners.Images);
+        picture.Preview = PreviewWith(RemovedPreview);
+        var kept = await store.AddAsync(picture);
+        Assert.True(Holds(paths.Root, RemovedPreview));
+
+        await store.SetPreviewAsync(kept.Id, PreviewWith(KeptPreview));
+        await Settled(services);
+
+        Assert.False(Holds(paths.Root, RemovedPreview));
+        Assert.True(Holds(paths.Root, KeptPreview));
+        Assert.Equal(PictureWith(KeptImage, Stays).Image, await store.ImageAsync(kept.Id));
+    }
+
+    [Fact]
+    public async Task A_deleted_or_replaced_saved_prompt_is_gone_from_every_database_file_while_dog_ai_is_still_running()
+    {
+        var paths = Install("a");
+        await using var services = Open(paths);
+        await services.MigrateDogDatabaseAsync();
+        var prompts = new SavedPicturePrompts(services.GetRequiredService<DogAI.Core.Models.IDocumentStore>());
+        await prompts.LoadAsync();
+        var gone = await prompts.SaveAsAsync("Gone", $"1girl, {Removed}, forest", $"lowres, {Removed}NEGATIVE");
+        await prompts.SaveAsAsync("Changed", $"castle, {Removed}BEFORE", "blurry");
+        await prompts.SaveAsAsync("Stays", $"1boy, {Stays}", "blurry");
+        Assert.True(HoldsWord(paths.Root, Removed));
+
+        await prompts.DeleteAsync(gone.Id);
+        await prompts.SaveAsAsync("Changed", "castle, night", "blurry");
+        await Settled(services);
+
+        Assert.False(HoldsWord(paths.Root, Removed));
+        Assert.True(HoldsWord(paths.Root, Stays));
+        var again = new SavedPicturePrompts(services.GetRequiredService<DogAI.Core.Models.IDocumentStore>());
+        await again.LoadAsync();
+        Assert.Equal(["Changed", "Stays"], again.All.Select(p => p.Name));
     }
 
     [Fact]

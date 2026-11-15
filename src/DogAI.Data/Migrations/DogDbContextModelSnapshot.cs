@@ -575,6 +575,9 @@ namespace DogAI.Data.Migrations
                     b.Property<int>("Prediction")
                         .HasColumnType("INTEGER");
 
+                    b.Property<byte[]>("Preview")
+                        .HasColumnType("BLOB");
+
                     b.Property<string>("Prompt")
                         .IsRequired()
                         .HasColumnType("TEXT");

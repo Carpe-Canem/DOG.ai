@@ -28,6 +28,9 @@ public sealed class KeptPictureTests : IDisposable
     /// <summary>Bytes that appear nowhere by chance, put inside the test pictures themselves.</summary>
     private static readonly byte[] ImageMarker = Encoding.ASCII.GetBytes("\u0001PICTURE-BYTES-KOOKABURRA\u0002");
 
+    /// <summary>Bytes put inside the test previews, so a preview left readable is found as surely as a picture.</summary>
+    private static readonly byte[] PreviewMarker = Encoding.ASCII.GetBytes("\u0001PREVIEW-BYTES-QUOKKA\u0002");
+
     private const int Rounds = 1000;
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "dogai-pictures-" + Guid.NewGuid().ToString("N"));
@@ -78,14 +81,14 @@ public sealed class KeptPictureTests : IDisposable
     /// A WebP file as far as its header goes (the lossy kind), followed by <paramref name="filler"/> bytes that hold
     /// <see cref="ImageMarker"/>. Enough for the store, which reads only the header.
     /// </summary>
-    internal static byte[] Webp(int width, int height, int filler = 4000, int seed = 1)
+    internal static byte[] Webp(int width, int height, int filler = 4000, int seed = 1, byte[]? marker = null)
     {
         var body = new byte[10 + filler];
         body[3] = 0x9D; body[4] = 0x01; body[5] = 0x2A;
         body[6] = (byte)width; body[7] = (byte)(width >> 8);
         body[8] = (byte)height; body[9] = (byte)(height >> 8);
         new Random(seed).NextBytes(body.AsSpan(10));
-        ImageMarker.CopyTo(body.AsSpan(10 + filler / 2));
+        (marker ?? ImageMarker).CopyTo(body.AsSpan(10 + filler / 2));
         return Riff(("VP8 ", body));
     }
 
@@ -133,8 +136,22 @@ public sealed class KeptPictureTests : IDisposable
         Hires = new HiresFix(1.5, 14, 0.5),
     };
 
+    private static readonly CheckpointSettings Card = CheckpointSettings.ForFamily(ImageFamily.Illustrious);
+
+    /// <summary>A preview of a <see cref="Sample"/> picture: the same shape, 384 pixels tall, holding <see cref="PreviewMarker"/>.</summary>
+    private static byte[] PreviewOf(int seed = 1) => Webp(263, 384, filler: 3000, seed: seed + 1000, marker: PreviewMarker);
+
+    /// <summary>A picture kept in the Images section, with its preview.</summary>
+    private static Picture Kept(int seed = 1, string word = Marker)
+    {
+        var picture = Sample(PictureOwners.Images, PictureOwners.ImagesOwner, seed, word);
+        picture.Preview = PreviewOf(seed);
+        return picture;
+    }
+
     private static void AssertSame(Picture expected, Picture actual, bool withImage = true)
     {
+        if (withImage) Assert.Equal(expected.Preview, actual.Preview);
         Assert.Equal(expected.OwnerKind, actual.OwnerKind);
         Assert.Equal(expected.OwnerId, actual.OwnerId);
         if (withImage) Assert.Equal(expected.Image, actual.Image);
@@ -176,7 +193,7 @@ public sealed class KeptPictureTests : IDisposable
 
     /// <summary>True if the word (as UTF-8 or UTF-16) or the picture marker can be read anywhere in the file or folder.</summary>
     private static bool HoldsPicture(string path) =>
-        Holds(path, Encoding.UTF8.GetBytes(Marker)) || Holds(path, Encoding.Unicode.GetBytes(Marker)) || Holds(path, ImageMarker);
+        Holds(path, Encoding.UTF8.GetBytes(Marker)) || Holds(path, Encoding.Unicode.GetBytes(Marker)) || Holds(path, ImageMarker) || Holds(path, PreviewMarker);
 
     // ---- The WebP header ----
 
@@ -459,9 +476,15 @@ public sealed class KeptPictureTests : IDisposable
         var paths = Install("a");
         var original = Sample();
         long id = 0;
-        await Use(paths, null, async s => id = (await Store(s).AddAsync(Sample())).Id);
-        // The search itself works: in the plain file both the picture's bytes and its prompt can be found.
+        await Use(paths, null, async s =>
+        {
+            id = (await Store(s).AddAsync(Sample())).Id;
+            await Store(s).SetPreviewAsync(id, PreviewOf());
+        });
+        original.Preview = PreviewOf();
+        // The search itself works: in the plain file the picture's bytes, its preview's and its prompt can be found.
         Assert.True(Holds(paths.DatabaseFile, ImageMarker));
+        Assert.True(Holds(paths.DatabaseFile, PreviewMarker));
         Assert.True(Holds(paths.DatabaseFile, Encoding.UTF8.GetBytes(Marker)));
         var key = LockFile.Create("pw", Rounds).DatabaseKey;
 
@@ -497,6 +520,26 @@ public sealed class KeptPictureTests : IDisposable
             var kept = await Store(s).AddAsync(Sample());
             AssertSame(Sample(), (await Store(s).GetAsync(kept.Id))!);
             Assert.False(HoldsPicture(paths.Root));
+            // M16: a picture of the Images section with its preview, a preview given later and one replaced, a saved
+            // prompt and the remembered controls. None of it is readable on disk at any moment.
+            var images = await Store(s).AddAsync(Kept(2));
+            var later = Sample(PictureOwners.Images, PictureOwners.ImagesOwner, 3);
+            later = await Store(s).AddAsync(later);
+            Assert.True(await Store(s).SetPreviewAsync(later.Id, PreviewOf(3)));
+            Assert.True(await Store(s).SetPreviewAsync(later.Id, PreviewOf(4)));
+            var documents = s.GetRequiredService<DogAI.Core.Models.IDocumentStore>();
+            var prompts = new SavedPicturePrompts(documents);
+            var saved = await prompts.SaveAsAsync("Forest", $"1girl, {Marker}, forest", $"lowres, {Marker}NOT");
+            await prompts.DeleteAsync(saved.Id);
+            await prompts.SaveAsAsync("Forest", $"1girl, {Marker}, forest", "lowres");
+            var memory = new ImagesMemory(documents);
+            await memory.SaveAsync("illustrious/nova.safetensors", Card, memory.For("illustrious/nova.safetensors", Card) with { Seed = 77 });
+            Assert.False(HoldsPicture(paths.Root));
+            Assert.Equal(PreviewOf(2), (await Store(s).PageAsync(PictureQuery.Images(Marker))).Pictures.Last().Preview);
+            Assert.Equal(PreviewOf(4), await Store(s).PreviewAsync(later.Id));
+            await Store(s).DeleteAsync(images.Id);
+            await s.GetRequiredService<DatabaseTidy>().SettledAsync();
+            Assert.False(HoldsPicture(paths.Root));
         });
         Assert.False(HoldsPicture(paths.Root));
         Assert.Equal(DatabaseFileKind.Encrypted, DatabaseLock.KindOf(paths.DatabaseFile));
@@ -524,6 +567,14 @@ public sealed class KeptPictureTests : IDisposable
             characterId = (await s.GetRequiredService<ICharacterStore>().SaveAsync(new Character { Name = "Ann" })).Id;
             await Store(s).AddAsync(Sample(PictureOwners.Message, passageId, 1));
             await Store(s).AddAsync(Sample(PictureOwners.Character, characterId, 2));
+            // M16: a picture kept in the Images section with its preview, a saved prompt and the remembered controls.
+            await Store(s).AddAsync(Kept(3));
+            var documents = s.GetRequiredService<DogAI.Core.Models.IDocumentStore>();
+            var prompts = new SavedPicturePrompts(documents);
+            await prompts.SetStartAsync((await prompts.SaveAsAsync("Forest", $"1girl, {Marker}, forest", "lowres")).Id);
+            var memory = new ImagesMemory(documents);
+            await memory.ChooseAsync("illustrious/nova.safetensors");
+            await memory.SaveAsync("illustrious/nova.safetensors", Card, memory.For("illustrious/nova.safetensors", Card) with { Width = 1216, Height = 832, Count = 4 });
             await s.GetRequiredService<ISettingsStore>().SaveAsync(new AppSettings { ModelsDirectory = @"Z:\backup-pc\models" });
         });
         var zip = Path.Combine(_root, "backup.zip");
@@ -572,6 +623,21 @@ public sealed class KeptPictureTests : IDisposable
             AssertSame(Sample(PictureOwners.Message, passageId, 1), (await store.GetAsync(ofPassage.Id))!);
             var ofCharacter = Assert.Single(await store.ListAsync(PictureOwners.Character, characterId));
             AssertSame(Sample(PictureOwners.Character, characterId, 2), (await store.GetAsync(ofCharacter.Id))!);
+            // The Images section's picture came back with its preview, and so did the saved prompt and the controls.
+            var page = await store.PageAsync(PictureQuery.Images());
+            var kept = Assert.Single(page.Pictures);
+            Assert.Null(kept.Image);
+            Assert.Equal(PreviewOf(3), kept.Preview);
+            AssertSame(Kept(3), (await store.GetAsync(kept.Id))!);
+            var documents = s.GetRequiredService<DogAI.Core.Models.IDocumentStore>();
+            var prompts = new SavedPicturePrompts(documents);
+            await prompts.LoadAsync();
+            Assert.Equal(($"1girl, {Marker}, forest", "lowres"), prompts.StartingBoxes(Card));
+            var memory = new ImagesMemory(documents);
+            await memory.LoadAsync();
+            Assert.Equal("illustrious/nova.safetensors", memory.Checkpoint);
+            var controls = memory.For("illustrious/nova.safetensors", Card);
+            Assert.Equal((1216, 832, 4), (controls.Width, controls.Height, controls.Count));
             // What was here before is gone from the app (it is in the safety copy), and the owners came along too.
             Assert.Empty(await store.ListAsync(PictureOwners.Test, 0));
             Assert.Equal("Ann", (await s.GetRequiredService<ICharacterStore>().GetAsync(characterId))!.Name);
@@ -623,7 +689,15 @@ public sealed class KeptPictureTests : IDisposable
         long id = 0;
         await Use(paths, null, async s =>
         {
-            id = (await Store(s).AddAsync(Sample())).Id;
+            id = (await Store(s).AddAsync(Kept())).Id;
+            var documents = s.GetRequiredService<DogAI.Core.Models.IDocumentStore>();
+            await new SavedPicturePrompts(documents).SaveAsAsync("Forest", "1girl, forest", "lowres");
+            var memory = new ImagesMemory(documents);
+            await memory.ChooseAsync("illustrious/nova.safetensors");
+            await memory.SaveAsync("illustrious/nova.safetensors", Card, memory.For("illustrious/nova.safetensors", Card) with
+            {
+                Sampling = new("dpm++2m", "karras", 30, 6, 2, "sdxl-fix.safetensors"), Loras = [new LoraUse("style/ink.safetensors", 0.8)],
+            });
             await s.GetRequiredService<ISettingsStore>().SaveAsync(new AppSettings { ModelsDirectory = @"E:\old place\models" });
         });
         var before = PictureRow(paths.DatabaseFile, id);
@@ -637,7 +711,13 @@ public sealed class KeptPictureTests : IDisposable
         await Use(paths, null, async s =>
         {
             var picture = (await Store(s).GetAsync(id))!;
-            AssertSame(Sample(), picture);
+            AssertSame(Kept(), picture);
+            // What the Images section remembers names files inside their folders too, so it reads the same after the move.
+            var memory = new ImagesMemory(s.GetRequiredService<DogAI.Core.Models.IDocumentStore>());
+            await memory.LoadAsync();
+            var controls = memory.For(memory.Checkpoint!, Card);
+            Assert.Equal("sdxl-fix.safetensors", controls.Sampling.Vae);
+            Assert.Equal([new LoraUse("style/ink.safetensors", 0.8)], controls.Loras);
             // The picture finds its files under wherever the models folder is now.
             var settings = await s.GetRequiredService<ISettingsStore>().LoadAsync();
             Assert.Equal(@"F:\new place\models", settings.ModelsDirectory);
@@ -658,7 +738,7 @@ public sealed class KeptPictureTests : IDisposable
             using var reader = command.ExecuteReader();
             Assert.True(reader.Read());
             return [.. Enumerable.Range(0, reader.FieldCount).Where(i => reader.GetName(i) != "Image")
-                .Select(i => reader.IsDBNull(i) ? null : reader.GetValue(i))];
+                .Select(i => reader.IsDBNull(i) ? null : reader.GetValue(i) is byte[] bytes ? Convert.ToBase64String(bytes) : reader.GetValue(i))];
         }
         finally
         {
