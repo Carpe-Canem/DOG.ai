@@ -139,7 +139,11 @@ public static class ImagesDraw
     /// or after keeping (<see cref="Picture.Preview"/>, <see cref="IPictureStore.SetPreviewAsync"/>).
     /// </summary>
     public static Picture Keep(string checkpoint, CheckpointSettings card, ImagesControls controls, ImageRequest request, ImageResult result, int index = 0) =>
-        Picture.Of(PictureOwners.Images, PictureOwners.ImagesOwner, checkpoint, controls.Sampling.Vae, card.Prediction, request, result, index);
+        KeepAs(checkpoint, controls.Sampling.Vae, card.Prediction, request, result, index);
+
+    /// <summary>The same from what a try recorded when it was drawn (the Make tab keeps from that, never from the controls now).</summary>
+    public static Picture KeepAs(string checkpoint, string? vae, ImagePrediction prediction, ImageRequest request, ImageResult result, int index = 0) =>
+        Picture.Of(PictureOwners.Images, PictureOwners.ImagesOwner, checkpoint, vae, prediction, request, result, index);
 
     /// <summary>
     /// "Use these settings" and "Make one like this": a kept picture (or a try made into one) as the checkpoint, the two

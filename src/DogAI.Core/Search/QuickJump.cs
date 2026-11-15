@@ -99,6 +99,7 @@ public static class QuickJump
             new(JumpKind.Screen, "Personas", "Characters", "characters/personas") { Words = "you are who am i me user" },
             new(JumpKind.Screen, "Story", "Your stories", "story") { Main = true, Words = "stories adventure write" },
             new(JumpKind.Screen, "New story", "Story", "story/new") { Words = "create adventure write add make" },
+            new(JumpKind.Screen, "Images", "Make pictures from a prompt", Images.ImagesPanels.Address) { Main = true, Words = "pictures draw make prompt picture stable diffusion sdxl txt2img" },
             new(JumpKind.Screen, "Search", "Words inside chats and stories", "search") { Words = "find messages text" },
         };
         foreach (var place in ModelsPlaces.Groups.SelectMany(g => g.Places))

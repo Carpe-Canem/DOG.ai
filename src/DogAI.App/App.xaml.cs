@@ -262,6 +262,8 @@ public partial class App : Application
         services.AddSingleton(sp => new DogAI.Core.Images.ImageModelCatalog(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton(sp => new DogAI.Core.Images.ImagesMemory(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton(sp => new DogAI.Core.Images.SavedPicturePrompts(sp.GetRequiredService<IDocumentStore>()));
+        // The Make tab's boxes and tries: memory only, never saved (M16 step 2).
+        services.AddSingleton<DogAI.Core.Images.ImagesSession>();
         services.AddSingleton(sp => new InterfaceMemory(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton<SidePanelDrawer>();
         services.AddSingleton<ReturnPlace>();

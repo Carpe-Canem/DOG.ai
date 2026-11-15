@@ -1,0 +1,603 @@
+@page "/images"
+@using System.Globalization
+@using DogAI.Engine.Images
+@implements IDisposable
+@inject ImagesSession Session
+@inject ImagesMemory Memory
+@inject SavedPicturePrompts Saved
+@inject ImageModelCatalog Catalog
+@inject IImageEngine Card
+@inject CardCoordinator Coordinator
+@inject IPictureStore Pictures
+@inject EngineManager Engine
+@inject ISettingsStore SettingsStore
+@inject SdServerLocator PictureLocator
+@inject IDesktopShell Desktop
+@inject IJSRuntime JS
+
+@* The Images section's Make tab (M16 step 2, layout B "Canvas"): the picture fills the page with the strip of tries beside
+   it, the two prompt boxes sit where the chat box is, and every control is in the side panel as folds. What is typed
+   goes out exactly as typed (ImagesDraw): nothing is added. The boxes and the tries live in ImagesSession (memory only);
+   the controls are remembered by ImagesMemory; a picture reaches the disk only through Keep. *@
+
+<SectionContent SectionName="title">
+    <div class="head-row">
+        <div class="head-text">
+            <h2>Images</h2>
+            <p>Make pictures from a prompt</p>
+        </div>
+        <div class="head-tools">
+            @if (_checkpoints.Count > 0 && _checkpoint is not null)
+            {
+                <select class="field head-select" id="images-checkpoint" aria-label="Checkpoint" title="The checkpoint pictures are drawn with here"
+                        disabled="@Session.IsDrawing" @onchange="ChooseCheckpointAsync">
+                    @foreach (var c in _checkpoints)
+                    {
+                        <option value="@c.RelativePath" selected="@(c.RelativePath == _checkpoint.RelativePath)">@c.Name</option>
+                    }
+                </select>
+            }
+            <AsideToggle Place="images" Hideable="false" Label="Open the picture settings" />
+        </div>
+    </div>
+</SectionContent>
+
+@if (!_ready)
+{
+    <p class="note">Looking at the image models…</p>
+}
+else if (Missing() is { } missing)
+{
+    <div class="notice" id="images-missing"><span>@missing</span>
+        <a class="btn" href="@(_engine is null ? ModelsPlaces.Address(ModelsPlaces.Engines) : ModelsPlaces.Address(ModelsPlaces.GetPictures))">Open Models</a></div>
+}
+else
+{
+    var shown = Session.Selected;
+    var live = Session.IsDrawing && Session.Preview is not null;
+    <div class="images-make" id="images-make">
+        <div class="images-stage">
+            <div class="images-picture @(Session.IsDrawing ? "drawing" : "")">
+                @if (live)
+                {
+                    <img id="images-preview" src="@PreviewSrc()" alt="The picture so far" />
+                }
+                else if (shown is not null)
+                {
+                    <img id="images-picture" src="@shown.Src" alt="@($"Try {shown.Number}")" />
+                }
+                else
+                {
+                    <div class="images-empty" id="images-empty">
+                        <Icon Name="images" Size="40" />
+                        <p>@(Session.IsDrawing ? "Drawing…" : "Type a prompt below and press Draw.")</p>
+                        <p class="small">It is sent exactly as typed. Every setting is in the side panel. Pictures stay in memory until you keep one.</p>
+                    </div>
+                }
+            </div>
+            @if (Session.Tries.Count > 0)
+            {
+                <div class="images-tries" id="images-tries" role="list" aria-label="Tries">
+                    @foreach (var t in Session.Tries)
+                    {
+                        var item = t;
+                        <button class="images-try @(ReferenceEquals(item, shown) ? "active" : "") @(item.KeptId is null ? "" : "kept")" role="listitem" data-try="@item.Number"
+                                title="@ImagesPanels.Meta(item)" @onclick="() => Session.Select(item)">
+                            <img src="@item.Src" alt="@($"Try {item.Number}")" />
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+        @if (shown is not null)
+        {
+            <p class="images-meta small" id="images-meta">@ImagesPanels.Meta(shown)</p>
+            <div class="images-acts">
+                @if (shown.KeptId is null)
+                {
+                    <button class="btn primary" id="images-keep" disabled="@_keeping" title="Keep this picture inside DOG.ai" @onclick="() => KeepAsync(shown)">Keep</button>
+                }
+                else
+                {
+                    <button class="btn" id="images-keep" disabled title="This picture is kept">Kept</button>
+                }
+                <button class="btn" id="images-use" disabled="@Session.IsDrawing" title="Put this picture’s prompt, checkpoint and settings back, seed included"
+                        @onclick="() => UseSettingsAsync(shown)">Use these settings</button>
+                <button class="btn" id="images-save" title="Save this picture as a WebP file" @onclick="() => SaveFileAsync(shown)">Save as a file…</button>
+            </div>
+        }
+        @if (_error is { } error)
+        {
+            <div class="notice bad" id="images-error"><span>@error</span></div>
+        }
+        @if (_note is { } note && !Session.IsDrawing)
+        {
+            <p class="small images-note" id="images-note" role="status">@note</p>
+        }
+    </div>
+}
+
+@if (_ready && Missing() is null && _controls is not null)
+{
+    <SectionContent SectionName="composer">
+        <div class="images-composer" id="images-composer">
+            <label class="images-box">
+                <span>Prompt</span>
+                <textarea class="field" id="images-prompt" rows="3" spellcheck="false" placeholder="What to draw, e.g. masterpiece, castle on a cliff, sunset"
+                          value="@Session.Prompt" @oninput="e => Session.Type(Text(e), Session.Negative)"></textarea>
+            </label>
+            <label class="images-box">
+                <span>Negative</span>
+                <textarea class="field" id="images-negative" rows="2" spellcheck="false" placeholder="What to keep out, e.g. lowres, watermark"
+                          value="@Session.Negative" @oninput="e => Session.Type(Session.Prompt, Text(e))"></textarea>
+            </label>
+            <div class="images-send">
+                <button class="btn" id="images-saved" title="Saved prompts: put one in, or save what is typed" @onclick="() => _savedOpen = true">Saved prompts</button>
+                <span class="small images-status" id="images-status" role="status">@StatusText</span>
+                @if (Session.IsDrawing)
+                {
+                    <button class="btn" id="images-cancel" @onclick="Session.Cancel">Cancel</button>
+                }
+                else
+                {
+                    <button class="btn primary" id="images-draw" disabled="@(Problems.Count > 0)" title="@(Problems.Count > 0 ? string.Join(" ", Problems) : "Draw what is typed")"
+                            @onclick="DrawAsync">@(_controls.Count > 1 ? $"Draw {_controls.Count}" : "Draw")</button>
+                }
+            </div>
+            @if (!Session.IsDrawing && FieldProblems.Count > 0)
+            {
+                <p class="small bad-text" id="images-problems" role="alert">@string.Join(" ", FieldProblems)</p>
+            }
+        </div>
+    </SectionContent>
+}
+
+@if (_ready && Missing() is null && _controls is { } controls && _card is { } card)
+{
+    <AsideRegion Place="images" Hideable="false" Title="Picture settings">
+        <Fold Id="@ImagesPanels.Model" Title="@ImagesPanels.Title(ImagesPanels.Model)" Summary="@_checkpoint?.Name" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Model)" Level="4" Class="panel images-fold">
+            <div class="kv"><span>Checkpoint</span><span id="images-model-name">@_checkpoint?.Name</span></div>
+            <label class="field-block">
+                <span class="field-label">VAE</span>
+                <select class="field" id="images-vae" @onchange="e => SetAsync(controls with { Sampling = controls.Sampling with { Vae = Text(e) is { Length: > 0 } v ? v : null } })">
+                    <option value="" selected="@(controls.Sampling.Vae is null)">The checkpoint’s own</option>
+                    @foreach (var v in Files(ImageFileKind.Vae))
+                    {
+                        var path = ImageModelCatalog.Normalise(v.RelativePath);
+                        <option value="@path" selected="@(string.Equals(path, controls.Sampling.Vae, StringComparison.OrdinalIgnoreCase))">@v.Name</option>
+                    }
+                    @if (controls.Sampling.Vae is { } chosenVae && !Files(ImageFileKind.Vae).Any(v => string.Equals(ImageModelCatalog.Normalise(v.RelativePath), chosenVae, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        <option value="@chosenVae" selected>@chosenVae (not found)</option>
+                    }
+                </select>
+            </label>
+            <p class="small">The numbers start from the checkpoint’s settings card in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.Pictures)">@ModelsPlaces.PicturesName</a>; what you change here is kept for this checkpoint.</p>
+            @if (_checkpoint is not null && Memory.SamplingChanged(_checkpoint.RelativePath))
+            {
+                <button class="btn" id="images-reset-sampling" title="Sampler, steps, guidance, clip skip and VAE as the settings card says" @onclick="ResetSamplingAsync">Back to the card’s numbers</button>
+            }
+        </Fold>
+
+        <Fold Id="@ImagesPanels.Loras" Title="@ImagesPanels.Title(ImagesPanels.Loras)" Summary="@ImagesPanels.LorasSummary(controls.Loras.Count)" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Loras)" Level="4" Class="panel images-fold">
+            @if (!Files(ImageFileKind.Lora).Any() && controls.Loras.Count == 0)
+            {
+                <p class="small" id="images-no-loras">No LoRAs in the loras folder. Get some in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.GetPictures)">@ModelsPlaces.GetPicturesName</a>.</p>
+            }
+            @foreach (var l in LoraRows(controls))
+            {
+                var row = l;
+                <div class="images-lora" data-lora="@row.Path">
+                    <label class="check">
+                        <input type="checkbox" checked="@row.On" @onchange="e => ToggleLoraAsync(controls, row, e.Value is true)" />
+                        <span class="images-lora-name">@row.Name@(row.Missing ? " (not found)" : "")</span>
+                    </label>
+                    <input class="field" type="number" step="0.05" min="-5" max="5" aria-label="@($"Strength of {row.Name}")" disabled="@(!row.On)"
+                           value="@row.Strength.ToString(CultureInfo.InvariantCulture)" @onchange="e => StrengthAsync(controls, row, e)" />
+                </div>
+            }
+            <p class="small">Ticked LoRAs are used with their strength. Their trigger words are not added: type them into the prompt.</p>
+        </Fold>
+
+        <Fold Id="@ImagesPanels.Size" Title="@ImagesPanels.Title(ImagesPanels.Size)" Summary="@ImagesPanels.SizeSummary(controls.Width, controls.Height)" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Size)" Level="4" Class="panel images-fold">
+            <div class="seg images-shapes" role="group" aria-label="Shape">
+                @foreach (var s in Enum.GetValues<PictureShape>())
+                {
+                    var shape = s;
+                    <button type="button" id="@($"images-shape-{shape.ToString().ToLowerInvariant()}")" class="@(controls.Shape == shape ? "active" : "")"
+                            aria-pressed="@(controls.Shape == shape ? "true" : "false")" title="@PictureLevels.Title(shape)" @onclick="() => SetAsync(controls.At(shape))">@shape</button>
+                }
+            </div>
+            <div class="two">
+                <label class="field-block"><span class="field-label">Width</span>
+                    <input class="field" id="images-width" type="number" step="8" min="@ImageRequest.MinSide" max="@ImageRequest.MaxSide" value="@controls.Width"
+                           @onchange="e => SetAsync(controls with { Width = Int(e, controls.Width) })" /></label>
+                <label class="field-block"><span class="field-label">Height</span>
+                    <input class="field" id="images-height" type="number" step="8" min="@ImageRequest.MinSide" max="@ImageRequest.MaxSide" value="@controls.Height"
+                           @onchange="e => SetAsync(controls with { Height = Int(e, controls.Height) })" /></label>
+            </div>
+            <p class="small">Multiples of 8, from @ImageRequest.MinSide to @ImageRequest.MaxSide pixels. SDXL draws best near 1024 × 1024 pixels in all.</p>
+        </Fold>
+
+        <Fold Id="@ImagesPanels.Sampling" Title="@ImagesPanels.Title(ImagesPanels.Sampling)" Summary="@ImagesPanels.SamplingSummary(controls.Sampling)" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Sampling)" Level="4" Class="panel images-fold">
+            <div class="two">
+                <label class="field-block"><span class="field-label">Sampler</span>
+                    <select class="field" id="images-sampler" @onchange="e => SetAsync(controls with { Sampling = controls.Sampling with { Sampler = Text(e) } })">
+                        @foreach (var (id, title) in SamplerNames.Samplers)
+                        {
+                            <option value="@id" selected="@(id == controls.Sampling.Sampler)">@title</option>
+                        }
+                        @if (SamplerNames.Samplers.All(s => s.Id != controls.Sampling.Sampler))
+                        {
+                            <option value="@controls.Sampling.Sampler" selected>@controls.Sampling.Sampler</option>
+                        }
+                    </select></label>
+                <label class="field-block"><span class="field-label">Scheduler</span>
+                    <select class="field" id="images-scheduler" @onchange="e => SetAsync(controls with { Sampling = controls.Sampling with { Scheduler = Text(e) is { Length: > 0 } s ? s : null } })">
+                        @foreach (var (id, title) in SamplerNames.Schedulers)
+                        {
+                            <option value="@(id ?? "")" selected="@(id == controls.Sampling.Scheduler)">@title</option>
+                        }
+                    </select></label>
+                <label class="field-block"><span class="field-label">Steps</span>
+                    <input class="field" id="images-steps" type="number" min="1" max="@ImageRequest.MaxSteps" value="@controls.Sampling.Steps"
+                           @onchange="e => SetAsync(controls with { Sampling = controls.Sampling with { Steps = Int(e, controls.Sampling.Steps) } })" /></label>
+                <label class="field-block"><span class="field-label">Guidance</span>
+                    <input class="field" id="images-guidance" type="number" step="0.5" min="0" max="30" value="@controls.Sampling.Guidance.ToString(CultureInfo.InvariantCulture)"
+                           @onchange="e => SetAsync(controls with { Sampling = controls.Sampling with { Guidance = Dbl(e, controls.Sampling.Guidance) } })" /></label>
+                <label class="field-block"><span class="field-label">Clip skip</span>
+                    <input class="field" id="images-clipskip" type="number" min="1" max="12" placeholder="Default" value="@controls.Sampling.ClipSkip"
+                           @onchange="e => SetAsync(controls with { Sampling = controls.Sampling with { ClipSkip = Text(e).Trim().Length == 0 ? null : Int(e, controls.Sampling.ClipSkip ?? 0) } })" /></label>
+            </div>
+        </Fold>
+
+        <Fold Id="@ImagesPanels.Seed" Title="@ImagesPanels.Title(ImagesPanels.Seed)" Summary="@ImagesPanels.SeedSummary(controls.Seed)" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Seed)" Level="4" Class="panel images-fold">
+            <SeedRow Id="images-seed" Original="@SeedOriginal" Value="@_seed" ValueChanged="SeedChangedAsync" />
+            <p class="small">@(controls.Seed is null ? "A new seed for every picture. Keep takes the seed of the picture shown." : controls.Count > 1 ? "The pictures of one Draw take this seed, then the next numbers." : "Every Draw starts from this seed: the same settings give the same picture.")</p>
+        </Fold>
+
+        <Fold Id="@ImagesPanels.Hires" Title="@ImagesPanels.Title(ImagesPanels.Hires)" Summary="@ImagesPanels.HiresSummary(controls.HiresOn, controls.Hires)" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Hires)" Level="4" Class="panel images-fold">
+            <label class="check"><input type="checkbox" id="images-hires-on" checked="@controls.HiresOn" @onchange="e => SetAsync(controls with { HiresOn = e.Value is true })" /> Draw it larger, then refine it</label>
+            <div class="two">
+                <label class="field-block"><span class="field-label">Enlarge by</span>
+                    <input class="field" id="images-hires-scale" type="number" step="0.05" min="1.05" max="4" disabled="@(!controls.HiresOn)" value="@controls.Hires.Scale.ToString(CultureInfo.InvariantCulture)"
+                           @onchange="e => SetAsync(controls with { Hires = controls.Hires with { Scale = Dbl(e, controls.Hires.Scale) } })" /></label>
+                <label class="field-block"><span class="field-label">Steps</span>
+                    <input class="field" id="images-hires-steps" type="number" min="1" max="@ImageRequest.MaxSteps" disabled="@(!controls.HiresOn)" value="@controls.Hires.Steps"
+                           @onchange="e => SetAsync(controls with { Hires = controls.Hires with { Steps = Int(e, controls.Hires.Steps) } })" /></label>
+                <label class="field-block"><span class="field-label">Strength</span>
+                    <input class="field" id="images-hires-denoise" type="number" step="0.05" min="0.05" max="1" disabled="@(!controls.HiresOn)" value="@controls.Hires.Denoise.ToString(CultureInfo.InvariantCulture)"
+                           @onchange="e => SetAsync(controls with { Hires = controls.Hires with { Denoise = Dbl(e, controls.Hires.Denoise) } })" /></label>
+                <label class="field-block"><span class="field-label">Enlarge with</span>
+                    <select class="field" id="images-hires-upscaler" disabled="@(!controls.HiresOn)" @onchange="e => SetAsync(controls with { Hires = controls.Hires with { Upscaler = Text(e) } })">
+                        @foreach (var u in Upscalers(controls.Hires.Upscaler))
+                        {
+                            <option value="@u" selected="@(u == controls.Hires.Upscaler)">@u</option>
+                        }
+                    </select></label>
+            </div>
+            @if (controls.HiresOn)
+            {
+                <p class="small" id="images-hires-size">Drawn at @controls.Width × @controls.Height, then refined at about @Larger(controls.Width, controls.Hires.Scale) × @Larger(controls.Height, controls.Hires.Scale). It takes about twice as long.</p>
+            }
+            else
+            {
+                <p class="small">Strength is how much the second pass may change. Lanczos keeps faces and hair as drawn; Latent redraws more.</p>
+            }
+        </Fold>
+
+        <Fold Id="@ImagesPanels.Count" Title="@ImagesPanels.Title(ImagesPanels.Count)" Summary="@ImagesPanels.CountSummary(controls.Count)" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Count)" Level="4" Class="panel images-fold">
+            <select class="field" id="images-count" aria-label="Pictures per Draw" @onchange="e => SetAsync(controls with { Count = Int(e, controls.Count) })">
+                @for (var n = 1; n <= ImageRequest.MaxCount; n++)
+                {
+                    var count = n;
+                    <option value="@count" selected="@(count == controls.Count)">@count</option>
+                }
+            </select>
+            <p class="small">Drawn one after another into the strip. Cancel keeps the ones already drawn.</p>
+        </Fold>
+    </AsideRegion>
+}
+
+@if (_savedOpen)
+{
+    <SavedPromptsBox Prompt="@Session.Prompt" Negative="@Session.Negative" OnPut="PutSaved" OnClose="() => _savedOpen = false" />
+}
+
+@code {
+    private bool _ready, _keeping, _savedOpen;
+    private string? _root, _engine, _error, _note;
+    private IReadOnlyList<ImageFile> _files = [];
+    private List<ImageFile> _checkpoints = [];
+    private ImageFile? _checkpoint;
+    private CheckpointSettings? _card;
+    private ImagesControls? _controls;
+    private SeedChoice _seed = SeedChoice.New;
+    private IJSObjectReference? _module;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.Changed += Refresh;
+        Engine.Changed += Refresh;
+        _engine = PictureLocator.Find();
+        _root = (await SettingsStore.LoadAsync()).ImageFolder();
+        if (_root is { } root)
+        {
+            _files = await Task.Run(() => ImageLibrary.Scan(root));
+            _checkpoints = Files(ImageFileKind.Checkpoint).ToList();
+            var paths = _checkpoints.Select(c => c.RelativePath).ToList();
+            if (Memory.CheckpointAmong(paths, Catalog) is { } chosen) Use(_checkpoints.First(c => c.RelativePath == chosen));
+        }
+        _ready = true;
+    }
+
+    private IEnumerable<ImageFile> Files(ImageFileKind kind) => _files.Where(f => f.Usable && f.Kind == kind);
+
+    /// <summary>Makes a checkpoint the one shown, with its card and the controls remembered for it. The boxes are filled once per run.</summary>
+    private void Use(ImageFile checkpoint)
+    {
+        _checkpoint = checkpoint;
+        _card = Catalog.CheckpointFor(checkpoint.RelativePath, checkpoint.Verdict);
+        _controls = Memory.For(checkpoint.RelativePath, _card);
+        _seed = _controls.Seed is null ? SeedChoice.New : SeedChoice.Keep;
+        var card = _card;
+        Session.Start(() => Saved.StartingBoxes(card));
+    }
+
+    private string? Missing() =>
+        _engine is null ? "The picture engine is not installed. Install it in " + ModelsPlaces.EnginesName + "."
+        : _root is null ? "No models folder is set. Choose one in Models."
+        : _checkpoint is null || _card is null ? "There is no checkpoint to draw with. Download one in " + ModelsPlaces.GetPicturesName + ", or put a .safetensors checkpoint in the checkpoints folder (" + ModelsPlaces.PicturesName + " opens it)."
+        : null;
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>Everything that stops a Draw, the empty prompt included.</summary>
+    private IReadOnlyList<string> Problems =>
+        _controls is null ? ["Nothing to draw with."]
+        : [.. (_seed.Problem is { } seed ? [seed] : Array.Empty<string>()).Concat(ImagesDraw.Problems(Session.Prompt, Session.Negative, _controls)).Distinct()];
+
+    /// <summary>The problems worth saying under the boxes: not the empty prompt, which the empty box says by itself.</summary>
+    private IReadOnlyList<string> FieldProblems => [.. Problems.Where(p => p != "The prompt is empty.")];
+
+    private string? StatusText
+    {
+        get
+        {
+            if (Session.IsDrawing)
+            {
+                var stage = Session.Progress is { } p ? PictureWords.Of(p)
+                    : Engine.State == EngineState.Loading ? "Waiting for the chat model to finish loading…" : null;
+                return ImagesPanels.Doing(Session.Drawing, Session.Of, stage);
+            }
+            return _note is null ? "Sent exactly as typed." : null;
+        }
+    }
+
+    private string? PreviewSrc() => Session.Preview is { } p ? "data:image/png;base64," + Convert.ToBase64String(p) : null;
+
+    private static string Text(ChangeEventArgs e) => e.Value?.ToString() ?? "";
+
+    private static int Int(ChangeEventArgs e, int old) =>
+        int.TryParse(Text(e).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var v) ? v
+        : double.TryParse(Text(e).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? (int)Math.Round(d) : old;
+
+    private static double Dbl(ChangeEventArgs e, double old) =>
+        double.TryParse(Text(e).Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : old;
+
+    private static int Larger(int side, double scale) => (int)Math.Round(side * scale);
+
+    private static IEnumerable<string> Upscalers(string current) =>
+        new[] { PictureLevels.FineUpscaler, "Latent" }.Concat(new[] { current }).Distinct();
+
+    /// <summary>
+    /// A control changed: shown at once; remembered only when nothing about the controls is wrong (the problem is said
+    /// under the boxes and Draw waits).
+    /// </summary>
+    private async Task SetAsync(ImagesControls next)
+    {
+        _controls = next;
+        _error = null;
+        if (_checkpoint is null || _card is null || next.Problems().Count > 0) return;
+        try
+        {
+            await Memory.SaveAsync(_checkpoint.RelativePath, _card, next);
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private async Task ChooseCheckpointAsync(ChangeEventArgs e)
+    {
+        if (_checkpoints.FirstOrDefault(c => c.RelativePath == Text(e)) is not { } chosen) return;
+        await Memory.ChooseAsync(chosen.RelativePath);
+        Use(chosen);
+        _note = null;
+    }
+
+    private async Task ResetSamplingAsync()
+    {
+        if (_checkpoint is null || _card is null) return;
+        await Memory.ResetSamplingAsync(_checkpoint.RelativePath);
+        _controls = Memory.For(_checkpoint.RelativePath, _card);
+    }
+
+    // ── LoRAs ──
+
+    private sealed record LoraRow(string Path, string Name, bool On, double Strength, bool Missing);
+
+    /// <summary>Every installed LoRA (ticked or not), then ticked ones whose file is gone.</summary>
+    private IEnumerable<LoraRow> LoraRows(ImagesControls controls)
+    {
+        var installed = Files(ImageFileKind.Lora).ToList();
+        foreach (var file in installed)
+        {
+            var path = ImageModelCatalog.Normalise(file.RelativePath);
+            var use = controls.Loras.FirstOrDefault(l => string.Equals(l.Path, path, StringComparison.OrdinalIgnoreCase));
+            yield return new LoraRow(path, file.Name, use is not null, use?.Strength ?? 1.0, false);
+        }
+        foreach (var gone in controls.Loras.Where(l => !installed.Any(f => string.Equals(ImageModelCatalog.Normalise(f.RelativePath), l.Path, StringComparison.OrdinalIgnoreCase))))
+            yield return new LoraRow(gone.Path, System.IO.Path.GetFileNameWithoutExtension(gone.Path), true, gone.Strength, true);
+    }
+
+    private Task ToggleLoraAsync(ImagesControls controls, LoraRow row, bool on)
+    {
+        var rest = controls.Loras.Where(l => !string.Equals(l.Path, row.Path, StringComparison.OrdinalIgnoreCase));
+        return SetAsync(controls with { Loras = on ? [.. rest, new LoraUse(row.Path, row.Strength)] : [.. rest] });
+    }
+
+    private Task StrengthAsync(ImagesControls controls, LoraRow row, ChangeEventArgs e) => SetAsync(controls with
+    {
+        Loras = [.. controls.Loras.Select(l => string.Equals(l.Path, row.Path, StringComparison.OrdinalIgnoreCase) ? l with { Strength = Dbl(e, l.Strength) } : l)],
+    });
+
+    // ── Seed ──
+
+    /// <summary>What Keep means in the seed row: the seed set, else the seed of the picture shown.</summary>
+    private long SeedOriginal => _controls?.Seed ?? Session.Selected?.Request.Seed ?? -1;
+
+    private async Task SeedChangedAsync(SeedChoice choice)
+    {
+        if (_controls is null) return;
+        _seed = choice;
+        if (choice.Problem is not null) return; // said under the row; Draw waits
+        var seed = choice.Mode == SeedMode.New ? null : (long?)choice.For(SeedOriginal);
+        await SetAsync(_controls with { Seed = seed });
+        _seed = seed is null ? SeedChoice.New : SeedChoice.Keep;
+    }
+
+    // ── Draw, Keep, Use these settings ──
+
+    private async Task DrawAsync()
+    {
+        if (_controls is not { } controls || _checkpoint is null || _card is null || _root is null || Problems.Count > 0) return;
+        _error = null;
+        _note = null;
+        var request = ImagesDraw.Request(Session.Prompt, Session.Negative, controls);
+        var model = ImagesDraw.Model(_root, _checkpoint.RelativePath, _card, controls);
+        var (checkpoint, vae, prediction, root) = (_checkpoint.RelativePath, controls.Sampling.Vae, _card.Prediction, _root);
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var drawn = 0;
+        try
+        {
+            ImageLibrary.Ensure(root);
+            drawn = await Task.Run(() => Session.DrawAsync(Card, model, checkpoint, vae, prediction, request));
+            _note = (drawn == 1 ? $"Drawn in {clock.Elapsed.TotalSeconds:0.0} seconds." : $"{drawn} pictures drawn in {clock.Elapsed.TotalSeconds:0} seconds.") + Afterwards();
+        }
+        catch (OperationCanceledException)
+        {
+            _note = Session.Tries.Count > 0 ? "Cancelled. The pictures already drawn stay in the strip." : "Cancelled.";
+        }
+        catch (Exception e) when (e is ImageEngineException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private string Afterwards() =>
+        (Coordinator.LastDecision?.Choice == CardChoice.SetChatAside ? " The chat model was set aside to make room; it loads again with your next message." : "") +
+        (Session.Dropped ? $" Only the last {ImagesSession.Max} tries are held; the oldest were let go." : "");
+
+    /// <summary>
+    /// Keeps the picture inside DOG.ai (the Pictures table), with a small preview made here in the page from the picture
+    /// itself (in memory) for the Kept pictures grid. A preview that is not acceptable is left out; the picture is kept anyway.
+    /// </summary>
+    private async Task KeepAsync(ImagesTry shown)
+    {
+        _keeping = true;
+        _error = null;
+        try
+        {
+            var picture = shown.ToKeep();
+            var (w, h) = PicturePreview.SizeFor(shown.ImageWidth, shown.ImageHeight);
+            string? previewNote = null;
+            try
+            {
+                _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/pictures.js");
+                // The browser adds a colour profile beside the picture: only the picture part is kept.
+                var preview = PicturePreview.Plain(await _module.InvokeAsync<byte[]>("toPreview", shown.Src, w, h));
+                if (PicturePreview.Problem(preview, shown.ImageWidth, shown.ImageHeight) is { } problem) previewNote = problem;
+                else picture.Preview = preview;
+            }
+            catch (JSException e)
+            {
+                previewNote = e.Message;
+            }
+            var row = await Pictures.AddAsync(picture);
+            Session.Kept(shown, row.Id);
+            _note = "Kept inside DOG.ai." + (previewNote is null ? "" : " (No small preview was made for it: " + previewNote + ")");
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = "The picture could not be kept: " + e.Message;
+        }
+        finally
+        {
+            _keeping = false;
+        }
+    }
+
+    /// <summary>"Use these settings": the picture's checkpoint, prompts and every control (its seed too) back on the Make tab.</summary>
+    private async Task UseSettingsAsync(ImagesTry shown)
+    {
+        if (_controls is null) return;
+        _error = null;
+        var like = ImagesDraw.Like(shown.ToKeep(), _controls);
+        if (_checkpoints.FirstOrDefault(c => string.Equals(ImageModelCatalog.Normalise(c.RelativePath), like.Checkpoint, StringComparison.OrdinalIgnoreCase)) is not { } checkpoint)
+        {
+            _error = "Its checkpoint is not in the checkpoints folder any more, so its settings cannot be used.";
+            return;
+        }
+        if (checkpoint.RelativePath != _checkpoint?.RelativePath)
+        {
+            await Memory.ChooseAsync(checkpoint.RelativePath);
+            Use(checkpoint);
+        }
+        Session.Type(like.Prompt, like.NegativePrompt);
+        await SetAsync(like.Controls);
+        _seed = like.Controls.Seed is null ? SeedChoice.New : SeedChoice.Keep;
+        _note = $"The boxes and the side panel now hold the settings of try {shown.Number}, its seed ({shown.Request.Seed}) too: Draw gives the same picture. Press New seed under Seed for new ones.";
+    }
+
+    private async Task SaveFileAsync(ImagesTry shown)
+    {
+        _error = null;
+        try
+        {
+            var saved = await Desktop.SaveFileAsync($"picture-{shown.Request.Seed}.webp", "WebP picture (*.webp)|*.webp", shown.Image);
+            if (saved is not null) _note = "Saved as " + System.IO.Path.GetFileName(saved) + ".";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _error = "The file could not be saved: " + e.Message;
+        }
+    }
+
+    private void PutSaved((string Prompt, string Negative) boxes)
+    {
+        Session.Type(boxes.Prompt, boxes.Negative);
+        _savedOpen = false;
+    }
+
+    public void Dispose()
+    {
+        Session.Changed -= Refresh;
+        Engine.Changed -= Refresh;
+        // A Draw belongs to the page that started it: leaving stops it (the pictures already drawn stay in the strip).
+        Session.Cancel();
+        if (_module is not null) _ = DisposeModuleAsync(_module);
+    }
+
+    private static async Task DisposeModuleAsync(IJSObjectReference module)
+    {
+        try
+        {
+            await module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
+}

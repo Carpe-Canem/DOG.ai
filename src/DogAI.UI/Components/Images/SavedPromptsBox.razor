@@ -1,0 +1,197 @@
+@* The Images section's Saved prompts (M16 step 2), opened from the button beside the prompt boxes: put one in (Replace)
+   or after what is typed (Add), store what is in the boxes now (Save these as…), mark one "Start with this", and
+   edit or delete them as the chat prompt library does. Storage and the rules are SavedPicturePrompts (Core). Nothing
+   typed reaches it unless Save is pressed. *@
+@implements IDisposable
+@inject SavedPicturePrompts Saved
+
+<Modal Title="@(_edit is null ? "Saved prompts" : _edit.Id.Length == 0 ? "New saved prompt" : "Edit saved prompt")" Class="wide saved-prompts" OnClose="OnClose">
+    @if (_edit is { } edit)
+    {
+        <div class="saved-edit" id="saved-edit">
+            <label class="field-block">
+                <span class="field-label">Name</span>
+                <input class="field" id="saved-edit-name" maxlength="@SavedPicturePrompts.MaxNameLength" value="@edit.Name"
+                       @oninput="e => _edit = edit with { Name = Text(e) }" />
+            </label>
+            <label class="field-block">
+                <span class="field-label">Prompt</span>
+                <textarea class="field" id="saved-edit-prompt" rows="4" value="@edit.Prompt" @oninput="e => _edit = _edit! with { Prompt = Text(e) }"></textarea>
+            </label>
+            <label class="field-block">
+                <span class="field-label">Negative prompt</span>
+                <textarea class="field" id="saved-edit-negative" rows="3" value="@edit.Negative" @oninput="e => _edit = _edit! with { Negative = Text(e) }"></textarea>
+            </label>
+            @Error()
+            <div class="row">
+                <button class="btn primary" id="saved-edit-save" @onclick="SaveEditAsync">Save</button>
+                <button class="btn" id="saved-edit-cancel" @onclick="() => { _edit = null; _error = null; }">Cancel</button>
+                @if (edit.Id.Length > 0)
+                {
+                    @if (_confirmDelete)
+                    {
+                        <span class="small">Delete “@edit.Name”?</span>
+                        <button class="btn danger" id="saved-edit-delete-yes" @onclick="() => DeleteAsync(edit.Id)">Delete</button>
+                        <button class="btn" @onclick="() => _confirmDelete = false">Keep</button>
+                    }
+                    else
+                    {
+                        <button class="btn" id="saved-edit-delete" @onclick="() => _confirmDelete = true">Delete…</button>
+                    }
+                }
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="saved-save">
+            <label class="field-block">
+                <span class="field-label">Save these as… <span class="small">What is in the two boxes now, under a name. The same name replaces.</span></span>
+                <span class="saved-save-row">
+                    <input class="field" id="saved-name" maxlength="@SavedPicturePrompts.MaxNameLength" placeholder="A name, e.g. Watercolour landscape"
+                           @bind="_name" @bind:event="oninput" @onkeydown="NameKeyAsync" />
+                    <button class="btn primary" id="saved-save" disabled="@string.IsNullOrWhiteSpace(_name)" @onclick="SaveAsAsync">Save</button>
+                </span>
+            </label>
+            @Error()
+            @if (_note is { } note)
+            {
+                <p class="small" id="saved-note" role="status">@note</p>
+            }
+        </div>
+
+        @if (Saved.All.Count == 0)
+        {
+            <p class="small" id="saved-none">No saved prompts yet. Type what you use often in the boxes, then save it here under a name.</p>
+        }
+        else
+        {
+            <div class="saved-list" id="saved-list">
+                @foreach (var s in Saved.All)
+                {
+                    var saved = s;
+                    var start = Saved.Start?.Id == saved.Id;
+                    <div class="saved-item" data-saved="@saved.Id">
+                        <div class="saved-text">
+                            <span class="saved-name">@saved.Name @if (start) {<span class="chip" title="The boxes start with this after DOG.ai starts">Start with this</span>}</span>
+                            <span class="small saved-line">@Line(saved.Prompt)</span>
+                            @if (saved.Negative.Length > 0)
+                            {
+                                <span class="small saved-line">Negative: @Line(saved.Negative)</span>
+                            }
+                        </div>
+                        <div class="saved-acts">
+                            <button class="btn" data-act="replace" title="Put this in the boxes in place of what is typed" @onclick="() => PutAsync(SavedPicturePrompts.Replace(saved))">Replace</button>
+                            <button class="btn" data-act="add" title="Add this after what is typed, with a comma" @onclick="() => PutAsync(SavedPicturePrompts.Add(Prompt, Negative, saved))">Add</button>
+                            <MoreMenu Label="@($"More for {saved.Name}")">
+                                <button class="menu-item" data-act="edit" @onclick="() => { _edit = saved; _error = null; _confirmDelete = false; }">Edit…</button>
+                                @if (start)
+                                {
+                                    <button class="menu-item" data-act="unstart" @onclick="() => StartAsync(null)">Don’t start with this</button>
+                                }
+                                else
+                                {
+                                    <button class="menu-item" data-act="start" @onclick="() => StartAsync(saved.Id)">Start with this</button>
+                                }
+                                <button class="menu-item danger" data-act="delete" @onclick="() => { _edit = saved; _confirmDelete = true; _error = null; }">Delete…</button>
+                            </MoreMenu>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        <p class="small">Marked “Start with this”, a saved prompt fills the boxes when DOG.ai starts; with none marked they start with the checkpoint’s own quality words and negative prompt. Saved prompts are kept inside DOG.ai, locked with the rest when the lock is on.</p>
+    }
+</Modal>
+
+@code {
+    /// <summary>What is in the boxes now (Add goes after it; Save these as… stores it).</summary>
+    [Parameter] public string Prompt { get; set; } = "";
+    [Parameter] public string Negative { get; set; } = "";
+
+    /// <summary>Called with what the two boxes should now hold.</summary>
+    [Parameter] public EventCallback<(string Prompt, string Negative)> OnPut { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private SavedPicturePrompt? _edit;
+    private string? _name, _error, _note;
+    private bool _confirmDelete;
+
+    protected override void OnInitialized() => Saved.Changed += Refresh;
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => Saved.Changed -= Refresh;
+
+    private static string Text(ChangeEventArgs e) => e.Value?.ToString() ?? "";
+
+    private static string Line(string text)
+    {
+        var line = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return line.Length == 0 ? "(empty)" : line.Length <= 110 ? line : line[..107] + "…";
+    }
+
+    private RenderFragment Error() => __builder =>
+    {
+        @if (_error is { } error)
+        {
+            <p class="small bad-text" id="saved-error" role="alert">@error</p>
+        }
+    };
+
+    private async Task SaveAsAsync()
+    {
+        _error = _note = null;
+        try
+        {
+            var replaces = Saved.All.Any(p => string.Equals(p.Name, (_name ?? "").Trim(), StringComparison.OrdinalIgnoreCase));
+            var saved = await Saved.SaveAsAsync(_name ?? "", Prompt, Negative);
+            _note = replaces ? $"“{saved.Name}” was replaced with what is in the boxes." : $"Saved as “{saved.Name}”.";
+            _name = null;
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private async Task NameKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(_name)) await SaveAsAsync();
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_edit is null) return;
+        _error = null;
+        try
+        {
+            await Saved.UpdateAsync(_edit);
+            _edit = null;
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private async Task DeleteAsync(string id)
+    {
+        await Saved.DeleteAsync(id);
+        _edit = null;
+        _confirmDelete = false;
+    }
+
+    private async Task StartAsync(string? id)
+    {
+        _error = null;
+        try
+        {
+            await Saved.SetStartAsync(id);
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+        }
+    }
+
+    private Task PutAsync((string Prompt, string Negative) boxes) => OnPut.InvokeAsync(boxes);
+}

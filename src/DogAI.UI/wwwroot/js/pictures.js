@@ -22,3 +22,20 @@ export function toPng(src) {
 export function toJpeg(src, quality) {
     return convert(src, 'image/jpeg', quality);
 }
+
+// The small WebP a kept picture is listed with (PicturePreview: the longest side 384 px, the picture's own shape). The
+// canvas writes the picture alone, with no metadata; the store checks that before keeping it.
+export async function toPreview(src, width, height) {
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const g = canvas.getContext('2d', { alpha: false });
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(img, 0, 0, width, height);
+    const blob = await new Promise((resolve, reject) =>
+        canvas.toBlob(b => (b ? resolve(b) : reject(new Error('The preview could not be made.'))), 'image/webp', 0.82));
+    return new Uint8Array(await blob.arrayBuffer());
+}

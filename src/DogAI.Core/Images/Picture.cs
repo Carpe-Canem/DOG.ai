@@ -56,6 +56,36 @@ public static class PicturePreview
         return (Math.Max(1, (int)Math.Round(imageWidth * scale)), Math.Max(1, (int)Math.Round(imageHeight * scale)));
     }
 
+    /// <summary>
+    /// The picture part alone, as a plain lossy WebP: the browser's encoder wraps its preview in the extended format with
+    /// a colour profile (ICC, about 450 bytes) beside the picture. Anything that is not an extended lossy file with
+    /// only a colour profile and the picture (transparency, animation, EXIF, XMP) comes back unchanged, for
+    /// <see cref="Problem"/> to judge.
+    /// </summary>
+    public static byte[] Plain(byte[] webp)
+    {
+        if (webp.Length < 30 || !webp.AsSpan(0, 4).SequenceEqual("RIFF"u8) || !webp.AsSpan(8, 4).SequenceEqual("WEBP"u8)
+            || !webp.AsSpan(12, 4).SequenceEqual("VP8X"u8)) return webp;
+        byte[]? picture = null;
+        var at = 12;
+        while (at + 8 <= webp.Length)
+        {
+            var name = webp.AsSpan(at, 4);
+            var size = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(webp.AsSpan(at + 4, 4));
+            if (size > (uint)(webp.Length - at - 8)) return webp;
+            if (name.SequenceEqual("VP8 "u8)) picture = webp.AsSpan(at, 8 + (int)size).ToArray();
+            else if (!name.SequenceEqual("VP8X"u8) && !name.SequenceEqual("ICCP"u8)) return webp;
+            at += 8 + (int)size + (int)(size & 1);
+        }
+        if (picture is null) return webp;
+        var plain = new byte[12 + picture.Length + (picture.Length & 1)];
+        "RIFF"u8.CopyTo(plain);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(plain.AsSpan(4), (uint)(plain.Length - 8));
+        "WEBP"u8.CopyTo(plain.AsSpan(8));
+        picture.CopyTo(plain, 12);
+        return plain;
+    }
+
     /// <summary>What stops these bytes from being the preview of a picture of this size, in plain words, or null.</summary>
     public static string? Problem(byte[]? preview, int imageWidth, int imageHeight)
     {
