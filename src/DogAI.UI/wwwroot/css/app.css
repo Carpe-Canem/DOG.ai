@@ -672,6 +672,33 @@ button.cite:hover { border-color: var(--accent); }
 .saved-line { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .saved-acts { flex: none; display: flex; gap: 6px; align-items: center; }
 .saved-edit { display: grid; gap: 10px; }
+/* Images, the two tabs in the header and the Kept pictures tab (M16 step 3): a grid of previews in cells of one shape
+   (each picture whole inside its cell), newest first, with a find box and two filters above it. */
+.images-tabs { margin: 0; border-bottom: 0; flex: 1; justify-content: center; min-width: 0; flex-wrap: nowrap; }
+.kept { display: flex; flex-direction: column; gap: 12px; }
+.kept-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.kept-tools .kept-find { flex: 1 1 220px; min-width: 0; }
+.kept-tools select { flex: 0 1 200px; min-width: 0; text-overflow: ellipsis; }
+.kept-drawing, .kept-note { margin: 0; }
+.kept-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
+.kept-item { padding: 0; aspect-ratio: 3 / 4; border: 1px solid var(--line); border-radius: min(var(--r), 10px); background: var(--surface2); cursor: pointer;
+  overflow: hidden; display: grid; place-items: center; }
+.kept-item:hover, .kept-item:focus-visible { border-color: var(--accent); }
+.kept-item img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.kept-noprev { color: var(--muted); }
+.kept-empty { display: grid; justify-items: center; gap: 6px; text-align: center; padding: 48px 20px; border: 1px dashed var(--line); border-radius: min(var(--r), 14px); color: var(--muted); }
+.kept-empty p { margin: 0; max-width: 420px; }
+.kept-empty .icon { color: var(--accent); }
+.kept-foot { display: flex; gap: 12px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.kept-foot:empty { display: none; }
+.kept-view .picture-large { max-height: calc(100vh - 390px); min-height: 160px; }
+.kept-meta { margin: 0; text-align: center; overflow-wrap: anywhere; }
+.kept-prompts { display: grid; gap: 8px; }
+.kept-text { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 6.6em; overflow-y: auto; font-size: .92em;
+  padding: 6px 8px; background: var(--surface2); border-radius: min(var(--r), 8px); }
+.kept-acts { flex-wrap: wrap; }
+.kept-step { margin-left: auto; display: flex; gap: 6px; }
+.images-about p { margin: 0; }
 /* Narrow: the strip gets thinner; only a very narrow window puts it under the picture. */
 @media (max-width: 520px) {
   .images-stage { flex-direction: column; }
@@ -684,6 +711,8 @@ button.cite:hover { border-color: var(--accent); }
   .images-box > span { padding-top: 0; }
   .saved-item { flex-direction: column; align-items: stretch; }
   .head-select { max-width: 150px; }
+  .kept-tools .kept-find { flex-basis: 100%; }
+  .kept-tools select { flex: 1 1 0; }
 }
 /* A short window: the boxes start two lines and one line high (they can still be dragged taller), so the picture keeps room. */
 @media (max-height: 720px) { #images-prompt { height: calc(2.9em + 14px); } #images-negative { height: calc(1.45em + 14px); } .images-stage { min-height: 220px; } }

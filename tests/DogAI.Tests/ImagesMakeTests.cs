@@ -213,8 +213,12 @@ public sealed class ImagesMakeTests
         Assert.Equal("Images", images.Title);
         Assert.Contains(QuickJump.Find([], "draw"), t => t.Route == ImagesPanels.Address);
         Assert.Equal("Images", ReturnPlace.NameOf(ImagesPanels.Address));
-        // The Kept pictures tab is step 3's: nothing links to it yet.
-        Assert.DoesNotContain(QuickJump.Screens, s => s.Route == ImagesPanels.KeptAddress);
+        // The Kept pictures tab (step 3): its own entry, found by "kept", and a back target by name.
+        var kept = Assert.Single(QuickJump.Screens, s => s.Route == ImagesPanels.KeptAddress);
+        Assert.False(kept.Main);
+        Assert.Equal("Kept pictures", QuickJump.Find([], "kept").First(t => t.Kind == JumpKind.Screen).Title);
+        Assert.Equal("Kept pictures", ReturnPlace.NameOf(ImagesPanels.KeptAddress));
+        Assert.Equal([ImagesPanels.Address, ImagesPanels.KeptAddress], ImagesPanels.Tabs.Select(t => t.Id));
     }
 
     [Fact]

@@ -127,6 +127,25 @@ public sealed class ImagesSession
         return marked;
     }
 
+    /// <summary>
+    /// A kept picture was removed (Kept pictures › Remove): any try kept as that row is marked not kept again, so Keep is
+    /// offered for it once more. True when a try was marked.
+    /// </summary>
+    public bool Unkept(long id)
+    {
+        var any = false;
+        for (var i = 0; i < _tries.Count; i++)
+        {
+            if (_tries[i].KeptId != id) continue;
+            var was = _tries[i];
+            _tries[i] = was with { KeptId = null };
+            if (ReferenceEquals(_selected, was)) _selected = _tries[i];
+            any = true;
+        }
+        if (any) Changed?.Invoke();
+        return any;
+    }
+
     /// <summary>Lets every try go (nothing kept is touched: kept pictures are in the database).</summary>
     public void Clear()
     {
@@ -231,8 +250,50 @@ public static class ImagesPanels
     /// <summary>The Make tab's address.</summary>
     public const string Address = "images";
 
-    /// <summary>The Kept pictures tab's address: reserved for step 3 of M16, no page answers it yet.</summary>
+    /// <summary>The Kept pictures tab's address (a second route of the same page, so a Draw goes on while it is open).</summary>
     public const string KeptAddress = "images/kept";
+
+    /// <summary>The two tabs in the header, as (address, title).</summary>
+    public static readonly IReadOnlyList<(string Id, string Title)> Tabs = [(Address, "Make"), (KeptAddress, "Kept pictures")];
+
+    /// <summary>The short note in the side panel of the Kept pictures tab (in place of the controls).</summary>
+    public const string KeptAbout = "Kept inside DOG.ai, and locked with the rest when the lock is on. A picture leaves only through Save as a file.";
+
+    /// <summary>How a checkpoint is named in the filter and the facts: its file name without the folder or ".safetensors".</summary>
+    public static string CheckpointName(string? path) =>
+        string.IsNullOrWhiteSpace(path) ? "Unknown checkpoint" : System.IO.Path.GetFileNameWithoutExtension(path.Replace('\\', '/').Split('/')[^1]);
+
+    /// <summary>
+    /// The line under the grid: "18 kept pictures", "312 kept pictures · showing 40", "3 found", or what it says when there
+    /// is nothing. <paramref name="filtered"/> is true when words, a checkpoint or a shape narrow the list.
+    /// </summary>
+    public static string KeptCount(int total, int shown, bool filtered)
+    {
+        if (total <= 0) return filtered ? "No kept picture matches." : "No kept pictures yet. Pictures you keep on the Make tab show here.";
+        var count = total.ToString("N0", CultureInfo.InvariantCulture);
+        var head = filtered ? $"{count} found" : total == 1 ? "1 kept picture" : $"{count} kept pictures";
+        return shown < total ? $"{head} · showing {shown.ToString("N0", CultureInfo.InvariantCulture)}" : head;
+    }
+
+    /// <summary>
+    /// The facts of a kept picture in its large view: "832 × 1216 · seed 2817463950 · Euler, 28 steps · guidance 5.5 ·
+    /// hires ×1.5 · illustrious · kept 15 Nov 2026, 14:03". <paramref name="keptLocal"/> is when it was kept, in local time.
+    /// </summary>
+    public static string KeptMeta(Picture p, DateTime keptLocal)
+    {
+        var parts = new List<string>
+        {
+            $"{p.ImageWidth} × {p.ImageHeight}",
+            "seed " + p.Seed.ToString(CultureInfo.InvariantCulture),
+            $"{SamplerNames.Title(p.Sampler)}, {p.Steps} steps",
+            "guidance " + p.Guidance.ToString("0.##", CultureInfo.InvariantCulture),
+        };
+        if (p.Hires is { } h) parts.Add("hires ×" + h.Scale.ToString("0.##", CultureInfo.InvariantCulture));
+        if (p.Loras.Count > 0) parts.Add(p.Loras.Count == 1 ? "1 LoRA" : $"{p.Loras.Count} LoRAs");
+        parts.Add(CheckpointName(p.Checkpoint));
+        parts.Add("kept " + keptLocal.ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture));
+        return string.Join(" · ", parts);
+    }
 
     public const string Model = "images-model", Loras = "images-loras", Size = "images-size", Sampling = "images-sampling",
         Seed = "images-seed", Hires = "images-hires", Count = "images-count";

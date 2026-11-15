@@ -1,5 +1,7 @@
 @page "/images"
+@page "/images/kept"
 @using System.Globalization
+@using Microsoft.AspNetCore.Components.Routing
 @using DogAI.Engine.Images
 @implements IDisposable
 @inject ImagesSession Session
@@ -14,20 +16,25 @@
 @inject SdServerLocator PictureLocator
 @inject IDesktopShell Desktop
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
-@* The Images section's Make tab (M16 step 2, layout B "Canvas"): the picture fills the page with the strip of tries beside
-   it, the two prompt boxes sit where the chat box is, and every control is in the side panel as folds. What is typed
-   goes out exactly as typed (ImagesDraw): nothing is added. The boxes and the tries live in ImagesSession (memory only);
-   the controls are remembered by ImagesMemory; a picture reaches the disk only through Keep. *@
+@* The Images section (M16, layout B "Canvas"), both tabs. Make (step 2): the picture fills the page with the strip of
+   tries beside it, the two prompt boxes sit where the chat box is, and every control is in the side panel as folds.
+   What is typed goes out exactly as typed (ImagesDraw): nothing is added. The boxes and the tries live in ImagesSession
+   (memory only); the controls are remembered by ImagesMemory; a picture reaches the disk only through Keep.
+   Kept pictures (step 3, images/kept): KeptPictures. Both addresses are this one page, so going from tab to tab keeps
+   the page (and a Draw in progress) alive; the tab is told from the address. *@
 
 <SectionContent SectionName="title">
     <div class="head-row">
         <div class="head-text">
             <h2>Images</h2>
-            <p>Make pictures from a prompt</p>
+            <p>@(_kept ? "The pictures you kept" : "Make pictures from a prompt")</p>
         </div>
+        <PageTabs Class="images-tabs" Label="Images" Current="@(_kept ? ImagesPanels.KeptAddress : ImagesPanels.Address)"
+                  Items="@ImagesPanels.Tabs" Href="@(id => id)" />
         <div class="head-tools">
-            @if (_checkpoints.Count > 0 && _checkpoint is not null)
+            @if (!_kept && _checkpoints.Count > 0 && _checkpoint is not null)
             {
                 <select class="field head-select" id="images-checkpoint" aria-label="Checkpoint" title="The checkpoint pictures are drawn with here"
                         disabled="@Session.IsDrawing" @onchange="ChooseCheckpointAsync">
@@ -37,12 +44,23 @@
                     }
                 </select>
             }
-            <AsideToggle Place="images" Hideable="false" Label="Open the picture settings" />
+            <AsideToggle Place="images" Hideable="false" Label="@(_kept ? "About kept pictures" : "Open the picture settings")" />
         </div>
     </div>
 </SectionContent>
 
-@if (!_ready)
+@if (_kept)
+{
+    <KeptPictures Like="LikeFromKeptAsync" LikeBlocked="@(Session.IsDrawing ? "A Draw is going on in Make. Wait for it, or cancel it there." : null)"
+                  Drawing="@(Session.IsDrawing ? StatusText : null)" />
+    <AsideRegion Place="images" Hideable="false" Title="Images">
+        <section class="panel images-about" id="images-kept-about">
+            <h4>Kept pictures</h4>
+            <p class="small">@ImagesPanels.KeptAbout</p>
+        </section>
+    </AsideRegion>
+}
+else if (!_ready)
 {
     <p class="note">Looking at the image models…</p>
 }
@@ -117,7 +135,7 @@ else
     </div>
 }
 
-@if (_ready && Missing() is null && _controls is not null)
+@if (!_kept && _ready && Missing() is null && _controls is not null)
 {
     <SectionContent SectionName="composer">
         <div class="images-composer" id="images-composer">
@@ -152,7 +170,7 @@ else
     </SectionContent>
 }
 
-@if (_ready && Missing() is null && _controls is { } controls && _card is { } card)
+@if (!_kept && _ready && Missing() is null && _controls is { } controls && _card is { } card)
 {
     <AsideRegion Place="images" Hideable="false" Title="Picture settings">
         <Fold Id="@ImagesPanels.Model" Title="@ImagesPanels.Title(ImagesPanels.Model)" Summary="@_checkpoint?.Name" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Model)" Level="4" Class="panel images-fold">
@@ -315,8 +333,28 @@ else
     private SeedChoice _seed = SeedChoice.New;
     private IJSObjectReference? _module;
 
+    /// <summary>True on the Kept pictures tab (images/kept).</summary>
+    private bool _kept;
+
+    private bool KeptAddress() =>
+        Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/').Equals(ImagesPanels.KeptAddress, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Going from one tab to the other keeps this page (both addresses are this page), so nothing calls it again: the tab
+    /// follows the address.
+    /// </summary>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        var kept = KeptAddress();
+        if (kept == _kept) return;
+        _kept = kept;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
     protected override async Task OnInitializedAsync()
     {
+        _kept = KeptAddress();
+        Nav.LocationChanged += OnLocationChanged;
         Session.Changed += Refresh;
         Engine.Changed += Refresh;
         _engine = PictureLocator.Find();
@@ -542,23 +580,49 @@ else
     /// <summary>"Use these settings": the picture's checkpoint, prompts and every control (its seed too) back on the Make tab.</summary>
     private async Task UseSettingsAsync(ImagesTry shown)
     {
-        if (_controls is null) return;
         _error = null;
-        var like = ImagesDraw.Like(shown.ToKeep(), _controls);
-        if (_checkpoints.FirstOrDefault(c => string.Equals(ImageModelCatalog.Normalise(c.RelativePath), like.Checkpoint, StringComparison.OrdinalIgnoreCase)) is not { } checkpoint)
+        if (await PutBackAsync(shown.ToKeep()) is { } problem)
         {
-            _error = "Its checkpoint is not in the checkpoints folder any more, so its settings cannot be used.";
+            _error = problem;
             return;
         }
-        if (checkpoint.RelativePath != _checkpoint?.RelativePath)
+        _note = $"The boxes and the side panel now hold the settings of try {shown.Number}, its seed ({shown.Request.Seed}) too: Draw gives the same picture. Press New seed under Seed for new ones.";
+    }
+
+    /// <summary>
+    /// Kept pictures › "Make one like this": the same as Use these settings for a kept picture, then the Make tab.
+    /// Returns what stopped it (said in the large view), or null.
+    /// </summary>
+    private async Task<string?> LikeFromKeptAsync(Picture picture)
+    {
+        if (Session.IsDrawing) return "A Draw is going on in Make. Wait for it, or cancel it there.";
+        if (_engine is null || _root is null) return Missing();
+        if (await PutBackAsync(picture) is { } problem) return problem;
+        _error = null;
+        _note = $"The boxes and the side panel now hold the kept picture’s settings, its seed ({picture.Seed.ToString(CultureInfo.InvariantCulture)}) too: Draw gives the same picture. Press New seed under Seed for new ones.";
+        Nav.NavigateTo(ImagesPanels.Address);
+        return null;
+    }
+
+    /// <summary>
+    /// A picture's checkpoint, both prompts and every control (seed included) onto the Make tab. The checkpoint is
+    /// chosen first, so what the picture does not record comes from that checkpoint's controls. Null when done.
+    /// </summary>
+    private async Task<string?> PutBackAsync(Picture picture)
+    {
+        if (_checkpoints.FirstOrDefault(c => string.Equals(ImageModelCatalog.Normalise(c.RelativePath), ImageModelCatalog.Normalise(picture.Checkpoint), StringComparison.OrdinalIgnoreCase)) is not { } checkpoint)
+            return $"Its checkpoint ({ImagesPanels.CheckpointName(picture.Checkpoint)}) is not in the checkpoints folder any more, so its settings cannot be used.";
+        if (checkpoint.RelativePath != _checkpoint?.RelativePath || _controls is null)
         {
             await Memory.ChooseAsync(checkpoint.RelativePath);
             Use(checkpoint);
         }
+        if (_controls is null) return "There is nothing to draw with.";
+        var like = ImagesDraw.Like(picture, _controls);
         Session.Type(like.Prompt, like.NegativePrompt);
         await SetAsync(like.Controls);
         _seed = like.Controls.Seed is null ? SeedChoice.New : SeedChoice.Keep;
-        _note = $"The boxes and the side panel now hold the settings of try {shown.Number}, its seed ({shown.Request.Seed}) too: Draw gives the same picture. Press New seed under Seed for new ones.";
+        return null;
     }
 
     private async Task SaveFileAsync(ImagesTry shown)
@@ -583,6 +647,7 @@ else
 
     public void Dispose()
     {
+        Nav.LocationChanged -= OnLocationChanged;
         Session.Changed -= Refresh;
         Engine.Changed -= Refresh;
         // A Draw belongs to the page that started it: leaving stops it (the pictures already drawn stay in the strip).

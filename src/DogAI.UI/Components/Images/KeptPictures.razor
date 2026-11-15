@@ -1,0 +1,420 @@
+@using System.Globalization
+@implements IDisposable
+@inject IPictureStore Pictures
+@inject ImagesSession Session
+@inject IDesktopShell Desktop
+@inject IJSRuntime JS
+
+@* The Images section's Kept pictures tab (M16 step 3): the pictures kept on the Make tab (owner kind Images only), newest
+   first, a page at a time, with their previews from their own rows. A box finds words in the prompt; checkpoint and shape
+   filter. A picture opens large with Make one like this, Save as a file… and Remove. Pictures and previews are shown
+   from memory (data: addresses made once per picture), never from a file. *@
+
+<div class="kept" id="kept">
+    <div class="kept-tools">
+        <input class="field kept-find" id="kept-find" type="search" placeholder="Find by words in the prompt" aria-label="Find by words in the prompt"
+               value="@_words" @oninput="Typed" />
+        <select class="field" id="kept-checkpoint" aria-label="Checkpoint" @onchange="CheckpointChosen">
+            <option value="" selected="@(_checkpoint is null)">Every checkpoint</option>
+            @foreach (var c in _checkpoints)
+            {
+                <option value="@c" selected="@(c == _checkpoint)">@ImagesPanels.CheckpointName(c)</option>
+            }
+            @if (_checkpoint is { } gone && !_checkpoints.Contains(gone))
+            {
+                <option value="@gone" selected>@ImagesPanels.CheckpointName(gone)</option>
+            }
+        </select>
+        <select class="field" id="kept-shape" aria-label="Shape" @onchange="ShapeChosen">
+            <option value="" selected="@(_shape is null)">Every shape</option>
+            @foreach (var s in Enum.GetValues<PictureShape>())
+            {
+                <option value="@s" selected="@(s == _shape)">@s</option>
+            }
+        </select>
+    </div>
+
+    @if (Drawing is { } drawing)
+    {
+        <p class="small kept-drawing" id="kept-drawing" role="status">@drawing · <a class="link-text" href="@ImagesPanels.Address">Make</a></p>
+    }
+
+    @if (_error is { } error)
+    {
+        <div class="notice bad" id="kept-error"><span>@error</span></div>
+    }
+    @if (_note is { } note)
+    {
+        <p class="small kept-note" id="kept-note" role="status">@note</p>
+    }
+
+    @if (!_loaded)
+    {
+        <p class="note">Reading the kept pictures…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="kept-empty" id="@(Filtered ? "kept-nomatch" : "kept-none")">
+            <Icon Name="images" Size="40" />
+            <p>@ImagesPanels.KeptCount(0, 0, Filtered)</p>
+        </div>
+    }
+    else
+    {
+        <div class="kept-grid" id="kept-grid" role="list" aria-label="Kept pictures">
+            @foreach (var p in _items)
+            {
+                var item = p;
+                <button class="kept-item" role="listitem" data-picture="@item.Id" data-shape="@PictureQuery.Shapes(item.ImageWidth, item.ImageHeight)" title="@Short(item.Prompt)" @onclick="() => OpenAsync(item.Id)">
+                    @if (_src.TryGetValue(item.Id, out var src))
+                    {
+                        <img src="@src" alt="@($"Kept picture {item.Id}")" loading="lazy" />
+                    }
+                    else
+                    {
+                        <span class="kept-noprev small">@(_failed.Contains(item.Id) ? "No preview" : "…")</span>
+                    }
+                </button>
+            }
+        </div>
+    }
+    @if (_loaded)
+    {
+        <div class="kept-foot">
+            @if (_items.Count > 0)
+            {
+                <span class="small" id="kept-count">@ImagesPanels.KeptCount(_total, _items.Count, Filtered)</span>
+            }
+            @if (_hasMore)
+            {
+                <button class="btn" id="kept-more" disabled="@_loading" @onclick="MoreAsync">Show more</button>
+            }
+        </div>
+    }
+</div>
+
+@if (_viewing is { } viewed && _large is { } large)
+{
+    <Modal Title="Kept picture" Class="wide picture-view kept-view" OnClose="Close">
+        <img class="picture-large" id="kept-large" src="@large" alt="@($"Kept picture {viewed.Id}")" />
+        <p class="small kept-meta" id="kept-meta">@ImagesPanels.KeptMeta(viewed, Local(viewed.CreatedAt))</p>
+        <div class="kept-prompts">
+            <div><span class="field-label">Prompt</span><p class="kept-text" id="kept-prompt">@viewed.Prompt</p></div>
+            @if (viewed.NegativePrompt.Length > 0)
+            {
+                <div><span class="field-label">Negative</span><p class="kept-text" id="kept-negative">@viewed.NegativePrompt</p></div>
+            }
+        </div>
+        @if (_viewError is { } viewError)
+        {
+            <div class="notice bad" id="kept-view-error"><span>@viewError</span></div>
+        }
+        <div class="row kept-acts">
+            <button class="btn primary" id="kept-like" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? "Its checkpoint, prompts and settings, seed included, go to the Make tab")"
+                    @onclick="() => LikeAsync(viewed)">Make one like this</button>
+            <button class="btn" id="kept-save" disabled="@_busy" title="Save this picture as a WebP file" @onclick="() => SaveAsync(viewed)">Save as a file…</button>
+            @if (_confirmRemove)
+            {
+                <button class="btn danger" id="kept-remove-yes" disabled="@_busy" @onclick="() => RemoveAsync(viewed)">Yes, remove it</button>
+                <button class="btn" id="kept-remove-no" @onclick="() => _confirmRemove = false">Keep it</button>
+            }
+            else
+            {
+                <button class="btn" id="kept-remove" disabled="@_busy" title="Remove it from DOG.ai; it cannot be brought back" @onclick="() => _confirmRemove = true">Remove</button>
+            }
+            <span class="kept-step">
+                <button class="btn" id="kept-prev" disabled="@(Neighbour(viewed.Id, -1) is null)" title="The newer picture" aria-label="The newer picture" @onclick="() => StepAsync(viewed.Id, -1)">‹</button>
+                <button class="btn" id="kept-next" disabled="@(Neighbour(viewed.Id, 1) is null)" title="The older picture" aria-label="The older picture" @onclick="() => StepAsync(viewed.Id, 1)">›</button>
+            </span>
+        </div>
+        @if (_confirmRemove)
+        {
+            <p class="small bad-text" id="kept-remove-note">The picture and its settings leave DOG.ai for good. Save it as a file first to keep a copy.</p>
+        }
+    </Modal>
+}
+
+@code {
+    /// <summary>"Make one like this": puts the picture on the Make tab; returns what stopped it, or null when done.</summary>
+    [Parameter, EditorRequired] public Func<Picture, Task<string?>> Like { get; set; } = null!;
+
+    /// <summary>Why Make one like this cannot be pressed now (a Draw in progress), or null.</summary>
+    [Parameter] public string? LikeBlocked { get; set; }
+
+    /// <summary>What a Draw going on in the Make tab says, or null.</summary>
+    [Parameter] public string? Drawing { get; set; }
+
+    private const int FindDelayMs = 300;
+
+    private string _words = "";
+    private string? _checkpoint;
+    private PictureShape? _shape;
+    private List<string> _checkpoints = [];
+    private readonly List<Picture> _items = [];
+    private int _total;
+    private bool _hasMore, _loaded, _loading, _busy, _confirmRemove, _disposed;
+    private int _version;
+    private string? _error, _note, _viewError;
+    private Picture? _viewing;
+    private string? _large;
+    private CancellationTokenSource? _typing;
+    private IJSObjectReference? _module;
+
+    // Each picture's preview as a data: address, made once per picture (never per render), and the previews being made.
+    private readonly Dictionary<long, string> _src = [];
+    private readonly HashSet<long> _failed = [], _repairing = [];
+
+    /// <summary>Whether the pictures shown were found with words, a checkpoint or a shape (what is typed counts once it was looked for).</summary>
+    private bool Filtered { get; set; }
+
+    private bool Filters => PictureQuery.WordsOf(_words).Count > 0 || _checkpoint is not null || _shape is not null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCheckpointsAsync();
+        await LoadAsync(reset: true);
+    }
+
+    private async Task LoadCheckpointsAsync() =>
+        _checkpoints = [.. await Pictures.CheckpointsAsync(PictureOwners.Images, PictureOwners.ImagesOwner)];
+
+    /// <summary>
+    /// Reads a page. A reset starts again from the newest; otherwise the next page is added. A page asked for earlier
+    /// that arrives after a newer question is dropped.
+    /// </summary>
+    private async Task LoadAsync(bool reset)
+    {
+        var mine = ++_version;
+        _loading = true;
+        try
+        {
+            var query = PictureQuery.Images(_words, _checkpoint, _shape, reset ? 0 : _items.Count);
+            var filtered = Filters;
+            var page = await Pictures.PageAsync(query);
+            if (mine != _version || _disposed) return;
+            Filtered = filtered;
+            if (reset) _items.Clear();
+            _items.AddRange(page.Pictures.Where(p => _items.All(i => i.Id != p.Id)));
+            _total = page.Total;
+            _hasMore = page.HasMore;
+            foreach (var p in page.Pictures)
+            {
+                if (p.Preview is { } preview) _src.TryAdd(p.Id, "data:image/webp;base64," + Convert.ToBase64String(preview));
+                p.Preview = null; // the address holds it now
+            }
+            _loaded = true;
+            _error = null;
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException)
+        {
+            if (mine == _version) _error = "The kept pictures could not be read: " + e.Message;
+            _loaded = true;
+        }
+        finally
+        {
+            if (mine == _version) _loading = false;
+        }
+        _ = RepairPreviewsAsync();
+    }
+
+    private Task MoreAsync() => LoadAsync(reset: false);
+
+    private void Typed(ChangeEventArgs e)
+    {
+        _words = e.Value?.ToString() ?? "";
+        _typing?.Cancel();
+        var typing = _typing = new CancellationTokenSource();
+        _ = FindLaterAsync(typing.Token);
+    }
+
+    private async Task FindLaterAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(FindDelayMs, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        await InvokeAsync(async () =>
+        {
+            if (ct.IsCancellationRequested || _disposed) return;
+            await LoadAsync(reset: true);
+            StateHasChanged();
+        });
+    }
+
+    private Task CheckpointChosen(ChangeEventArgs e)
+    {
+        _checkpoint = e.Value?.ToString() is { Length: > 0 } c ? c : null;
+        return LoadAsync(reset: true);
+    }
+
+    private Task ShapeChosen(ChangeEventArgs e)
+    {
+        _shape = Enum.TryParse<PictureShape>(e.Value?.ToString(), out var s) ? s : null;
+        return LoadAsync(reset: true);
+    }
+
+    /// <summary>
+    /// A picture kept without a preview (the page could not make one when it was kept) gets one now, made here from the
+    /// picture in memory and kept in its row; one at a time, each tried once per visit. If it cannot be made the tile
+    /// says "No preview" and the picture still opens.
+    /// </summary>
+    private async Task RepairPreviewsAsync()
+    {
+        foreach (var p in _items.Where(p => !_src.ContainsKey(p.Id) && !_failed.Contains(p.Id) && !_repairing.Contains(p.Id)).ToList())
+        {
+            if (_disposed) return;
+            _repairing.Add(p.Id);
+            try
+            {
+                if (await Pictures.ImageAsync(p.Id) is not { } image) continue;
+                var (w, h) = PicturePreview.SizeFor(p.ImageWidth, p.ImageHeight);
+                _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/pictures.js");
+                var preview = PicturePreview.Plain(await _module.InvokeAsync<byte[]>("toPreview", "data:image/webp;base64," + Convert.ToBase64String(image), w, h));
+                if (PicturePreview.Problem(preview, p.ImageWidth, p.ImageHeight) is not null) { _failed.Add(p.Id); continue; }
+                if (await Pictures.SetPreviewAsync(p.Id, preview)) _src[p.Id] = "data:image/webp;base64," + Convert.ToBase64String(preview);
+            }
+            catch (Exception e) when (e is JSException or JSDisconnectedException or InvalidOperationException or IOException or TaskCanceledException)
+            {
+                _failed.Add(p.Id);
+            }
+            finally
+            {
+                _repairing.Remove(p.Id);
+                if (!_disposed) await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    // ── The large view ──
+
+    private async Task OpenAsync(long id)
+    {
+        _error = _viewError = null;
+        _note = null;
+        _confirmRemove = false;
+        var picture = await Pictures.GetAsync(id);
+        if (picture?.Image is not { } image)
+        {
+            _error = "That picture is not there any more.";
+            Forget(id);
+            return;
+        }
+        _viewing = picture;
+        _large = "data:image/webp;base64," + Convert.ToBase64String(image);
+    }
+
+    private void Close()
+    {
+        _viewing = null;
+        _large = null;
+        _confirmRemove = false;
+        _viewError = null;
+    }
+
+    /// <summary>The picture before (-1, newer) or after (+1, older) this one among those shown, or null.</summary>
+    private long? Neighbour(long id, int step)
+    {
+        var here = _items.FindIndex(p => p.Id == id);
+        var at = here + step;
+        return here >= 0 && at >= 0 && at < _items.Count ? _items[at].Id : null;
+    }
+
+    private async Task StepAsync(long id, int step)
+    {
+        if (Neighbour(id, step) is { } next) await OpenAsync(next);
+    }
+
+    private async Task LikeAsync(Picture picture)
+    {
+        _busy = true;
+        try
+        {
+            _viewError = await Like(picture);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync(Picture picture)
+    {
+        if (picture.Image is not { } image) return;
+        _busy = true;
+        _viewError = null;
+        try
+        {
+            var saved = await Desktop.SaveFileAsync($"picture-{picture.Seed.ToString(CultureInfo.InvariantCulture)}.webp", "WebP picture (*.webp)|*.webp", image);
+            if (saved is not null)
+            {
+                Close();
+                _note = "Saved as " + System.IO.Path.GetFileName(saved) + ".";
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _viewError = "The file could not be saved: " + e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RemoveAsync(Picture picture)
+    {
+        _busy = true;
+        try
+        {
+            await Pictures.DeleteAsync(picture.Id);
+            Session.Unkept(picture.Id);
+            Close();
+            Forget(picture.Id);
+            _note = "Removed.";
+            await LoadCheckpointsAsync();
+            // An emptied page that has older pictures after it shows them.
+            if (_items.Count == 0 && _total > 0) await LoadAsync(reset: true);
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException)
+        {
+            _viewError = "The picture could not be removed: " + e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Forget(long id)
+    {
+        if (_items.RemoveAll(p => p.Id == id) > 0) _total = Math.Max(0, _total - 1);
+        _src.Remove(id);
+    }
+
+    private static string Short(string prompt) => prompt.Length <= 300 ? prompt : prompt[..300] + "…";
+
+    private static DateTime Local(DateTime kept) =>
+        (kept.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(kept, DateTimeKind.Utc) : kept).ToLocalTime();
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _typing?.Cancel();
+        if (_module is not null) _ = DisposeModuleAsync(_module);
+    }
+
+    private static async Task DisposeModuleAsync(IJSObjectReference module)
+    {
+        try
+        {
+            await module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
+}
