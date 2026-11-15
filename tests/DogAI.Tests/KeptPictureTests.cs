@@ -533,7 +533,7 @@ public sealed class KeptPictureTests : IDisposable
             await prompts.DeleteAsync(saved.Id);
             await prompts.SaveAsAsync("Forest", $"1girl, {Marker}, forest", "lowres");
             var memory = new ImagesMemory(documents);
-            await memory.SaveAsync("illustrious/nova.safetensors", Card, memory.For("illustrious/nova.safetensors", Card) with { Seed = 77 });
+            await memory.SaveAsync("illustrious/nova.safetensors", Card, memory.For("illustrious/nova.safetensors", Card, PictureSize.Normal) with { Seed = 77 }, PictureSize.Normal);
             Assert.False(HoldsPicture(paths.Root));
             Assert.Equal(PreviewOf(2), (await Store(s).PageAsync(PictureQuery.Images(Marker))).Pictures.Last().Preview);
             Assert.Equal(PreviewOf(4), await Store(s).PreviewAsync(later.Id));
@@ -574,7 +574,7 @@ public sealed class KeptPictureTests : IDisposable
             await prompts.SetStartAsync((await prompts.SaveAsAsync("Forest", $"1girl, {Marker}, forest", "lowres")).Id);
             var memory = new ImagesMemory(documents);
             await memory.ChooseAsync("illustrious/nova.safetensors");
-            await memory.SaveAsync("illustrious/nova.safetensors", Card, memory.For("illustrious/nova.safetensors", Card) with { Width = 1216, Height = 832, Count = 4 });
+            await memory.SaveAsync("illustrious/nova.safetensors", Card, memory.For("illustrious/nova.safetensors", Card, PictureSize.Normal) with { Width = 1216, Height = 832, Count = 4 }, PictureSize.Normal);
             await s.GetRequiredService<ISettingsStore>().SaveAsync(new AppSettings { ModelsDirectory = @"Z:\backup-pc\models" });
         });
         var zip = Path.Combine(_root, "backup.zip");
@@ -636,7 +636,7 @@ public sealed class KeptPictureTests : IDisposable
             var memory = new ImagesMemory(documents);
             await memory.LoadAsync();
             Assert.Equal("illustrious/nova.safetensors", memory.Checkpoint);
-            var controls = memory.For("illustrious/nova.safetensors", Card);
+            var controls = memory.For("illustrious/nova.safetensors", Card, PictureSize.Normal);
             Assert.Equal((1216, 832, 4), (controls.Width, controls.Height, controls.Count));
             // What was here before is gone from the app (it is in the safety copy), and the owners came along too.
             Assert.Empty(await store.ListAsync(PictureOwners.Test, 0));
@@ -694,10 +694,10 @@ public sealed class KeptPictureTests : IDisposable
             await new SavedPicturePrompts(documents).SaveAsAsync("Forest", "1girl, forest", "lowres");
             var memory = new ImagesMemory(documents);
             await memory.ChooseAsync("illustrious/nova.safetensors");
-            await memory.SaveAsync("illustrious/nova.safetensors", Card, memory.For("illustrious/nova.safetensors", Card) with
+            await memory.SaveAsync("illustrious/nova.safetensors", Card, memory.For("illustrious/nova.safetensors", Card, PictureSize.Normal) with
             {
                 Sampling = new("dpm++2m", "karras", 30, 6, 2, "sdxl-fix.safetensors"), Loras = [new LoraUse("style/ink.safetensors", 0.8)],
-            });
+            }, PictureSize.Normal);
             await s.GetRequiredService<ISettingsStore>().SaveAsync(new AppSettings { ModelsDirectory = @"E:\old place\models" });
         });
         var before = PictureRow(paths.DatabaseFile, id);
@@ -715,7 +715,7 @@ public sealed class KeptPictureTests : IDisposable
             // What the Images section remembers names files inside their folders too, so it reads the same after the move.
             var memory = new ImagesMemory(s.GetRequiredService<DogAI.Core.Models.IDocumentStore>());
             await memory.LoadAsync();
-            var controls = memory.For(memory.Checkpoint!, Card);
+            var controls = memory.For(memory.Checkpoint!, Card, PictureSize.Normal);
             Assert.Equal("sdxl-fix.safetensors", controls.Sampling.Vae);
             Assert.Equal([new LoraUse("style/ink.safetensors", 0.8)], controls.Loras);
             // The picture finds its files under wherever the models folder is now.

@@ -40,7 +40,7 @@ public sealed class KeptPicturesTabTests : IDisposable
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        var drawn = ImagesControls.StartFor(Card) with
+        var drawn = ImagesControls.StartFor(Card, PictureSize.Normal) with
         {
             Sampling = new ImagesSampling("dpm++2m", "karras", 22, 6.5, 2, "sdxl/vae.safetensors"),
             Width = 1024, Height = 768,
@@ -72,7 +72,7 @@ public sealed class KeptPicturesTabTests : IDisposable
 
         // Opened large, then "Make one like this" with whatever the side panel holds now (another checkpoint's numbers, 4 per Draw).
         var opened = (await store.GetAsync(listed.Id))!;
-        var now = ImagesControls.StartFor(Card) with { Count = 4 };
+        var now = ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 4 };
         var like = ImagesDraw.Like(opened, now);
         Assert.Equal(Checkpoint, like.Checkpoint);
         Assert.Equal(("  a lighthouse,\n at dusk ", "blurry, "), (like.Prompt, like.NegativePrompt));
@@ -89,7 +89,7 @@ public sealed class KeptPicturesTabTests : IDisposable
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        await Draw(session, engine, "a fox", "", ImagesControls.StartFor(Card) with { Count = 3 });
+        await Draw(session, engine, "a fox", "", ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 3 });
         session.Select(session.Tries[1]);
         session.Kept(session.Tries[0], 4);
         session.Kept(session.Tries[1], 5);

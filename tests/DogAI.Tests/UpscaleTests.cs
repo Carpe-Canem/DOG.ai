@@ -87,7 +87,7 @@ public sealed class UpscaleTests : IDisposable
         // Standard and Fine in every shape are drawn as they always were, so a kept one still redraws byte for byte.
         foreach (var shape in Enum.GetValues<PictureShape>())
         {
-            var (width, height) = PictureLevels.Size(shape);
+            var (width, height) = PictureLevels.Size(shape, PictureSize.Normal);
             var standard = new ImageRequest("x", Width: width, Height: height, Steps: 28);
             Assert.False(standard.DecodesInTiles);
             Assert.False((standard with { Hires = PictureLevels.FineHires(28) }).DecodesInTiles);
@@ -358,7 +358,7 @@ public sealed class UpscaleTests : IDisposable
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        var controls = ImagesControls.StartFor(Card) with { Seed = 777, Loras = [new LoraUse("style/ink.safetensors", 0.65)], Count = 2 };
+        var controls = ImagesControls.StartFor(Card, PictureSize.Normal) with { Seed = 777, Loras = [new LoraUse("style/ink.safetensors", 0.65)], Count = 2 };
         await DrawOne(session, engine, controls);
         var original = session.Tries[0];
         var stages = new List<string>();
@@ -388,7 +388,7 @@ public sealed class UpscaleTests : IDisposable
         Assert.Empty(row.Problems());
         Assert.Equal(new HiresFix(2, 14, 0.3, "Lanczos"), row.Hires);
         Assert.Null(PictureUpscale.EnlargedBy(row));
-        var like = ImagesDraw.Like(row, ImagesControls.StartFor(Card));
+        var like = ImagesDraw.Like(row, ImagesControls.StartFor(Card, PictureSize.Normal));
         Assert.True(like.Controls.HiresOn);
         Assert.Equal(made.Request with { Loras = [] }, ImagesDraw.Singles(ImagesDraw.Request(like.Prompt, like.NegativePrompt, like.Controls))[0] with { Loras = [] });
         Assert.StartsWith("Upscaled to 1664 × 2432 in ", PictureUpscale.Done(made), StringComparison.Ordinal);
@@ -399,7 +399,7 @@ public sealed class UpscaleTests : IDisposable
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        var controls = ImagesControls.StartFor(Card) with { Seed = 42 };
+        var controls = ImagesControls.StartFor(Card, PictureSize.Normal) with { Seed = 42 };
         var original = await DrawOne(session, engine, controls);
         var draws = engine.Requests.Count;
 
@@ -423,7 +423,7 @@ public sealed class UpscaleTests : IDisposable
         Assert.Equal((3328, 4864, 832, 1216), (row.ImageWidth, row.ImageHeight, row.Width, row.Height));
         Assert.Null(row.Hires);
         Assert.Contains(" · enlarged ×4 · ", ImagesPanels.KeptMeta(row, new DateTime(2026, 11, 15, 14, 3, 0)), StringComparison.Ordinal);
-        var like = ImagesDraw.Like(row, ImagesControls.StartFor(Card));
+        var like = ImagesDraw.Like(row, ImagesControls.StartFor(Card, PictureSize.Normal));
         Assert.Equal((832, 1216, false, 42L), (like.Controls.Width, like.Controls.Height, like.Controls.HiresOn, like.Controls.Seed!.Value));
         // The enlarged picture cannot be enlarged four times again (the engine stops at 8192), and says so first.
         Assert.NotNull(PictureUpscale.EnlargeProblem(made.ImageWidth, made.ImageHeight, 4));
@@ -434,7 +434,7 @@ public sealed class UpscaleTests : IDisposable
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        var controls = ImagesControls.StartFor(Card);
+        var controls = ImagesControls.StartFor(Card, PictureSize.Normal);
         var original = await DrawOne(session, engine, controls);
         var other = ImageFolders.ModelFor(@"C:\models\image", "other.safetensors", null, ImagePrediction.Auto);
         await engine.LoadAsync(other);
@@ -456,7 +456,7 @@ public sealed class UpscaleTests : IDisposable
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        var controls = ImagesControls.StartFor(Card) with { Seed = 9 };
+        var controls = ImagesControls.StartFor(Card, PictureSize.Normal) with { Seed = 9 };
         var first = await DrawOne(session, engine, controls);
 
         var paths = new AppPaths(_root);
@@ -503,7 +503,7 @@ public sealed class UpscaleTests : IDisposable
     {
         var engine = new FakeImageEngine { Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
         var session = new ImagesSession();
-        var controls = ImagesControls.StartFor(Card) with { Seed = 3 };
+        var controls = ImagesControls.StartFor(Card, PictureSize.Normal) with { Seed = 3 };
         var source = new UpscaleSource(Checkpoint, null, ImagePrediction.Auto, ImagesDraw.Singles(ImagesDraw.Request("a fox", "", controls))[0],
             KeptPictureTests.Webp(832, 1216, 100), 832, 1216);
 

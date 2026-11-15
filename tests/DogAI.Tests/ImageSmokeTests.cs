@@ -135,7 +135,7 @@ public class ImageSmokeTests(ITestOutputHelper output)
             output.WriteLine($"draft level: {clock.ElapsedMilliseconds} ms, {planned.Request.Steps} steps");
             var quickSize = WebpInfo.Read(quick.Images[0]).GetValueOrDefault();
             Assert.Equal((832, 1216), (quickSize.Width, quickSize.Height));
-            var fineRequest = planned.Request.At(PictureQuality.Fine, PictureShape.Wide).ForKeeping();
+            var fineRequest = planned.Request.At(PictureQuality.Fine, PictureShape.Wide, PictureSize.Normal).ForKeeping();
             clock.Restart();
             var fine = await server.DrawAsync(fineRequest);
             output.WriteLine($"fine level: {clock.ElapsedMilliseconds} ms, {fine.Images[0].Length} bytes");

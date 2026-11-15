@@ -197,7 +197,7 @@ public sealed class PortraitTests : IDisposable
         var engine = new WebpEngine();
         var tries = new PictureTries(engine);
         var progress = new Collect<ImageProgress>();
-        var first = await tries.DrawAsync(Root, "il.safetensors", Illustrious, Base(), PictureQuality.Draft, PictureShape.Tall, "Mara.", TagNotes.None, progress);
+        var first = await tries.DrawAsync(Root, "il.safetensors", Illustrious, Base(), PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, "Mara.", TagNotes.None, progress);
 
         var sent = engine.Requests.Single();
         Assert.Equal(ImageFormat.Webp, sent.Format);
@@ -221,7 +221,7 @@ public sealed class PortraitTests : IDisposable
     {
         var engine = new WebpEngine();
         var tries = new PictureTries(engine);
-        var first = await tries.DrawAsync(Root, "il.safetensors", Illustrious, Base(), PictureQuality.Draft, PictureShape.Tall, "Mara.", TagNotes.None);
+        var first = await tries.DrawAsync(Root, "il.safetensors", Illustrious, Base(), PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, "Mara.", TagNotes.None);
         var second = await tries.TryAgainAsync(Root, first);
         Assert.NotEqual(first.Base.Seed, second.Base.Seed);
         Assert.Equal(-1, engine.Requests[1].Seed); // a new seed was asked for
@@ -229,7 +229,7 @@ public sealed class PortraitTests : IDisposable
         Assert.Equal("Mara.", second.Moment);
 
         // Draft → Fine with the same seed: the checkpoint's own steps plus the hires fix, not Draft's steps refined.
-        var fine = await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Fine, PictureShape.Tall);
+        var fine = await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Fine, PictureShape.Tall, PictureSize.Normal);
         var sent = engine.Requests[2];
         Assert.Equal(first.Base.Seed, sent.Seed);
         Assert.Equal(Illustrious.Steps, sent.Steps);
@@ -237,19 +237,19 @@ public sealed class PortraitTests : IDisposable
         Assert.Equal("Mara.", fine.Moment);
 
         // Fine → Draft from the Fine try: Draft's own steps, no hires fix.
-        await tries.RedrawAsync(Root, fine, fine.Base.Prompt, PictureQuality.Draft, PictureShape.Square);
+        await tries.RedrawAsync(Root, fine, fine.Base.Prompt, PictureQuality.Draft, PictureShape.Square, PictureSize.Normal);
         Assert.Equal(PictureLevels.DraftSteps(Illustrious.Steps), engine.Requests[3].Steps);
         Assert.Null(engine.Requests[3].Hires);
         Assert.Equal((1024, 1024), (engine.Requests[3].Width, engine.Requests[3].Height));
 
         // A changed prompt keeps the seed and everything else; the plan's moment no longer describes it.
-        var edited = await tries.RedrawAsync(Root, first, first.Base.Prompt + ",\n red dress", PictureQuality.Draft, PictureShape.Tall);
+        var edited = await tries.RedrawAsync(Root, first, first.Base.Prompt + ",\n red dress", PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal);
         Assert.Equal(first.Base.Seed, edited.Base.Seed);
         Assert.EndsWith("red dress", engine.Requests[4].Prompt);
         Assert.DoesNotContain("\n", engine.Requests[4].Prompt);
         Assert.Equal(first.Base.NegativePrompt, engine.Requests[4].NegativePrompt);
         Assert.Null(edited.Moment);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => tries.RedrawAsync(Root, first, "  ", PictureQuality.Draft, PictureShape.Tall));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => tries.RedrawAsync(Root, first, "  ", PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal));
     }
 
     [Fact]
@@ -258,18 +258,18 @@ public sealed class PortraitTests : IDisposable
         var engine = new WebpEngine();
         var tries = new PictureTries(engine);
         var withLora = ImagePrompt.Compose(Illustrious, "1girl", [("Maid_marian.safetensors", new LoraSettings("maid_marian", 0.8))]);
-        var first = await tries.DrawAsync(Root, "il.safetensors", Illustrious, withLora, PictureQuality.Draft, PictureShape.Tall, null, TagNotes.None);
+        var first = await tries.DrawAsync(Root, "il.safetensors", Illustrious, withLora, PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, null, TagNotes.None);
         Assert.Single(engine.Requests[0].Loras!);
 
-        var without = await tries.RedrawAsync(Root, first, first.Base.Prompt.Replace("maid_marian, ", ""), PictureQuality.Draft, PictureShape.Tall, []);
+        var without = await tries.RedrawAsync(Root, first, first.Base.Prompt.Replace("maid_marian, ", ""), PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, []);
         Assert.Empty(engine.Requests[1].Loras!);
         Assert.DoesNotContain("maid_marian", engine.Requests[1].Prompt);
         Assert.Equal(first.Base.Seed, without.Base.Seed);
 
         // Null keeps the LoRAs as they were; a strength can change.
-        await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall);
+        await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal);
         Assert.Equal(0.8, engine.Requests[2].Loras!.Single().Strength);
-        await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, [new LoraUse("Maid_marian.safetensors", 0.4)]);
+        await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, [new LoraUse("Maid_marian.safetensors", 0.4)]);
         Assert.Equal(0.4, engine.Requests[3].Loras!.Single().Strength);
     }
 
@@ -280,7 +280,7 @@ public sealed class PortraitTests : IDisposable
         var kept = new Picture { Id = 7, Checkpoint = "il.safetensors", Prompt = "1girl", Width = 832, Height = 1216, Seed = 5, Steps = 28, Sampler = "euler", Image = KeptPictureTests.Webp(832, 1216) };
         tries.Adopt(kept, Illustrious);
         for (var i = 0; i < PictureTries.Max + 3; i++)
-            await tries.DrawAsync(Root, "il.safetensors", Illustrious, Base(), PictureQuality.Draft, PictureShape.Tall, null, TagNotes.None);
+            await tries.DrawAsync(Root, "il.safetensors", Illustrious, Base(), PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, null, TagNotes.None);
         Assert.Equal(PictureTries.Max, tries.All.Count);
         Assert.True(tries.Dropped);
         Assert.Equal(7, tries.All[0].KeptId);
@@ -296,12 +296,14 @@ public sealed class PortraitTests : IDisposable
     {
         var kept = new Picture { Checkpoint = "il.safetensors", Prompt = "1girl", Width = 832, Height = 1216, Seed = 5, Steps = steps, Sampler = "euler",
             Hires = hires ? PictureLevels.FineHires(28) : null };
-        var (b, q) = PictureTries.BaseOf(kept, Illustrious.Steps);
-        Assert.Equal(quality, q);
-        Assert.Equal(baseSteps, b.Steps);
-        Assert.Null(b.Hires);
+        var level = PictureTries.BaseOf(kept, Illustrious.Steps);
+        Assert.Equal(quality, level.Quality);
+        Assert.Equal((PictureShape.Tall, PictureSize.Normal), (level.Shape, level.Size));
+        Assert.Equal(baseSteps, level.Base.Steps);
+        Assert.Null(level.Base.Hires);
         // Levelled again, it is exactly the request the picture was drawn with.
-        Assert.Equal(kept.ToRequest() with { Loras = null }, PictureTries.Levelled(b, q, PictureShape.Tall) with { Loras = null });
+        Assert.Equal(kept.ToRequest() with { Loras = null },
+            PictureTries.Levelled(level.Base, level.Quality, level.Shape, level.Size, level.Scale) with { Loras = null });
     }
 
     [Fact]
@@ -327,7 +329,7 @@ public sealed class PortraitTests : IDisposable
         var card = Illustrious with { Vae = "fix.safetensors" };
         var loras = new List<(string, LoraSettings)> { ("Maid_marian.safetensors", new LoraSettings("maid_marian", 0.8)) };
         var @base = ImagePrompt.Compose(card, "1girl", loras, rating: PictureRating.General);
-        var drawn = await tries.DrawAsync(Root, "il.safetensors", card, @base, PictureQuality.Draft, PictureShape.Square, "Mara.", TagNotes.None);
+        var drawn = await tries.DrawAsync(Root, "il.safetensors", card, @base, PictureQuality.Draft, PictureShape.Square, PictureSize.Normal, "Mara.", TagNotes.None);
 
         var kept = await store.AddAsync(drawn.ToKeep(PictureOwners.Character, 42));
         Assert.Equal("fix.safetensors", kept.Vae);
@@ -345,7 +347,7 @@ public sealed class PortraitTests : IDisposable
         Assert.Equal(drawn.Image, back.Image);
 
         // Redrawn at Standard: same seed, the checkpoint's own steps, the picture's VAE.
-        await later.RedrawAsync(Root, back, back.Base.Prompt, PictureQuality.Standard, PictureShape.Square);
+        await later.RedrawAsync(Root, back, back.Base.Prompt, PictureQuality.Standard, PictureShape.Square, PictureSize.Normal);
         Assert.Equal(kept.Seed, engine.Requests[^1].Seed);
         Assert.Equal(card.Steps, engine.Requests[^1].Steps);
         Assert.Equal(Path.Combine(Root, "vae", "fix.safetensors"), engine.Model!.VaePath);
@@ -360,7 +362,7 @@ public sealed class PortraitTests : IDisposable
         await services.MigrateDogDatabaseAsync();
         var store = services.GetRequiredService<IPictureStore>();
         var tries = new PictureTries(new WebpEngine());
-        PictureTry Draw() => tries.DrawAsync(Root, "il.safetensors", Illustrious, Base(), PictureQuality.Draft, PictureShape.Tall, null, TagNotes.None).Result;
+        PictureTry Draw() => tries.DrawAsync(Root, "il.safetensors", Illustrious, Base(), PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, null, TagNotes.None).Result;
         async Task<List<long>> Kept(long owner) => (await store.ListAsync(PictureOwners.Character, owner)).Select(p => p.Id).ToList();
 
         // First portrait; another owner's picture is never touched.

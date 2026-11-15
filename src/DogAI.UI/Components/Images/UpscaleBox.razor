@@ -57,6 +57,10 @@
                             }
                         </select>
                     </label>
+                    @if (_fellBack && _scale == PictureLevels.LargerFallbackScale)
+                    {
+                        <p class="small" id="upscale-size-note">×1.25 is chosen: at ×1.5 the chat model would be set aside to make room.</p>
+                    }
                     @if (Source.Request.Hires is not null)
                     {
                         <p class="small" id="upscale-from">× is counted from the size it was first drawn at (@Source.Request.Width × @Source.Request.Height).</p>
@@ -140,6 +144,9 @@
     private UpscaleWay _way = UpscaleWay.Redraw;
     private IReadOnlyList<RedrawSize> _sizes = [];
     private double _scale;
+
+    /// <summary>The first size is ×1.25 because ×1.5 would not fit beside the chat model (said under the choice).</summary>
+    private bool _fellBack;
     private IReadOnlyList<ImageFile> _files = [];
     private IReadOnlyList<ImageFile> _upscalers = [];
     private string? _upscaler, _folderProblem, _thumb, _error, _status, _after;
@@ -156,9 +163,14 @@
         Engine.Changed += Refresh;
         _thumb = "data:image/webp;base64," + Convert.ToBase64String(Source.Image);
         _sizes = PictureUpscale.RedrawSizes(Source.Request);
-        // Twice the first size when it can be had; else the smallest offered.
-        _scale = (_sizes.FirstOrDefault(s => s.Scale == 2) ?? _sizes.FirstOrDefault())?.Scale ?? 0;
         await LookAsync();
+        // A Small picture starts on Make larger's own choice (×1.5, or ×1.25 when only that fits beside the chat model);
+        // any other on twice its first size when it can be had, else the smallest offered.
+        var root = Root;
+        _scale = await PictureUpscale.FirstScaleAsync(Source.Request, _sizes, scale => root is null || !Has(ImageFileKind.Checkpoint, Source.Checkpoint)
+            ? Task.FromResult<bool?>(null)
+            : Coordinator.FitsBesideChatAsync(OwnModel(root), PictureUpscale.Redraw(Source.Request, scale)));
+        _fellBack = _scale == PictureLevels.LargerFallbackScale;
         // A picture that cannot be drawn again (its checkpoint is gone) can still be enlarged.
         if (RedrawWhy is not null && EnlargeWhy is null) _way = UpscaleWay.Enlarge;
         _ready = true;

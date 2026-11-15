@@ -373,9 +373,9 @@ public sealed class GraphicsMemoryTests
         Assert.InRange(need, (long)(11.5 * Gb), 13 * Gb);
         foreach (var shape in Enum.GetValues<PictureShape>())
         {
-            var (width, height) = PictureLevels.Size(shape);
+            var (width, height) = PictureLevels.Size(shape, PictureSize.Normal);
             // No shape at Standard needs more, so a marked model is kept whichever shape is drawn.
-            Assert.True(need >= PictureMemory.Need(checkpoint, 0, new ImageRequest("x").At(PictureQuality.Standard, shape) with { Width = width, Height = height }));
+            Assert.True(need >= PictureMemory.Need(checkpoint, 0, new ImageRequest("x").At(PictureQuality.Standard, shape, PictureSize.Normal) with { Width = width, Height = height }));
         }
     }
 

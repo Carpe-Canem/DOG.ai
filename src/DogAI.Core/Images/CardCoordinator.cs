@@ -373,7 +373,7 @@ public sealed class CardCoordinator : IImageEngine
             try
             {
                 var model = _images.Model ?? throw new ImageEngineException(NoModel);
-                var need = PictureMemory.Need(_fileSize(model.CheckpointPath), LoraBytes(model, request), request);
+                var need = NeedOf(model, request);
                 await MakeRoomAsync(need, "the picture", progress, ct).ConfigureAwait(false);
                 return await _images.DrawAsync(request, progress, ct).ConfigureAwait(false);
             }
@@ -388,6 +388,23 @@ public sealed class CardCoordinator : IImageEngine
             Changed?.Invoke();
         }
     }
+
+    /// <summary>
+    /// Asked before choosing a picture's size (M18): would <paramref name="request"/>, drawn with <paramref name="model"/>,
+    /// fit beside the chat model now, by the same rule <see cref="DrawAsync"/> uses? Null when no chat model is in graphics
+    /// memory (one set aside counts as none), so there is nothing a size could keep. The card is read as it is: idle
+    /// guests are counted as staying, so it may answer no where drawing would have let them go first.
+    /// </summary>
+    public async Task<bool?> FitsBesideChatAsync(ImageModel model, ImageRequest request, CancellationToken ct = default)
+    {
+        if (!_chat.IsLoaded) return null;
+        var now = await _meter.ReadAsync(ct).ConfigureAwait(false);
+        return PictureMemory.FitsBeside(now, NeedOf(model, request));
+    }
+
+    /// <summary>What a picture is expected to need at its peak with a model: the one estimate the coordinator decides by.</summary>
+    public long NeedOf(ImageModel model, ImageRequest request) =>
+        PictureMemory.Need(_fileSize(model.CheckpointPath), LoraBytes(model, request), request);
 
     /// <summary>
     /// Enlarges a picture with an upscaler file. It takes its turn on the card like a picture, but needs so little

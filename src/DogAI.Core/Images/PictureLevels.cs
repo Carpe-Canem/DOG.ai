@@ -13,17 +13,30 @@ public enum PictureQuality
     Fine,
 }
 
-/// <summary>The three picture shapes, at SDXL's native sizes (about one million pixels each).</summary>
+/// <summary>The three picture shapes. Each comes in two sizes (<see cref="PictureSize"/>).</summary>
 public enum PictureShape
 {
-    /// <summary>832 × 1216. The default for portraits.</summary>
+    /// <summary>640 × 960 Small, 832 × 1216 Normal. The default for portraits.</summary>
     Tall,
 
-    /// <summary>1024 × 1024.</summary>
+    /// <summary>768 × 768 Small, 1024 × 1024 Normal.</summary>
     Square,
 
-    /// <summary>1216 × 832. The default for story illustrations.</summary>
+    /// <summary>960 × 640 Small, 1216 × 832 Normal. The default for story illustrations.</summary>
     Wide,
+}
+
+/// <summary>
+/// How large a picture is first drawn (M18). Small is where every picture starts (the owner's request, 2026-11-15);
+/// Make larger redraws a chosen one larger from the same seed. Small comes first so a value nobody set reads as Small.
+/// </summary>
+public enum PictureSize
+{
+    /// <summary>About 0.6 million pixels: 640 × 960. Faster and lighter on graphics memory; chosen by looking in the M18 trial.</summary>
+    Small,
+
+    /// <summary>SDXL's native sizes, about one million pixels: 832 × 1216. Every picture before M18 was this size.</summary>
+    Normal,
 }
 
 /// <summary>
@@ -59,34 +72,118 @@ public static class PictureLevels
     /// </summary>
     public const string FineUpscaler = "Lanczos";
 
-    public static (int Width, int Height) Size(PictureShape shape) => shape switch
+    /// <summary>
+    /// Make larger from a Small picture: a hires fix of ×1.5 with Fine's second pass (640 × 960 comes out 960 × 1472). In
+    /// the M18 trial it kept the layout and looked as good as or better than a picture drawn at Normal.
+    /// </summary>
+    public const double LargerScale = FineScale;
+
+    /// <summary>
+    /// Make larger from a Small picture when only this fits beside the loaded chat model: ×1.25, which is Normal's size
+    /// for Tall and Wide (800 × 1200 rounds up to 832 × 1216) and 960 × 960 for Square. A little softer than ×1.5.
+    /// </summary>
+    public const double LargerFallbackScale = 1.25;
+
+    /// <summary>
+    /// A size's pixels. Small's sides are multiples of 64: the picture engine rounds every side up to one, so any other
+    /// number would come out larger than asked.
+    /// </summary>
+    public static (int Width, int Height) Size(PictureShape shape, PictureSize size) => (shape, size) switch
     {
-        PictureShape.Tall => (832, 1216),
-        PictureShape.Wide => (1216, 832),
+        (PictureShape.Tall, PictureSize.Small) => (640, 960),
+        (PictureShape.Wide, PictureSize.Small) => (960, 640),
+        (_, PictureSize.Small) => (768, 768),
+        (PictureShape.Tall, _) => (832, 1216),
+        (PictureShape.Wide, _) => (1216, 832),
         _ => (1024, 1024),
     };
+
+    /// <summary>The shape and size whose pixels are <paramref name="width"/> × <paramref name="height"/>, or null for a size typed by hand.</summary>
+    public static (PictureShape Shape, PictureSize Size)? Of(int width, int height)
+    {
+        foreach (var size in Enum.GetValues<PictureSize>())
+            foreach (var shape in Enum.GetValues<PictureShape>())
+                if (Size(shape, size) == (width, height)) return (shape, size);
+        return null;
+    }
 
     /// <summary>The steps Draft draws for a checkpoint whose own count is <paramref name="steps"/>.</summary>
     public static int DraftSteps(int steps) => Math.Min(steps, Math.Max(DraftFloor, (int)Math.Round(steps * DraftShare)));
 
-    /// <summary>Fine's hires fix for a checkpoint whose own step count is <paramref name="steps"/>.</summary>
-    public static HiresFix FineHires(int steps) => new(FineScale, Math.Max(8, (int)Math.Round(steps * FineStepShare)), FineDenoise, FineUpscaler);
+    /// <summary>
+    /// Fine's hires fix for a checkpoint whose own step count is <paramref name="steps"/>. Make larger is the same at
+    /// <paramref name="scale"/> (<see cref="LargerScale"/> or <see cref="LargerFallbackScale"/>).
+    /// </summary>
+    public static HiresFix FineHires(int steps, double scale = FineScale) =>
+        new(scale, Math.Max(8, (int)Math.Round(steps * FineStepShare)), FineDenoise, FineUpscaler);
 
     /// <summary>
-    /// The request at a quality level and shape. <paramref name="request"/> carries the checkpoint's own step count (as
-    /// <see cref="ImagePrompt.Compose"/> makes it); everything else in it is kept, so Edit and redraw can change the
-    /// level alone.
+    /// The request at a quality level, shape and size. <paramref name="request"/> carries the checkpoint's own step count
+    /// (as <see cref="ImagePrompt.Compose"/> makes it); everything else in it is kept, so Edit and redraw can change the
+    /// level alone. Fine is the hires fix at <paramref name="fineScale"/>: at Normal it is Fine as before M18 (1280 × 1856);
+    /// at Small it is Make larger (<see cref="LargerScale"/>, or <see cref="LargerFallbackScale"/>).
     /// </summary>
-    public static ImageRequest At(this ImageRequest request, PictureQuality quality, PictureShape shape)
+    public static ImageRequest At(this ImageRequest request, PictureQuality quality, PictureShape shape, PictureSize size, double fineScale = FineScale)
     {
-        var (width, height) = Size(shape);
+        var (width, height) = Size(shape, size);
         return quality switch
         {
             PictureQuality.Draft => request with { Width = width, Height = height, Steps = DraftSteps(request.Steps), Hires = null },
-            PictureQuality.Fine => request with { Width = width, Height = height, Hires = FineHires(request.Steps) },
+            PictureQuality.Fine => request with { Width = width, Height = height, Hires = FineHires(request.Steps, fineScale) },
             _ => request with { Width = width, Height = height, Hires = null },
         };
     }
+
+    /// <summary>Whether a picture at this quality can be made larger (one at Fine, or made larger already, cannot).</summary>
+    public static bool CanMakeLarger(PictureQuality quality) => quality != PictureQuality.Fine;
+
+    /// <summary>
+    /// The hires scale Make larger uses for a picture of <paramref name="size"/>: Normal goes to Fine (×1.5); Small goes
+    /// ×1.5, or ×1.25 when only that fits beside the loaded chat model. <paramref name="fits"/> answers whether a scale
+    /// fits beside it (null: no chat model is loaded, so nothing would be set aside). When neither fits, ×1.5 is drawn and
+    /// the chat model is set aside, as for any picture.
+    /// </summary>
+    public static async Task<double> LargerScaleAsync(PictureSize size, Func<double, Task<bool?>> fits)
+    {
+        if (size == PictureSize.Normal) return FineScale;
+        if (await fits(LargerScale).ConfigureAwait(false) is null or true) return LargerScale;
+        return await fits(LargerFallbackScale).ConfigureAwait(false) == true ? LargerFallbackScale : LargerScale;
+    }
+
+    /// <summary>
+    /// The size a new picture starts at. <paramref name="wanted"/> is the setting; when it is Normal and a Normal picture
+    /// would set the loaded chat model aside where a Small one would not, it starts Small (<see cref="StartedSmall"/> says
+    /// so). <paramref name="fits"/> answers whether a size fits beside the chat model (null: none is loaded).
+    /// </summary>
+    public static async Task<PictureSize> StartSizeAsync(PictureSize wanted, Func<PictureSize, Task<bool?>> fits)
+    {
+        if (wanted == PictureSize.Small || await fits(PictureSize.Normal).ConfigureAwait(false) is null or true) return wanted;
+        return await fits(PictureSize.Small).ConfigureAwait(false) == true ? PictureSize.Small : wanted;
+    }
+
+    /// <summary>Said after a picture that <see cref="StartSizeAsync"/> started Small in place of Normal.</summary>
+    public const string StartedSmall = "Drawn Small: at Normal size the chat model would have been set aside. Make larger keeps the picture and adds detail.";
+
+    /// <summary>Said after Make larger chose <see cref="LargerFallbackScale"/>.</summary>
+    public const string LargerFellBack = "Made larger ×1.25: ×1.5 would have set the chat model aside.";
+
+    public static string Title(PictureSize size) => size.ToString();
+
+    /// <summary>One line for the owner on what a size is for.</summary>
+    public static string Blurb(PictureSize size) => size switch
+    {
+        PictureSize.Small => "Faster, and leaves more room for the chat model. Make larger on a picture you like.",
+        _ => "SDXL’s own size, about a million pixels.",
+    };
+
+    /// <summary>
+    /// A picture's level in words: "Standard", "Draft", "Fine", and for a Small picture made larger "Made larger ×1.5"
+    /// (never "Fine": Fine is the hires fix at Normal's size).
+    /// </summary>
+    public static string Title(PictureQuality quality, PictureSize size, double fineScale) =>
+        quality == PictureQuality.Fine && size == PictureSize.Small
+            ? "Made larger ×" + fineScale.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)
+            : Title(quality);
 
     public static string Title(PictureQuality quality) => quality.ToString();
 
@@ -98,10 +195,10 @@ public static class PictureLevels
         _ => "The checkpoint’s normal quality.",
     };
 
-    public static string Title(PictureShape shape) => shape switch
+    /// <summary>"Tall (640 × 960)": the shape with its pixels at a size.</summary>
+    public static string Title(PictureShape shape, PictureSize size)
     {
-        PictureShape.Tall => "Tall (832 × 1216)",
-        PictureShape.Wide => "Wide (1216 × 832)",
-        _ => "Square (1024 × 1024)",
-    };
+        var (width, height) = Size(shape, size);
+        return $"{shape} ({width} × {height})";
+    }
 }

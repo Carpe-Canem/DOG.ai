@@ -1,5 +1,5 @@
 @* Settings → Pictures: the checkpoint pictures are drawn with (the same choice as the Pictures default in Models › On this PC), the
-   quality pictures start at, whether the prompt is shown before drawing, and the rating pictures aim for. Saved as chosen.
+   quality and size pictures start at, whether the prompt is shown before drawing, and the rating pictures aim for. Saved as chosen.
    Opening it only reads file headers: it starts nothing. *@
 @using DogAI.Engine.Images
 @implements IDisposable
@@ -32,6 +32,16 @@
         </select>
         <span class="small">@PictureLevels.Blurb(P.Quality) Each picture can be drawn again at another quality.</span>
     </label>
+    <label>
+        Start pictures at
+        <select class="field" id="pictures-size" @onchange="e => SaveAsync(P with { Size = Enum.Parse<PictureSize>(e.Value!.ToString()!) })">
+            @foreach (var z in Enum.GetValues<PictureSize>())
+            {
+                <option value="@z" selected="@(z == P.Size)">@PictureLevels.Title(z) (@SizeText(z))</option>
+            }
+        </select>
+        <span class="small" id="pictures-size-blurb">@PictureLevels.Blurb(P.Size)<InfoButton About="the size pictures start at">Small is 640 × 960 tall, 960 × 640 wide and 768 × 768 square; Normal is 832 × 1216, 1216 × 832 and 1024 × 1024. Make larger redraws a picture from its seed with more detail, so its layout stays. With Normal chosen, a picture starts Small when only Small fits beside the chat model, so the chat model stays loaded; the picture says so. The Images section remembers its own size once you pick one there.</InfoButton></span>
+    </label>
     <div class="field-block wide-field">
         <span class="field-label" id="rating-label">Rating pictures aim for</span>
         <div class="seg" role="radiogroup" aria-labelledby="rating-label">
@@ -61,6 +71,12 @@
     private string? _chosen;
 
     private PicturePreferences P => Catalog.Preferences;
+
+    private static string SizeText(PictureSize size)
+    {
+        var (width, height) = PictureLevels.Size(PictureShape.Tall, size);
+        return $"{width} × {height}";
+    }
 
     /// <summary>Said beside the two highest ratings while the full tag list is not added.</summary>
     private const string TagsNote = "The two highest ratings: DOG.ai’s own tag list leaves some tags out, so some of the planner’s tags for these levels are dropped. The full list can be added in " + ModelsPlaces.TagsName + ".";

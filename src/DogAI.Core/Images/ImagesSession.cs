@@ -425,7 +425,9 @@ public static class ImagesPanels
 
     public static string LorasSummary(int ticked) => ticked == 0 ? "None" : $"{ticked} on";
 
-    public static string SizeSummary(int width, int height) => $"{width} × {height}";
+    /// <summary>"Small · 640 × 960", or the pixels alone for a size typed by hand.</summary>
+    public static string SizeSummary(int width, int height) =>
+        (PictureLevels.Of(width, height) is { } named ? $"{named.Size} · " : "") + $"{width} × {height}";
 
     public static string SamplingSummary(ImagesSampling s) => $"{SamplerNames.Title(s.Sampler)} · {s.Steps} steps";
 

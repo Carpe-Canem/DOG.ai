@@ -42,9 +42,9 @@ public sealed class PicturePromptTests : IDisposable
     [Fact]
     public void Shapes_are_sdxl_native_sizes()
     {
-        Assert.Equal((832, 1216), PictureLevels.Size(PictureShape.Tall));
-        Assert.Equal((1024, 1024), PictureLevels.Size(PictureShape.Square));
-        Assert.Equal((1216, 832), PictureLevels.Size(PictureShape.Wide));
+        Assert.Equal((832, 1216), PictureLevels.Size(PictureShape.Tall, PictureSize.Normal));
+        Assert.Equal((1024, 1024), PictureLevels.Size(PictureShape.Square, PictureSize.Normal));
+        Assert.Equal((1216, 832), PictureLevels.Size(PictureShape.Wide, PictureSize.Normal));
     }
 
     [Theory]
@@ -59,20 +59,20 @@ public sealed class PicturePromptTests : IDisposable
     {
         var request = ImagePrompt.Compose(Illustrious, "1girl, forest", [("ink.safetensors", new LoraSettings("ink", 0.6))], seed: 77);
 
-        var draft = request.At(PictureQuality.Draft, PictureShape.Wide);
+        var draft = request.At(PictureQuality.Draft, PictureShape.Wide, PictureSize.Normal);
         Assert.Equal((1216, 832, 20), (draft.Width, draft.Height, draft.Steps));
         Assert.Null(draft.Hires);
 
-        var standard = request.At(PictureQuality.Standard, PictureShape.Tall);
+        var standard = request.At(PictureQuality.Standard, PictureShape.Tall, PictureSize.Normal);
         Assert.Equal((832, 1216, 28), (standard.Width, standard.Height, standard.Steps));
         Assert.Null(standard.Hires);
 
-        var fine = request.At(PictureQuality.Fine, PictureShape.Tall);
+        var fine = request.At(PictureQuality.Fine, PictureShape.Tall, PictureSize.Normal);
         Assert.Equal(28, fine.Steps);
         Assert.Equal(new HiresFix(1.5, 14, 0.3, "Lanczos"), fine.Hires);
 
         // Going back from Fine takes the second pass off again; nothing else moved, so the same seed redraws the same picture.
-        Assert.Equal(standard, fine.At(PictureQuality.Standard, PictureShape.Tall));
+        Assert.Equal(standard, fine.At(PictureQuality.Standard, PictureShape.Tall, PictureSize.Normal));
         foreach (var r in new[] { draft, standard, fine })
         {
             Assert.Equal((request.Prompt, request.NegativePrompt, 77L, request.Sampler, request.Guidance), (r.Prompt, r.NegativePrompt, r.Seed, r.Sampler, r.Guidance));
@@ -361,7 +361,8 @@ public sealed class PicturePromptTests : IDisposable
         Assert.Equal("masterpiece, best quality, amazing quality, very aesthetic, absurdres, ink style, mara_trigger, " + picture.Subject, picture.Request.Prompt);
         Assert.Equal(Illustrious.Negative, picture.Request.NegativePrompt);
         Assert.Equal([new LoraUse("style/ink.safetensors", 0.6), new LoraUse("chars/mara.safetensors", 0.7)], picture.Request.Loras);
-        Assert.Equal((832, 1216, 20, 5L, "euler"), (picture.Request.Width, picture.Request.Height, picture.Request.Steps, picture.Request.Seed, picture.Request.Sampler));
+        // Planned pictures start Small (M18).
+        Assert.Equal((640, 960, 20, 5L, "euler"), (picture.Request.Width, picture.Request.Height, picture.Request.Steps, picture.Request.Seed, picture.Request.Sampler));
         Assert.Empty(picture.Request.Problems());
 
         Assert.Contains(("holding a cup", "holding cup"), picture.Notes.Corrected);
@@ -401,7 +402,7 @@ public sealed class PicturePromptTests : IDisposable
         var scene = new PictureScene("The lake at dusk.", [], ["lake"], ["sunset"], ["wide shot"]);
         var picture = PicturePrompt.Assemble(scene, new PictureOrder(Illustrious, Shape: PictureShape.Wide, Quality: PictureQuality.Fine), Tags);
         Assert.Equal("no humans, scenery, lake, sunset, wide shot", picture.Subject);
-        Assert.Equal((1216, 832), (picture.Request.Width, picture.Request.Height));
+        Assert.Equal((960, 640), (picture.Request.Width, picture.Request.Height));
         Assert.Equal(PictureLevels.FineUpscaler, picture.Request.Hires?.Upscaler);
     }
 

@@ -45,11 +45,20 @@
                 </select>
             </label>
             <label class="inline-field">
+                Size
+                <select class="field" id="maker-size" @bind="_size" disabled="@Busy" title="@PictureLevels.Blurb(_size)">
+                    @foreach (var z in Enum.GetValues<PictureSize>())
+                    {
+                        <option value="@z">@PictureLevels.Title(z)</option>
+                    }
+                </select>
+            </label>
+            <label class="inline-field">
                 Shape
                 <select class="field" id="maker-shape" @bind="_shape" disabled="@Busy">
                     @foreach (var s in Enum.GetValues<PictureShape>())
                     {
-                        <option value="@s">@PictureLevels.Title(s)</option>
+                        <option value="@s">@PictureLevels.Title(s, _size)</option>
                     }
                 </select>
             </label>
@@ -70,6 +79,12 @@
                 {
                     <button class="btn" id="maker-again" disabled="@(_review is not null || !Installed(like))" title="The same prompt with a new seed: another take on it, side by side"
                             @onclick="() => TryAgainAsync(like)">Try again</button>
+                    @if (PictureLevels.CanMakeLarger(like.Quality))
+                    {
+                        <button class="btn" id="maker-larger" disabled="@(_review is not null || !Installed(like))"
+                                title="The same picture redrawn larger from its seed: the layout stays, the detail grows. Small things can change."
+                                @onclick="() => MakeLargerAsync(like)">Make larger</button>
+                    }
                 }
             }
             @if (StatusText is { } status)
@@ -143,11 +158,21 @@
                             <span class="small">@PictureLevels.Blurb(_editQuality)</span>
                         </label>
                         <label>
+                            Size
+                            <select class="field" id="maker-edit-size" @bind="_editSize">
+                                @foreach (var z in Enum.GetValues<PictureSize>())
+                                {
+                                    <option value="@z">@PictureLevels.Title(z)</option>
+                                }
+                            </select>
+                            <span class="small">@PictureLevels.Blurb(_editSize)</span>
+                        </label>
+                        <label>
                             Shape
                             <select class="field" id="maker-edit-shape" @bind="_editShape">
                                 @foreach (var s in Enum.GetValues<PictureShape>())
                                 {
-                                    <option value="@s">@PictureLevels.Title(s)</option>
+                                    <option value="@s">@PictureLevels.Title(s, _editSize)</option>
                                 }
                             </select>
                         </label>
@@ -257,6 +282,10 @@
     private PicturePreferences _prefs = PicturePreferences.Default;
     private PictureQuality _quality, _editQuality;
     private PictureShape _shape, _editShape;
+    private PictureSize _size, _editSize;
+
+    /// <summary>Said after the picture: it started Small in place of Normal, or Make larger chose ×1.25 (see <see cref="PictureLevels"/>).</summary>
+    private string? _sizeNote;
     private Review? _review;
     private CancellationTokenSource? _cts;
     private IJSObjectReference? _module;
@@ -285,6 +314,7 @@
         Engine.Changed += Refresh;
         _prefs = Catalog.Preferences;
         _quality = _prefs.Quality;
+        _size = _prefs.Size;
         _shape = DefaultShape;
         _engine = PictureLocator.Find();
         _root = (await SettingsStore.LoadAsync()).ImageFolder();
@@ -379,7 +409,7 @@
             {
                 _planning = false;
             }
-            var planned = PicturePrompt.Assemble(scene, new PictureOrder(_settings, PeopleLooks(), _styleLoras, _shape, PictureQuality.Standard, -1, _prefs.Rating));
+            var planned = PicturePrompt.Assemble(scene, new PictureOrder(_settings, PeopleLooks(), _styleLoras, _shape, PictureQuality.Standard, -1, _prefs.Rating, _size));
             if (_prefs.ShowPromptFirst)
             {
                 _review = new Review(planned, scene.Moment, planned.Request);
@@ -388,7 +418,8 @@
                 return;
             }
             // The plan job has ended: only now may the picture take the graphics card.
-            await DrawAsync(() => _tries.DrawAsync(_root!, _checkpoint.RelativePath, _settings, planned.Request, _quality, _shape, scene.Moment, planned.Notes, Progress(), cts.Token));
+            var size = await StartSizeAsync(_checkpoint.RelativePath, _settings, planned.Request, cts.Token);
+            await DrawAsync(() => _tries.DrawAsync(_root!, _checkpoint.RelativePath, _settings, planned.Request, _quality, _shape, size, scene.Moment, planned.Notes, Progress(), cts.Token));
         }
         catch (OperationCanceledException)
         {
@@ -419,8 +450,52 @@
         using var cts = Begin();
         try
         {
-            await DrawAsync(() => _tries.DrawAsync(_root!, _checkpoint.RelativePath, _settings, review.Base with { Prompt = prompt }, _quality, _shape,
+            var @base = review.Base with { Prompt = prompt };
+            var size = await StartSizeAsync(_checkpoint.RelativePath, _settings, @base, cts.Token);
+            await DrawAsync(() => _tries.DrawAsync(_root!, _checkpoint.RelativePath, _settings, @base, _quality, _shape, size,
                 changed ? null : review.Moment, review.Planned.Notes, Progress(), cts.Token));
+        }
+        catch (OperationCanceledException)
+        {
+            _status = "Cancelled.";
+        }
+        finally
+        {
+            End(cts);
+        }
+    }
+
+    /// <summary>
+    /// The size a new picture starts at: the one chosen above, except that Normal starts Small when only Small fits
+    /// beside the loaded chat model (<see cref="PictureLevels.StartSizeAsync"/>; the note says so).
+    /// </summary>
+    private async Task<PictureSize> StartSizeAsync(string checkpoint, CheckpointSettings settings, ImageRequest @base, CancellationToken ct)
+    {
+        var size = await PictureLevels.StartSizeAsync(_size, z => FitsAsync(checkpoint, settings, PictureTries.Levelled(@base, _quality, _shape, z), ct));
+        _sizeNote = size != _size ? PictureLevels.StartedSmall : null;
+        return size;
+    }
+
+    /// <summary>Whether a request fits beside the loaded chat model now (null: none is loaded), by the coordinator's own rule.</summary>
+    private Task<bool?> FitsAsync(string checkpoint, CheckpointSettings settings, ImageRequest request, CancellationToken ct) =>
+        Coordinator.FitsBesideChatAsync(ImageFolders.ModelFor(_root!, ImageModelCatalog.Normalise(checkpoint), settings), request, ct);
+
+    /// <summary>The same picture redrawn larger from its seed: ×1.5, or ×1.25 from Small when only that fits beside the chat model.</summary>
+    private async Task MakeLargerAsync(PictureTry from)
+    {
+        _error = null;
+        _editing = false;
+        using var cts = Begin();
+        try
+        {
+            var scale = await PictureLevels.LargerScaleAsync(from.Size,
+                s => FitsAsync(from.Checkpoint, from.Settings, PictureTries.Levelled(from.Base, PictureQuality.Fine, from.Shape, from.Size, s), cts.Token));
+            _sizeNote = scale == PictureLevels.LargerFallbackScale ? PictureLevels.LargerFellBack : null;
+            await DrawAsync(() => _tries.MakeLargerAsync(_root!, from, scale, Progress(), cts.Token));
+        }
+        catch (OperationCanceledException)
+        {
+            _status = "Cancelled.";
         }
         finally
         {
@@ -437,8 +512,12 @@
         {
             // The same plan again: no chat model job, so a model set aside for pictures stays set aside. It takes the rating
             // chosen now, so a picture drawn or kept under another rating does not bring that rating's words back.
+            // Quality and shape as chosen above (as before M18); the size stays the try's own, so a kept Normal picture
+            // stays Normal and a picture made larger is made larger again by the same scale.
             var again = PictureRatings.Reapply(like.Base, like.Settings, _prefs.Rating) with { Seed = -1 };
-            await DrawAsync(() => _tries.DrawAsync(_root!, like.Checkpoint, like.Settings, again, _quality, _shape, like.Moment, like.Notes, Progress(), cts.Token));
+            _sizeNote = null;
+            await DrawAsync(() => _tries.DrawAsync(_root!, like.Checkpoint, like.Settings, again, _quality, _shape, like.Size, like.Moment, like.Notes,
+                Progress(), cts.Token, like.Scale));
         }
         finally
         {
@@ -453,6 +532,7 @@
         _editPrompt = shown.Base.Prompt;
         _editQuality = shown.Quality;
         _editShape = shown.Shape;
+        _editSize = shown.Size;
         _editLoras = (shown.Base.Loras ?? []).Select(l => new EditLora(l.Path, l.Strength)).ToList();
         _editSeed = SeedChoice.Keep;
     }
@@ -462,10 +542,11 @@
         _error = null;
         if (_editSeed.Problem is not null) return; // the seed row says why; Redraw is disabled meanwhile
         var seed = _editSeed;
+        _sizeNote = null;
         using var cts = Begin();
         try
         {
-            await DrawAsync(() => _tries.RedrawAsync(_root!, from, _editPrompt ?? "", _editQuality, _editShape,
+            await DrawAsync(() => _tries.RedrawAsync(_root!, from, _editPrompt ?? "", _editQuality, _editShape, _editSize,
                 _editLoras.Where(l => l.On).Select(l => new LoraUse(l.Path, l.Strength)).ToList(), seed, Progress(), cts.Token));
             if (_error is null) _editing = false;
         }
@@ -489,6 +570,7 @@
             _drawing = false; // reports still on their way are about this picture: ignore them
             _selected = made;
             _status = $"Drawn in {clock.Elapsed.TotalSeconds:0.0} seconds." +
+                      (_sizeNote is { } sized ? " " + sized : "") +
                       (Coordinator.LastDecision?.Choice == CardChoice.SetChatAside ? " The chat model was set aside to make room; it loads again with your next message." : "") +
                       (_tries.Dropped ? $" Only the last {PictureTries.Max} tries are kept; the oldest was let go." : "");
         }
@@ -567,7 +649,7 @@
     }
 
     private static string Meta(PictureTry t) =>
-        $"{(t.KeptId is null ? $"Try {t.Number}" : "The picture in use")} · {PictureLevels.Title(t.Quality)} · {t.ImageWidth}×{t.ImageHeight} · seed {t.Base.Seed} · {Path.GetFileNameWithoutExtension(t.Checkpoint)}";
+        $"{(t.KeptId is null ? $"Try {t.Number}" : "The picture in use")} · {PictureLevels.Title(t.Size)} · {t.LevelTitle} · {t.ImageWidth}×{t.ImageHeight} · seed {t.Base.Seed} · {Path.GetFileNameWithoutExtension(t.Checkpoint)}";
 
     private RenderFragment Strip() => __builder =>
     {

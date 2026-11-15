@@ -255,7 +255,7 @@ public sealed partial class ChatServiceTests
     private static PictureTry DrawTry(PictureTries tries) =>
         tries.DrawAsync(Path.Combine(Path.GetTempPath(), "dogai-image-root"), "il.safetensors", CheckpointSettings.ForFamily(ImageFamily.Illustrious),
             ImagePrompt.Compose(CheckpointSettings.ForFamily(ImageFamily.Illustrious), "1girl, canal", width: 1216, height: 832, rating: PictureRating.General),
-            PictureQuality.Draft, PictureShape.Wide, "She looks out.", TagNotes.None).GetAwaiter().GetResult();
+            PictureQuality.Draft, PictureShape.Wide, PictureSize.Normal, "She looks out.", TagNotes.None).GetAwaiter().GetResult();
 
     private async Task<(long Story, long Passage)> IllustratedStoryAsync()
     {

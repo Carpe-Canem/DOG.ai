@@ -258,12 +258,20 @@ else
         </Fold>
 
         <Fold Id="@ImagesPanels.Size" Title="@ImagesPanels.Title(ImagesPanels.Size)" Summary="@ImagesPanels.SizeSummary(controls.Width, controls.Height)" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Size)" Level="4" Class="panel images-fold">
+            <div class="seg images-sizes" role="group" aria-label="Size">
+                @foreach (var z in Enum.GetValues<PictureSize>())
+                {
+                    var size = z;
+                    <button type="button" id="@($"images-size-{size.ToString().ToLowerInvariant()}")" class="@(controls.Size == size ? "active" : "")"
+                            aria-pressed="@(controls.Size == size ? "true" : "false")" title="@PictureLevels.Blurb(size)" @onclick="() => SetAsync(controls.At(size))">@size</button>
+                }
+            </div>
             <div class="seg images-shapes" role="group" aria-label="Shape">
                 @foreach (var s in Enum.GetValues<PictureShape>())
                 {
                     var shape = s;
                     <button type="button" id="@($"images-shape-{shape.ToString().ToLowerInvariant()}")" class="@(controls.Shape == shape ? "active" : "")"
-                            aria-pressed="@(controls.Shape == shape ? "true" : "false")" title="@PictureLevels.Title(shape)" @onclick="() => SetAsync(controls.At(shape))">@shape</button>
+                            aria-pressed="@(controls.Shape == shape ? "true" : "false")" title="@PictureLevels.Title(shape, controls.Size ?? PictureSize.Small)" @onclick="() => SetAsync(controls.At(shape))">@shape</button>
                 }
             </div>
             <div class="two">
@@ -274,7 +282,7 @@ else
                     <input class="field" id="images-height" type="number" step="8" min="@ImageRequest.MinSide" max="@ImageRequest.MaxSide" value="@controls.Height"
                            @onchange="e => SetAsync(controls with { Height = Int(e, controls.Height) })" /></label>
             </div>
-            <p class="small">Multiples of 8, from @ImageRequest.MinSide to @ImageRequest.MaxSide pixels. SDXL draws best near 1024 × 1024 pixels in all.</p>
+            <p class="small">Multiples of 8, from @ImageRequest.MinSide to @ImageRequest.MaxSide pixels. Small is about 0.6 million pixels and faster; Normal is SDXL’s own size, about 1024 × 1024 in all. To make a picture you like larger, use Upscale under it.</p>
         </Fold>
 
         <Fold Id="@ImagesPanels.Sampling" Title="@ImagesPanels.Title(ImagesPanels.Sampling)" Summary="@ImagesPanels.SamplingSummary(controls.Sampling)" OpenByDefault="@ImagesPanels.OpensByDefault(ImagesPanels.Sampling)" Level="4" Class="panel images-fold">
@@ -442,7 +450,7 @@ else
     {
         _checkpoint = checkpoint;
         _card = Catalog.CheckpointFor(checkpoint.RelativePath, checkpoint.Verdict);
-        _controls = Memory.For(checkpoint.RelativePath, _card);
+        _controls = Memory.For(checkpoint.RelativePath, _card, Catalog.Preferences.Size);
         _seed = _controls.Seed is null ? SeedChoice.New : SeedChoice.Keep;
         var card = _card;
         Session.Start(() => Saved.StartingBoxes(card));
@@ -505,9 +513,9 @@ else
         if (_checkpoint is null || _card is null || next.Problems().Count > 0) return;
         try
         {
-            await Memory.SaveAsync(_checkpoint.RelativePath, _card, next);
+            await Memory.SaveAsync(_checkpoint.RelativePath, _card, next, Catalog.Preferences.Size);
             // As remembered: hires numbers nobody set follow a changed step count at once, not only after a restart.
-            _controls = Memory.For(_checkpoint.RelativePath, _card);
+            _controls = Memory.For(_checkpoint.RelativePath, _card, Catalog.Preferences.Size);
         }
         catch (InvalidOperationException e)
         {
@@ -527,7 +535,7 @@ else
     {
         if (_checkpoint is null || _card is null) return;
         await Memory.ResetSamplingAsync(_checkpoint.RelativePath);
-        _controls = Memory.For(_checkpoint.RelativePath, _card);
+        _controls = Memory.For(_checkpoint.RelativePath, _card, Catalog.Preferences.Size);
     }
 
     // ── LoRAs ──

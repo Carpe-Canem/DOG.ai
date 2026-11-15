@@ -54,25 +54,36 @@ public sealed record ImagesControls(
     public const PictureShape StartShape = PictureShape.Tall;
 
     /// <summary>
-    /// The controls before the owner has changed anything: the checkpoint's own card, the starting shape, no LoRAs, a
-    /// new seed each time, hires fix off (with the numbers Fine uses, ready for when it is switched on), one picture.
+    /// The controls before the owner has changed anything: the checkpoint's own card, the starting shape at
+    /// <paramref name="size"/> (Settings › Pictures, "Start pictures at"), no LoRAs, a new seed each time, hires fix off
+    /// (with the numbers Fine uses, ready for when it is switched on), one picture.
     /// </summary>
-    public static ImagesControls StartFor(CheckpointSettings card)
+    public static ImagesControls StartFor(CheckpointSettings card, PictureSize size)
     {
-        var (width, height) = PictureLevels.Size(StartShape);
+        var (width, height) = PictureLevels.Size(StartShape, size);
         return new(ImagesSampling.Of(card), width, height, [], null, false, PictureLevels.FineHires(card.Steps), 1);
     }
 
-    /// <summary>The same controls at one of the three shapes (the Tall / Square / Wide shortcuts).</summary>
-    public ImagesControls At(PictureShape shape)
+    /// <summary>
+    /// The same controls at one of the three shapes (the Tall / Square / Wide shortcuts), at the size shown now (Small
+    /// or Normal; Small for a size typed by hand that is neither).
+    /// </summary>
+    public ImagesControls At(PictureShape shape) => At(shape, Size ?? PictureSize.Small);
+
+    /// <summary>The same controls at one of the two sizes (the Small / Normal shortcuts), in the shape shown now.</summary>
+    public ImagesControls At(PictureSize size) => At(Shape ?? PictureTries.ShapeOf(Width, Height), size);
+
+    public ImagesControls At(PictureShape shape, PictureSize size)
     {
-        var (width, height) = PictureLevels.Size(shape);
+        var (width, height) = PictureLevels.Size(shape, size);
         return this with { Width = width, Height = height };
     }
 
-    /// <summary>The shortcut the size matches, or null for a size typed by hand.</summary>
-    public PictureShape? Shape => Enum.GetValues<PictureShape>().Cast<PictureShape?>()
-        .FirstOrDefault(s => PictureLevels.Size(s!.Value) == (Width, Height));
+    /// <summary>The shape shortcut the size matches, or null for a size typed by hand.</summary>
+    public PictureShape? Shape => PictureLevels.Of(Width, Height)?.Shape;
+
+    /// <summary>The size shortcut the size matches, or null for a size typed by hand.</summary>
+    public PictureSize? Size => PictureLevels.Of(Width, Height)?.Size;
 
     /// <summary>What is wrong with the controls in plain words, or nothing. An empty prompt is not looked at here.</summary>
     public IReadOnlyList<string> Problems()
@@ -225,9 +236,10 @@ public sealed class ImagesMemory(IDocumentStore? documents = null)
     /// gives it from the checkpoint's card. The sampling numbers and the VAE are remembered per checkpoint (a card
     /// differs from checkpoint to checkpoint); size, LoRAs, seed, hires fix and the count are shared.
     /// </summary>
-    public ImagesControls For(string checkpoint, CheckpointSettings card)
+    /// <param name="start">Settings › Pictures, "Start pictures at": the size until the owner picks another one here.</param>
+    public ImagesControls For(string checkpoint, CheckpointSettings card, PictureSize startSize)
     {
-        var start = ImagesControls.StartFor(card);
+        var start = ImagesControls.StartFor(card, startSize);
         var sampling = _doc.Sampling.TryGetValue(ImageModelCatalog.Normalise(checkpoint), out var saved) ? saved : start.Sampling;
         return new ImagesControls(
             sampling,
@@ -248,7 +260,9 @@ public sealed class ImagesMemory(IDocumentStore? documents = null)
     /// a checkpoint whose numbers the owner never changed goes on following its card (and a changed card reaches it).
     /// Throws <see cref="InvalidOperationException"/> with <see cref="ImagesControls.Problems"/> when something is wrong.
     /// </summary>
-    public async Task SaveAsync(string checkpoint, CheckpointSettings card, ImagesControls controls, CancellationToken ct = default)
+    /// <param name="startSize">As for <see cref="For"/>. A size equal to where the section starts is not remembered, so
+    /// saving another control never fixes the size: it goes on following Settings until the owner picks another.</param>
+    public async Task SaveAsync(string checkpoint, CheckpointSettings card, ImagesControls controls, PictureSize startSize, CancellationToken ct = default)
     {
         if (!ImageRequest.IsSafeRelativePath(checkpoint))
             throw new InvalidOperationException("The checkpoint must be named by its path inside the checkpoints folder.");
@@ -256,7 +270,7 @@ public sealed class ImagesMemory(IDocumentStore? documents = null)
 
         var name = ImageModelCatalog.Normalise(checkpoint);
         // Hires numbers nobody set go on following the step count, also when this very save changes the steps.
-        var following = _doc.Hires is null && controls.Hires == For(checkpoint, card).Hires;
+        var following = _doc.Hires is null && controls.Hires == For(checkpoint, card, startSize).Hires;
         var sampling = controls.Sampling with
         {
             Scheduler = string.IsNullOrWhiteSpace(controls.Sampling.Scheduler) ? null : controls.Sampling.Scheduler,
@@ -265,8 +279,11 @@ public sealed class ImagesMemory(IDocumentStore? documents = null)
         if (sampling == ImagesSampling.Of(card)) _doc.Sampling.Remove(name);
         else if (_doc.Sampling.ContainsKey(name) || _doc.Sampling.Count < MaxCheckpoints) _doc.Sampling[name] = sampling;
 
-        _doc.Width = controls.Width;
-        _doc.Height = controls.Height;
+        var start = ImagesControls.StartFor(card, startSize);
+        var chosen = (controls.Width, controls.Height) != (start.Width, start.Height);
+        _doc.Width = chosen ? controls.Width : null;
+        _doc.Height = chosen ? controls.Height : null;
+        _doc.SizeChosen = true;
         _doc.Loras = controls.Loras.Count == 0 ? null : [.. controls.Loras.Select(l => l with { Path = ImageModelCatalog.Normalise(l.Path) })];
         _doc.Seed = controls.Seed;
         _doc.HiresOn = controls.HiresOn;
@@ -294,7 +311,10 @@ public sealed class ImagesMemory(IDocumentStore? documents = null)
                 clean.Sampling[ImageModelCatalog.Normalise(name)] = sampling;
         }
         bool Side(int? side) => side is >= ImageRequest.MinSide and <= ImageRequest.MaxSide && side % 8 == 0;
-        if (Side(doc.Width) && Side(doc.Height)) (clean.Width, clean.Height) = (doc.Width, doc.Height);
+        // Before M18 every save wrote the size, chosen or not, so a size from then is forgotten once (the owner's
+        // decision, 2026-11-15): the section starts at Settings' size until a size is picked here.
+        if (doc.SizeChosen && Side(doc.Width) && Side(doc.Height)) (clean.Width, clean.Height) = (doc.Width, doc.Height);
+        clean.SizeChosen = doc.SizeChosen;
         var loras = (doc.Loras ?? [])
             .Where(l => l is not null && ImageRequest.IsSafeRelativePath(l.Path) && l.Strength is >= -5 and <= 5)
             .Select(l => l with { Path = ImageModelCatalog.Normalise(l.Path) })
@@ -324,6 +344,12 @@ public sealed class ImagesMemory(IDocumentStore? documents = null)
         public Dictionary<string, ImagesSampling> Sampling { get; set; } = new(StringComparer.OrdinalIgnoreCase);
         public int? Width { get; set; }
         public int? Height { get; set; }
+
+        /// <summary>
+        /// Written since M18, where a size is saved only when the owner picked one. False in a document from before,
+        /// whose size is then not used.
+        /// </summary>
+        public bool SizeChosen { get; set; }
         public List<LoraUse>? Loras { get; set; }
         public long? Seed { get; set; }
         public bool HiresOn { get; set; }

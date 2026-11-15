@@ -24,7 +24,7 @@ public sealed class ImagesMakeTests
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        var controls = ImagesControls.StartFor(Card) with { Seed = 4_294_967_294, Count = 3 };
+        var controls = ImagesControls.StartFor(Card, PictureSize.Normal) with { Seed = 4_294_967_294, Count = 3 };
         const string prompt = "  1girl,\n  castle on a cliff  ";
 
         Assert.Equal(3, await Draw(session, engine, prompt, "lowres\n", controls));
@@ -54,7 +54,7 @@ public sealed class ImagesMakeTests
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        await Draw(session, engine, "a cat", "", ImagesControls.StartFor(Card) with { Count = 2 });
+        await Draw(session, engine, "a cat", "", ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 2 });
 
         Assert.All(engine.Requests, r => Assert.Equal(-1, r.Seed));
         Assert.Equal([100L, 101L], session.Tries.Select(t => t.Request.Seed));
@@ -66,7 +66,7 @@ public sealed class ImagesMakeTests
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        var drawn = ImagesControls.StartFor(Card) with
+        var drawn = ImagesControls.StartFor(Card, PictureSize.Normal) with
         {
             Sampling = new ImagesSampling("dpm++2m", "karras", 20, 7, 1, "sdxl/vae.safetensors"),
             Width = 1024, Height = 768,
@@ -80,7 +80,7 @@ public sealed class ImagesMakeTests
         var shown = session.Selected!;
 
         // The owner changes everything afterwards; Keep must not notice.
-        var now = ImagesControls.StartFor(Card) with { Count = 4 };
+        var now = ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 4 };
         var kept = shown.ToKeep();
         Assert.Equal(PictureOwners.Images, kept.OwnerKind);
         Assert.Equal(PictureOwners.ImagesOwner, kept.OwnerId);
@@ -108,7 +108,7 @@ public sealed class ImagesMakeTests
     {
         var engine = new StopsAtSecond();
         var session = new ImagesSession();
-        var draw = Draw(session, engine, "a forest", "", ImagesControls.StartFor(Card) with { Count = 4 });
+        var draw = Draw(session, engine, "a forest", "", ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 4 });
         await engine.Second.Task;
         Assert.True(session.IsDrawing);
         Assert.Equal((2, 4), (session.Drawing, session.Of));
@@ -123,7 +123,7 @@ public sealed class ImagesMakeTests
 
         // A second Draw works after it.
         engine.Stop = false;
-        Assert.Equal(1, await Draw(session, engine, "a forest", "", ImagesControls.StartFor(Card)));
+        Assert.Equal(1, await Draw(session, engine, "a forest", "", ImagesControls.StartFor(Card, PictureSize.Normal)));
         Assert.Equal(2, session.Tries.Count);
     }
 
@@ -132,12 +132,12 @@ public sealed class ImagesMakeTests
     {
         var engine = new StopsAtSecond();
         var session = new ImagesSession();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Draw(session, engine, "  ", "", ImagesControls.StartFor(Card)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Draw(session, engine, "  ", "", ImagesControls.StartFor(Card, PictureSize.Normal)));
         Assert.Empty(engine.Requests);
 
-        var first = Draw(session, engine, "a forest", "", ImagesControls.StartFor(Card) with { Count = 2 });
+        var first = Draw(session, engine, "a forest", "", ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 2 });
         await engine.Second.Task;
-        await Assert.ThrowsAsync<InvalidOperationException>(() => Draw(session, engine, "a field", "", ImagesControls.StartFor(Card)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Draw(session, engine, "a field", "", ImagesControls.StartFor(Card, PictureSize.Normal)));
         session.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
     }
@@ -147,9 +147,9 @@ public sealed class ImagesMakeTests
     {
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        await Draw(session, engine, "first", "", ImagesControls.StartFor(Card));
+        await Draw(session, engine, "first", "", ImagesControls.StartFor(Card, PictureSize.Normal));
         var first = session.Tries[0];
-        for (var i = 0; i < 4; i++) await Draw(session, engine, "more", "", ImagesControls.StartFor(Card) with { Count = 8 });
+        for (var i = 0; i < 4; i++) await Draw(session, engine, "more", "", ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 8 });
 
         Assert.Equal(ImagesSession.Max, session.Tries.Count);
         Assert.True(session.Dropped);
@@ -165,12 +165,12 @@ public sealed class ImagesMakeTests
         // modified" took the page down). A list handed out never changes afterwards.
         var engine = new PortraitTests.WebpEngine();
         var session = new ImagesSession();
-        await Draw(session, engine, "first", "", ImagesControls.StartFor(Card) with { Count = 2 });
+        await Draw(session, engine, "first", "", ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 2 });
 
         var held = session.Tries;
         using var reading = held.GetEnumerator();
         Assert.True(reading.MoveNext());
-        await Draw(session, engine, "more", "", ImagesControls.StartFor(Card) with { Count = 8 });
+        await Draw(session, engine, "more", "", ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 8 });
         var kept = session.Kept(session.Tries[0], 7);
         session.Unkept(7);
         Assert.True(reading.MoveNext());
@@ -195,7 +195,7 @@ public sealed class ImagesMakeTests
         });
         // The draws below take a moment only: they begin once the reader is going, or it could miss them all.
         await reading2.Task;
-        for (var i = 0; i < 6; i++) await Task.Run(() => Draw(session, engine, "again", "", ImagesControls.StartFor(Card) with { Count = 8 }));
+        for (var i = 0; i < 6; i++) await Task.Run(() => Draw(session, engine, "again", "", ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 8 }));
         stop.Cancel();
         Assert.True(await reader > 0);
         Assert.Equal(ImagesSession.Max, session.Tries.Count);
@@ -242,7 +242,9 @@ public sealed class ImagesMakeTests
 
         Assert.Equal("None", ImagesPanels.LorasSummary(0));
         Assert.Equal("2 on", ImagesPanels.LorasSummary(2));
-        Assert.Equal("832 × 1216", ImagesPanels.SizeSummary(832, 1216));
+        Assert.Equal("Normal · 832 × 1216", ImagesPanels.SizeSummary(832, 1216));
+        Assert.Equal("Small · 640 × 960", ImagesPanels.SizeSummary(640, 960));
+        Assert.Equal("704 × 1088", ImagesPanels.SizeSummary(704, 1088));
         Assert.Equal("Euler · 28 steps", ImagesPanels.SamplingSummary(ImagesSampling.Of(Card)));
         Assert.Equal("New each time", ImagesPanels.SeedSummary(null));
         Assert.Equal("2817463950", ImagesPanels.SeedSummary(2817463950));

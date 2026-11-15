@@ -63,7 +63,7 @@ public sealed class ImagesCoreTests : IDisposable
     {
         const string prompt = "  1girl, silver hair,\n(forest:1.2), <not a lora>, ";
         const string negative = " blurry ,, ";
-        var controls = ImagesControls.StartFor(Card) with { Loras = [new LoraUse("style\\ink.safetensors", 0.8)] };
+        var controls = ImagesControls.StartFor(Card, PictureSize.Normal) with { Loras = [new LoraUse("style\\ink.safetensors", 0.8)] };
 
         var request = ImagesDraw.Request(prompt, negative, controls);
 
@@ -109,7 +109,7 @@ public sealed class ImagesCoreTests : IDisposable
     [Fact]
     public void Several_pictures_per_draw_are_one_request_each_with_seeds_that_go_up_from_a_set_seed()
     {
-        var controls = ImagesControls.StartFor(Card) with { Seed = 500, Count = 4 };
+        var controls = ImagesControls.StartFor(Card, PictureSize.Normal) with { Seed = 500, Count = 4 };
 
         var singles = ImagesDraw.Singles(ImagesDraw.Request("a cat", "", controls));
 
@@ -126,7 +126,7 @@ public sealed class ImagesCoreTests : IDisposable
     [Fact]
     public void A_draw_that_cannot_work_says_why_in_words()
     {
-        var start = ImagesControls.StartFor(Card);
+        var start = ImagesControls.StartFor(Card, PictureSize.Normal);
         Assert.Empty(ImagesDraw.Problems("a cat", "", start));
         Assert.Contains("The prompt is empty.", ImagesDraw.Problems("  ", "", start));
         Assert.Empty(start.Problems());
@@ -150,7 +150,7 @@ public sealed class ImagesCoreTests : IDisposable
     public void The_model_is_the_checkpoint_with_the_vae_from_the_controls_and_the_cards_prediction()
     {
         var card = CheckpointSettings.ForFamily(ImageFamily.NoobAI, vPrediction: true) with { Vae = "card-vae.safetensors" };
-        var controls = ImagesControls.StartFor(card);
+        var controls = ImagesControls.StartFor(card, PictureSize.Normal);
         Assert.Equal("card-vae.safetensors", controls.Sampling.Vae);
 
         var model = ImagesDraw.Model(@"D:\models\image", @"noob\v.safetensors", card, controls with { Sampling = controls.Sampling with { Vae = null } });
@@ -181,7 +181,7 @@ public sealed class ImagesCoreTests : IDisposable
 
         // Make one like this: the picture's settings and seed go back into the boxes and controls; what a picture does
         // not record (how many per Draw) stays as it is now.
-        var now = ImagesControls.StartFor(Card) with { Count = 5 };
+        var now = ImagesControls.StartFor(Card, PictureSize.Normal) with { Count = 5 };
         var like = ImagesDraw.Like(picture, now);
         Assert.Equal((Checkpoint, " 1girl,\nforest ", "blurry"), (like.Checkpoint, like.Prompt, like.NegativePrompt));
         Assert.Equal((9002L, 5, true), (like.Controls.Seed, like.Controls.Count, like.Controls.HiresOn));
@@ -203,7 +203,7 @@ public sealed class ImagesCoreTests : IDisposable
         var memory = new ImagesMemory(documents);
         await memory.LoadAsync();
 
-        var start = memory.For(Checkpoint, Card);
+        var start = memory.For(Checkpoint, Card, PictureSize.Normal);
         Assert.Equal(ImagesSampling.Of(Card), start.Sampling);
         Assert.Equal(("euler", 28, 5.5, 2), (start.Sampling.Sampler, start.Sampling.Steps, start.Sampling.Guidance, start.Sampling.ClipSkip));
         Assert.Equal((832, 1216, PictureShape.Tall), (start.Width, start.Height, start.Shape));
@@ -216,13 +216,13 @@ public sealed class ImagesCoreTests : IDisposable
             1024, 640, [new LoraUse("style\\ink.safetensors", 0.7)], 4_000_000_000, true, new HiresFix(2, 10, 0.25, "Lanczos"), 6);
         var events = 0;
         memory.Changed += () => events++;
-        await memory.SaveAsync(Checkpoint, Card, changed);
+        await memory.SaveAsync(Checkpoint, Card, changed, PictureSize.Normal);
         Assert.Equal(1, events);
 
         // A new start of DOG.ai reads the same back.
         var again = new ImagesMemory(documents);
         await again.LoadAsync();
-        var read = again.For(Checkpoint, Card);
+        var read = again.For(Checkpoint, Card, PictureSize.Normal);
         Assert.Equal(changed.Sampling, read.Sampling);
         Assert.Equal((1024, 640, (PictureShape?)null), (read.Width, read.Height, read.Shape));
         Assert.Equal([new LoraUse("style/ink.safetensors", 0.7)], read.Loras);
@@ -235,30 +235,30 @@ public sealed class ImagesCoreTests : IDisposable
     {
         var memory = new ImagesMemory(new MemoryDocumentStore());
         var pony = CheckpointSettings.ForFamily(ImageFamily.Pony);
-        await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card).At(PictureShape.Wide) with
+        await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card, PictureSize.Normal).At(PictureShape.Wide) with
         {
             Sampling = ImagesSampling.Of(Card) with { Steps = 40 }, Count = 2,
-        });
+        }, PictureSize.Normal);
 
         // Another checkpoint still follows its own card, at the size and count that were set.
-        var other = memory.For("pony.safetensors", pony);
+        var other = memory.For("pony.safetensors", pony, PictureSize.Normal);
         Assert.Equal(ImagesSampling.Of(pony), other.Sampling);
         Assert.Equal(("euler_a", 25, 7.0), (other.Sampling.Sampler, other.Sampling.Steps, other.Sampling.Guidance));
         Assert.Equal((1216, 832, PictureShape.Wide, 2), (other.Width, other.Height, other.Shape, other.Count));
         Assert.False(memory.SamplingChanged("pony.safetensors"));
         // The hires numbers follow each checkpoint's steps until the owner sets them.
         Assert.Equal(PictureLevels.FineHires(25), other.Hires);
-        Assert.Equal(PictureLevels.FineHires(40), memory.For(Checkpoint, Card).Hires);
+        Assert.Equal(PictureLevels.FineHires(40), memory.For(Checkpoint, Card, PictureSize.Normal).Hires);
 
         // Back to the card's numbers: forgotten again, so a card changed later reaches the Images section.
-        await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card) with { Sampling = ImagesSampling.Of(Card) });
+        await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card, PictureSize.Normal) with { Sampling = ImagesSampling.Of(Card) }, PictureSize.Normal);
         Assert.False(memory.SamplingChanged(Checkpoint));
-        Assert.Equal(35, memory.For(Checkpoint, Card with { Steps = 35 }).Sampling.Steps);
+        Assert.Equal(35, memory.For(Checkpoint, Card with { Steps = 35 }, PictureSize.Normal).Sampling.Steps);
 
-        await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card) with { Sampling = ImagesSampling.Of(Card) with { Guidance = 9 } });
-        Assert.Equal(9, memory.For(Checkpoint, Card).Sampling.Guidance);
+        await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card, PictureSize.Normal) with { Sampling = ImagesSampling.Of(Card) with { Guidance = 9 } }, PictureSize.Normal);
+        Assert.Equal(9, memory.For(Checkpoint, Card, PictureSize.Normal).Sampling.Guidance);
         await memory.ResetSamplingAsync(Checkpoint);
-        Assert.Equal(5.5, memory.For(Checkpoint, Card).Sampling.Guidance);
+        Assert.Equal(5.5, memory.For(Checkpoint, Card, PictureSize.Normal).Sampling.Guidance);
     }
 
     [Fact]
@@ -294,22 +294,22 @@ public sealed class ImagesCoreTests : IDisposable
         var documents = new MemoryDocumentStore();
         var memory = new ImagesMemory(documents);
         await memory.ChooseAsync(Checkpoint);
-        await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card) with
+        await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card, PictureSize.Normal) with
         {
             Sampling = ImagesSampling.Of(Card) with { Steps = 30 }, Loras = [new LoraUse("ink.safetensors")], Seed = 5, HiresOn = true,
             Hires = new HiresFix(2, 10, 0.25), Count = 2,
-        });
+        }, PictureSize.Normal);
 
         // The document's fields are the controls and nothing else: there is nowhere a prompt could be.
         var saved = (await documents.LoadAsync<JsonObject>(ImagesMemory.Key))!;
-        Assert.Equal(["Checkpoint", "Count", "Height", "Hires", "HiresOn", "Loras", "Sampling", "Seed", "Width"], saved.Select(p => p.Key).Order());
+        Assert.Equal(["Checkpoint", "Count", "Height", "Hires", "HiresOn", "Loras", "Sampling", "Seed", "SizeChosen", "Width"], saved.Select(p => p.Key).Order());
         Assert.DoesNotContain("rompt", saved.ToJsonString(), StringComparison.OrdinalIgnoreCase);
 
         var before = saved.ToJsonString();
-        var bad = memory.For(Checkpoint, Card) with { Count = 99 };
-        var e = await Assert.ThrowsAsync<InvalidOperationException>(() => memory.SaveAsync(Checkpoint, Card, bad));
+        var bad = memory.For(Checkpoint, Card, PictureSize.Normal) with { Count = 99 };
+        var e = await Assert.ThrowsAsync<InvalidOperationException>(() => memory.SaveAsync(Checkpoint, Card, bad, PictureSize.Normal));
         Assert.Contains("Between 1 and 8", e.Message);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => memory.SaveAsync(@"C:\x.safetensors", Card, memory.For(Checkpoint, Card)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => memory.SaveAsync(@"C:\x.safetensors", Card, memory.For(Checkpoint, Card, PictureSize.Normal), PictureSize.Normal));
         Assert.Equal(before, (await documents.LoadAsync<JsonObject>(ImagesMemory.Key))!.ToJsonString());
     }
 
@@ -348,7 +348,7 @@ public sealed class ImagesCoreTests : IDisposable
         Assert.False(memory.SamplingChanged("bad.safetensors"));
         Assert.False(memory.SamplingChanged("none.safetensors"));
         Assert.False(memory.SamplingChanged("../out.safetensors"));
-        var controls = memory.For("good.safetensors", Card);
+        var controls = memory.For("good.safetensors", Card, PictureSize.Normal);
         Assert.Equal(30, controls.Sampling.Steps);
         Assert.Equal((832, 1216), (controls.Width, controls.Height));
         Assert.Equal([new LoraUse("ok.safetensors", 0.5)], controls.Loras);
@@ -368,7 +368,7 @@ public sealed class ImagesCoreTests : IDisposable
             var copy = await settings.LoadAsync();
             var memory = new ImagesMemory(services.GetRequiredService<IDocumentStore>());
             await memory.LoadAsync();
-            await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card) with { Count = 3 });
+            await memory.SaveAsync(Checkpoint, Card, memory.For(Checkpoint, Card, PictureSize.Normal) with { Count = 3 }, PictureSize.Normal);
             // A screen saves the settings it loaded before the controls changed.
             await settings.SaveAsync(copy with { Skin = "fireside" });
         }
@@ -378,7 +378,7 @@ public sealed class ImagesCoreTests : IDisposable
         {
             var memory = new ImagesMemory(services.GetRequiredService<IDocumentStore>());
             await memory.LoadAsync();
-            Assert.Equal(3, memory.For(Checkpoint, Card).Count);
+            Assert.Equal(3, memory.For(Checkpoint, Card, PictureSize.Normal).Count);
             Assert.Equal("fireside", (await services.GetRequiredService<ISettingsStore>().LoadAsync()).Skin);
         }
     }

@@ -88,10 +88,32 @@ public static class PictureUpscale
     public static IReadOnlyList<RedrawSize> RedrawSizes(ImageRequest request)
     {
         var has = request.Hires?.Scale ?? 1;
-        return [.. Scales.Where(s => s > has + 0.01)
+        // A Small picture is also offered ×1.25 (Normal's size for Tall and Wide): Make larger's choice when ×1.5 would
+        // set the chat model aside.
+        IEnumerable<double> scales = IsSmall(request) ? [PictureLevels.LargerFallbackScale, .. Scales] : Scales;
+        return [.. scales.Where(s => s > has + 0.01)
             .Select(s => Redraw(request, s))
             .Where(r => r.Seed >= 0 && r.Problems().Count == 0)
             .Select(r => new RedrawSize(r.Hires!.Scale, r.LargestPass.Width, r.LargestPass.Height))];
+    }
+
+    /// <summary>True when the picture was first drawn at one of the Small sizes (M18).</summary>
+    public static bool IsSmall(ImageRequest request) => PictureLevels.Of(request.Width, request.Height)?.Size == PictureSize.Small;
+
+    /// <summary>
+    /// The size Redraw larger starts on: for a Small picture not made larger yet, Make larger's own choice (×1.5, or ×1.25
+    /// when only that fits beside the chat model; <paramref name="fits"/> as for <see cref="PictureLevels.LargerScaleAsync"/>);
+    /// for any other ×2, else the first offered.
+    /// </summary>
+    public static async Task<double> FirstScaleAsync(ImageRequest request, IReadOnlyList<RedrawSize> sizes, Func<double, Task<bool?>> fits)
+    {
+        if (sizes.Count == 0) return 0;
+        if (IsSmall(request) && request.Hires is null)
+        {
+            var larger = await PictureLevels.LargerScaleAsync(PictureSize.Small, fits).ConfigureAwait(false);
+            if (sizes.Any(s => s.Scale == larger)) return larger;
+        }
+        return (sizes.FirstOrDefault(s => s.Scale == 2) ?? sizes[0]).Scale;
     }
 
     /// <summary>Why Redraw larger has no size to offer.</summary>

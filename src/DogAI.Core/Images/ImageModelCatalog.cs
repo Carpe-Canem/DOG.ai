@@ -66,14 +66,16 @@ public sealed class ImageModelDocument
 }
 
 /// <summary>
-/// Settings → Pictures: the quality pictures start at, whether the prompt is shown before drawing (off by default, the
+/// Settings → Pictures: the quality and size pictures start at (Small by default since M18: a document from before has
+/// no size and reads as Small), whether the prompt is shown before drawing (off by default, the
 /// owner's decision 2026-11-13), and the rating pictures aim for. The checkpoint is <see cref="ImageModelCatalog.Chosen"/>,
 /// the same choice as the Pictures default in Models › On this PC and "Draw with" in the test picture there.
 /// </summary>
 public sealed record PicturePreferences(
     PictureQuality Quality = PictureQuality.Standard,
     bool ShowPromptFirst = false,
-    PictureRating Rating = PictureRating.General)
+    PictureRating Rating = PictureRating.General,
+    PictureSize Size = PictureSize.Small)
 {
     public static PicturePreferences Default { get; } = new();
 }
@@ -99,8 +101,8 @@ public sealed class ImageModelCatalog(IDocumentStore? documents = null)
 
     public async Task SetPreferencesAsync(PicturePreferences preferences, CancellationToken ct = default)
     {
-        if (!Enum.IsDefined(preferences.Quality) || !Enum.IsDefined(preferences.Rating))
-            throw new InvalidOperationException("That quality or rating is not one DOG.ai knows.");
+        if (!Enum.IsDefined(preferences.Quality) || !Enum.IsDefined(preferences.Rating) || !Enum.IsDefined(preferences.Size))
+            throw new InvalidOperationException("That quality, rating or size is not one DOG.ai knows.");
         _doc.Preferences = preferences;
         await PersistAsync(ct);
     }
@@ -115,7 +117,7 @@ public sealed class ImageModelCatalog(IDocumentStore? documents = null)
             Loras = new(doc?.Loras ?? [], StringComparer.OrdinalIgnoreCase),
             StyleLoras = new(doc?.StyleLoras ?? [], StringComparer.OrdinalIgnoreCase),
             Chosen = doc?.Chosen,
-            Preferences = doc?.Preferences,
+            Preferences = doc?.Preferences is { } p && !Enum.IsDefined(p.Size) ? p with { Size = PictureSize.Small } : doc?.Preferences,
         };
         Changed?.Invoke();
     }

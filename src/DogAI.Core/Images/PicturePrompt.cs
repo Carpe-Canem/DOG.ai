@@ -17,7 +17,8 @@ public sealed record PictureOrder(
     PictureShape Shape = PictureShape.Tall,
     PictureQuality Quality = PictureQuality.Standard,
     long Seed = -1,
-    PictureRating? Rating = null);
+    PictureRating? Rating = null,
+    PictureSize Size = PictureSize.Small);
 
 /// <summary>A picture ready to draw.</summary>
 /// <param name="Request">What goes to the picture engine.</param>
@@ -64,7 +65,7 @@ public static partial class PicturePrompt
             loras.Add((path, card));
         }
 
-        var request = ImagePrompt.Compose(settings, subject, loras, seed: order.Seed, rating: order.Rating).At(order.Quality, order.Shape);
+        var request = ImagePrompt.Compose(settings, subject, loras, seed: order.Seed, rating: order.Rating).At(order.Quality, order.Shape, order.Size);
         return new PlannedPicture(request, subject, notes);
     }
 

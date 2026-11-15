@@ -65,32 +65,32 @@ public sealed class QuickFixTests
         var engine = new PortraitTests.WebpEngine();
         var tries = new PictureTries(engine);
         var first = await tries.DrawAsync(Root, "il.safetensors", Illustrious, ImagePrompt.Compose(Illustrious, "1girl"), PictureQuality.Draft,
-            PictureShape.Tall, "Mara.", TagNotes.None);
+            PictureShape.Tall, PictureSize.Normal, "Mara.", TagNotes.None);
         var firstImage = first.Image;
 
         // Keep, as before M14: the same seed, and with nothing else changed the same picture.
-        var kept = await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, seed: SeedChoice.Keep);
+        var kept = await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, seed: SeedChoice.Keep);
         Assert.Equal(first.Base.Seed, engine.Requests[^1].Seed);
         Assert.Equal(first.Image, kept.Image);
-        await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall);
+        await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal);
         Assert.Equal(first.Base.Seed, engine.Requests[^1].Seed);
 
         // New seed: the engine picks one and the new try remembers it.
-        var fresh = await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, seed: SeedChoice.New);
+        var fresh = await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, seed: SeedChoice.New);
         Assert.Equal(-1, engine.Requests[^1].Seed);
         Assert.NotEqual(first.Base.Seed, fresh.Base.Seed);
         Assert.Equal(engine.LastSeed, fresh.Base.Seed);
         Assert.Equal("Mara.", fresh.Moment); // the prompt is the plan's: its moment still describes it
 
         // A typed number is drawn exactly.
-        var typed = await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, seed: SeedChoice.Typed("4294967295", first.Base.Seed));
+        var typed = await tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, seed: SeedChoice.Typed("4294967295", first.Base.Seed));
         Assert.Equal(4294967295, engine.Requests[^1].Seed);
         Assert.Equal(4294967295, typed.Base.Seed);
 
         // A number that cannot be drawn is refused before anything is sent.
         var sent = engine.Requests.Count;
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, seed: SeedChoice.Typed("-5", first.Base.Seed)));
+            tries.RedrawAsync(Root, first, first.Base.Prompt, PictureQuality.Draft, PictureShape.Tall, PictureSize.Normal, seed: SeedChoice.Typed("-5", first.Base.Seed)));
         Assert.Equal(sent, engine.Requests.Count);
 
         // Every redraw is a new try; the one it came from is untouched.
@@ -107,7 +107,7 @@ public sealed class QuickFixTests
         var keptPicture = new Picture { Id = 7, Checkpoint = "il.safetensors", Prompt = "1girl", Width = 832, Height = 1216, Seed = 5, Steps = 28, Sampler = "euler", Image = KeptPictureTests.Webp(832, 1216) };
         var kept = tries.Adopt(keptPicture, Illustrious);
 
-        var redrawn = await tries.RedrawAsync(Root, kept, kept.Base.Prompt, kept.Quality, kept.Shape, seed: SeedChoice.New);
+        var redrawn = await tries.RedrawAsync(Root, kept, kept.Base.Prompt, kept.Quality, kept.Shape, kept.Size, seed: SeedChoice.New);
         Assert.Null(redrawn.KeptId);
         Assert.Equal(7, tries.All[0].KeptId);
         Assert.Equal(5, tries.All[0].Base.Seed);

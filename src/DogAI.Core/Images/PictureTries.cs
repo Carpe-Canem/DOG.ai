@@ -12,6 +12,9 @@ namespace DogAI.Core.Images;
 /// picture was drawn from. Quality and shape are applied to it (<see cref="Request"/>), never to an already-levelled request:
 /// <see cref="PictureLevels.At"/> takes the checkpoint's own step count.
 /// </param>
+/// <param name="Size">The size it was first drawn at (Small or Normal).</param>
+/// <param name="Scale">The hires fix's scale when <paramref name="Quality"/> is Fine: ×1.5, or ×1.25 for a Small picture made
+/// larger beside a chat model where only that fitted (<see cref="PictureLevels.LargerScaleAsync"/>).</param>
 /// <param name="Moment">The planned moment, for the owner to read; null for a redraw of a kept picture.</param>
 /// <param name="KeptId">The <see cref="Picture"/> row this is, when it is already kept.</param>
 public sealed record PictureTry(
@@ -21,6 +24,8 @@ public sealed record PictureTry(
     ImageRequest Base,
     PictureQuality Quality,
     PictureShape Shape,
+    PictureSize Size,
+    double Scale,
     byte[] Image,
     int ImageWidth,
     int ImageHeight,
@@ -29,7 +34,10 @@ public sealed record PictureTry(
     long? KeptId = null)
 {
     /// <summary>What was sent to the engine for this picture (WebP, the way kept pictures are drawn).</summary>
-    public ImageRequest Request => PictureTries.Levelled(Base, Quality, Shape);
+    public ImageRequest Request => PictureTries.Levelled(Base, Quality, Shape, Size, Scale);
+
+    /// <summary>Its level in words ("Standard", "Fine", "Made larger ×1.5").</summary>
+    public string LevelTitle => PictureLevels.Title(Quality, Size, Scale);
 
     /// <summary>
     /// The row to keep for <paramref name="ownerKind"/> / <paramref name="ownerId"/>. Drawing it again from the row gives
@@ -79,9 +87,9 @@ public sealed class PictureTries(IImageEngine engine)
 
     public void Clear() => _tries.Clear();
 
-    /// <summary>The request sent to the engine: <paramref name="base"/> at a quality and shape, drawn as kept pictures are.</summary>
-    public static ImageRequest Levelled(ImageRequest @base, PictureQuality quality, PictureShape shape) =>
-        @base.At(quality, shape).ForKeeping();
+    /// <summary>The request sent to the engine: <paramref name="base"/> at a quality, shape and size, drawn as kept pictures are.</summary>
+    public static ImageRequest Levelled(ImageRequest @base, PictureQuality quality, PictureShape shape, PictureSize size, double scale = PictureLevels.FineScale) =>
+        @base.At(quality, shape, size, scale).ForKeeping();
 
     /// <summary>
     /// Draws <paramref name="base"/> at a quality and shape with the checkpoint, through the engine (the graphics-card
@@ -89,22 +97,36 @@ public sealed class PictureTries(IImageEngine engine)
     /// Call it only after the chat model's job has ended.
     /// </summary>
     public async Task<PictureTry> DrawAsync(string imageRoot, string checkpoint, CheckpointSettings settings, ImageRequest @base,
-        PictureQuality quality, PictureShape shape, string? moment, TagNotes notes, IProgress<ImageProgress>? progress = null,
-        CancellationToken ct = default)
+        PictureQuality quality, PictureShape shape, PictureSize size, string? moment, TagNotes notes, IProgress<ImageProgress>? progress = null,
+        CancellationToken ct = default, double scale = PictureLevels.FineScale)
     {
-        var request = Levelled(@base, quality, shape) with { Preview = progress is not null, PreviewEvery = 4 };
+        if (quality != PictureQuality.Fine) scale = PictureLevels.FineScale;
+        var request = Levelled(@base, quality, shape, size, scale) with { Preview = progress is not null, PreviewEvery = 4 };
         var model = ImageFolders.ModelFor(imageRoot, checkpoint, settings);
         if (engine.Model != model) await engine.LoadAsync(model, ct).ConfigureAwait(false);
         var result = await engine.DrawAsync(request, progress, ct).ConfigureAwait(false);
         var image = result.Images[0];
-        var size = WebpInfo.Read(image);
-        return Add(new PictureTry(++_number, ImageModelCatalog.Normalise(checkpoint), settings, @base with { Seed = result.Seed }, quality, shape,
-            image, size?.Width ?? 0, size?.Height ?? 0, moment, notes));
+        var pixels = WebpInfo.Read(image);
+        return Add(new PictureTry(++_number, ImageModelCatalog.Normalise(checkpoint), settings, @base with { Seed = result.Seed }, quality, shape, size, scale,
+            image, pixels?.Width ?? 0, pixels?.Height ?? 0, moment, notes));
     }
 
-    /// <summary>The same plan again with a new seed.</summary>
+    /// <summary>The same plan again with a new seed, at the try's own quality, shape and size.</summary>
     public Task<PictureTry> TryAgainAsync(string imageRoot, PictureTry like, IProgress<ImageProgress>? progress = null, CancellationToken ct = default) =>
-        DrawAsync(imageRoot, like.Checkpoint, like.Settings, like.Base with { Seed = -1 }, like.Quality, like.Shape, like.Moment, like.Notes, progress, ct);
+        DrawAsync(imageRoot, like.Checkpoint, like.Settings, like.Base with { Seed = -1 }, like.Quality, like.Shape, like.Size, like.Moment, like.Notes,
+            progress, ct, like.Scale);
+
+    /// <summary>
+    /// Make larger: the same picture (same seed, prompt and size) redrawn with a hires fix at <paramref name="scale"/>, so
+    /// the layout stays and the detail grows. The same seed at a larger size would be another picture, so it is never
+    /// simply drawn larger. A new try; the one it came from is not touched.
+    /// </summary>
+    public Task<PictureTry> MakeLargerAsync(string imageRoot, PictureTry from, double scale, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)
+    {
+        if (!PictureLevels.CanMakeLarger(from.Quality)) throw new InvalidOperationException("This picture is already as large as Make larger goes.");
+        return DrawAsync(imageRoot, from.Checkpoint, from.Settings, from.Base, PictureQuality.Fine, from.Shape, from.Size, from.Moment, from.Notes,
+            progress, ct, scale);
+    }
 
     /// <summary>
     /// The same picture with things changed: the prompt, the quality, the shape, the LoRAs, and the seed when the owner
@@ -114,7 +136,7 @@ public sealed class PictureTries(IImageEngine engine)
     /// <param name="loras">The LoRAs and strengths to draw with; null keeps the try's own. A LoRA's trigger words stay in the
     /// prompt until the owner takes them out.</param>
     /// <param name="seed">The seed row's choice; null keeps the try's own seed.</param>
-    public Task<PictureTry> RedrawAsync(string imageRoot, PictureTry from, string prompt, PictureQuality quality, PictureShape shape,
+    public Task<PictureTry> RedrawAsync(string imageRoot, PictureTry from, string prompt, PictureQuality quality, PictureShape shape, PictureSize size,
         IReadOnlyList<LoraUse>? loras = null, SeedChoice? seed = null, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)
     {
         prompt = string.Join(' ', prompt.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).Trim();
@@ -125,8 +147,10 @@ public sealed class PictureTries(IImageEngine engine)
             Loras = loras is null ? from.Base.Loras : [.. loras],
             Seed = (seed ?? SeedChoice.Keep).For(from.Base.Seed),
         };
-        return DrawAsync(imageRoot, from.Checkpoint, from.Settings, @base, quality, shape,
-            prompt == from.Base.Prompt ? from.Moment : null, prompt == from.Base.Prompt ? from.Notes : TagNotes.None, progress, ct);
+        // A picture made larger keeps its scale while it stays at its size; any other Fine is ×1.5.
+        var scale = from.Quality == PictureQuality.Fine && size == from.Size ? from.Scale : PictureLevels.FineScale;
+        return DrawAsync(imageRoot, from.Checkpoint, from.Settings, @base, quality, shape, size,
+            prompt == from.Base.Prompt ? from.Moment : null, prompt == from.Base.Prompt ? from.Notes : TagNotes.None, progress, ct, scale);
     }
 
     /// <summary>
@@ -136,27 +160,37 @@ public sealed class PictureTries(IImageEngine engine)
     /// </summary>
     public PictureTry Adopt(Picture kept, CheckpointSettings card)
     {
-        var (@base, quality) = BaseOf(kept, card.Steps);
-        var shape = ShapeOf(kept.Width, kept.Height);
+        var level = BaseOf(kept, card.Steps);
         var settings = card with { Vae = kept.Vae, Prediction = kept.Prediction };
-        return Add(new PictureTry(++_number, kept.Checkpoint, settings, @base, quality, shape, kept.Image ?? [], kept.ImageWidth, kept.ImageHeight,
-            null, TagNotes.None, kept.Id));
+        return Add(new PictureTry(++_number, kept.Checkpoint, settings, level.Base, level.Quality, level.Shape, level.Size, level.Scale,
+            kept.Image ?? [], kept.ImageWidth, kept.ImageHeight, null, TagNotes.None, kept.Id));
     }
 
-    /// <summary>A kept picture's request at the checkpoint's own step count, and the quality it was drawn at.</summary>
-    public static (ImageRequest Base, PictureQuality Quality) BaseOf(Picture kept, int cardSteps)
+    /// <summary>
+    /// A kept picture's request at the checkpoint's own step count, and the level it was drawn at. The size comes first,
+    /// from the row's own width and height (the first pass, never the image's): a Small picture made larger is a hires
+    /// fix at 640 × 960, not Fine (a hires fix at Normal's size). <see cref="Levelled"/> of what it gives is the row's
+    /// own request.
+    /// </summary>
+    public static KeptLevel BaseOf(Picture kept, int cardSteps)
     {
+        var (shape, size) = PictureLevels.Of(kept.Width, kept.Height) ?? (ShapeOf(kept.Width, kept.Height), PictureSize.Normal);
         var request = kept.ToRequest() with { Hires = null };
-        if (kept.Hires is not null) return (request, PictureQuality.Fine);
-        if (kept.Steps != cardSteps && kept.Steps == PictureLevels.DraftSteps(cardSteps)) return (request with { Steps = cardSteps }, PictureQuality.Draft);
+        if (kept.Hires is { } hires) return new(request, PictureQuality.Fine, shape, size, hires.Scale);
+        if (kept.Steps != cardSteps && kept.Steps == PictureLevels.DraftSteps(cardSteps))
+            return new(request with { Steps = cardSteps }, PictureQuality.Draft, shape, size, PictureLevels.FineScale);
         // Drawn at the card's own count, or at a count the card no longer has: Standard at the picture's own count.
-        return (request, PictureQuality.Standard);
+        return new(request, PictureQuality.Standard, shape, size, PictureLevels.FineScale);
     }
 
+    /// <summary>The shape of a size: by its own pixels, or for a size typed by hand by which side is longer.</summary>
     public static PictureShape ShapeOf(int width, int height) =>
-        Enum.GetValues<PictureShape>().FirstOrDefault(s => PictureLevels.Size(s) == (width, height),
-            width > height ? PictureShape.Wide : width < height ? PictureShape.Tall : PictureShape.Square);
+        PictureLevels.Of(width, height)?.Shape ?? (width > height ? PictureShape.Wide : width < height ? PictureShape.Tall : PictureShape.Square);
 }
+
+/// <summary>What <see cref="PictureTries.BaseOf"/> reads from a kept picture.</summary>
+/// <param name="Scale">The hires fix's scale when <paramref name="Quality"/> is Fine.</param>
+public sealed record KeptLevel(ImageRequest Base, PictureQuality Quality, PictureShape Shape, PictureSize Size, double Scale);
 
 /// <summary>
 /// The one kept picture of a character or persona: the portrait in use, which Edit and redraw starts from later. Called

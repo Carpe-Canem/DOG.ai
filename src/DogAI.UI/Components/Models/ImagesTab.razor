@@ -122,11 +122,21 @@
                 <span class="small">@PictureLevels.Blurb(_quality)</span>
             </label>
             <label>
+                Size
+                <select class="field" id="test-size" @bind="TestSize" disabled="@_drawing">
+                    @foreach (var z in Enum.GetValues<PictureSize>())
+                    {
+                        <option value="@z">@PictureLevels.Title(z)</option>
+                    }
+                </select>
+                <span class="small">@PictureLevels.Blurb(TestSize)</span>
+            </label>
+            <label>
                 Shape
                 <select class="field" id="test-shape" @bind="_shape" disabled="@_drawing">
                     @foreach (var s in Enum.GetValues<PictureShape>())
                     {
-                        <option value="@s">@PictureLevels.Title(s)</option>
+                        <option value="@s">@PictureLevels.Title(s, TestSize)</option>
                     }
                 </select>
             </label>
@@ -303,6 +313,10 @@
     private bool _drawing;
     private PictureQuality _quality = PictureQuality.Standard;
     private PictureShape _shape = PictureShape.Tall;
+
+    /// <summary>The test picture's size: Settings' "Start pictures at" until one is picked here.</summary>
+    private PictureSize TestSize { get => _sizePicked ?? Catalog.Preferences.Size; set => _sizePicked = value; }
+    private PictureSize? _sizePicked;
     private string? _testNote, _testPicture;
     private CancellationTokenSource? _drawCts;
 
@@ -569,7 +583,7 @@
             var subject = ImagePrompt.TestSubject(settings.Style) + (_keepWords is null ? "" : ", " + _keepWords);
             var quality = _quality;
             // Drawn the way pictures are kept (WebP), so what is shown is exactly what Keep would save.
-            var request = ImagePrompt.Compose(settings, subject, loras, rating: Catalog.Preferences.Rating).At(quality, _shape).ForKeeping() with
+            var request = ImagePrompt.Compose(settings, subject, loras, rating: Catalog.Preferences.Rating).At(quality, _shape, TestSize).ForKeeping() with
             {
                 Preview = true,
                 PreviewEvery = 4,

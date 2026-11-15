@@ -29,7 +29,7 @@ public static class BesidePictures
     public static long PictureNeed(long checkpointBytes) =>
         Enum.GetValues<PictureShape>().Max(shape =>
         {
-            var (width, height) = PictureLevels.Size(shape);
+            var (width, height) = PictureLevels.Size(shape, PictureSize.Normal);
             return PictureMemory.Need(checkpointBytes, 0, new ImageRequest("x", Width: width, Height: height));
         });
 
