@@ -33,6 +33,8 @@
 #               @{ mouse = '120,400' }           a real mouse click at these page coordinates (CSS pixels): it hits what
 #                                                is on top there and moves the focus, unlike a script .click();
 #                                                or mouse = '<css selector>' to click the middle of that element
+#               @{ osclick = '<css selector>' }  the same, but through Windows: DOG.ai is brought to the front and the
+#                                                real cursor clicks there (or osclick = 'x,y' in page coordinates)
 #   -DataDir  data folder for the run (default: a fresh temp folder, deleted afterwards)
 #   -OutDir   where screenshots are written (default: a temp folder, printed at the end)
 #   -Exe      run this DOG.ai.exe instead of the Debug build (for example publish\win-x64\app\DOG.ai.exe; point at the one
@@ -99,6 +101,8 @@ if (-not ('DogWalk.Win' -as [type])) {
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
 [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+[DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
 public delegate bool EnumProc(IntPtr hwnd, IntPtr lParam);
 [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc proc, IntPtr lParam);
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out int pid);
@@ -430,6 +434,39 @@ try {
             }
             Start-Sleep -Milliseconds 500
             "clicked at $x,$y"
+        }
+        if ($step.osclick) {
+            # A click through Windows itself: the real cursor moves there and the mouse button goes down and up, as a
+            # person's would (the mouse step above goes through the browser control instead). DOG.ai must be in front.
+            if ($step.osclick -match '^\s*[\d.]+\s*,\s*[\d.]+\s*$') { $x, $y = $step.osclick -split ',' }
+            else {
+                $sel = $step.osclick | ConvertTo-Json
+                $r = Send 'Runtime.evaluate' @{ expression = "(() => { const e = document.querySelector($sel); if (!e) return ''; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return (r.x + r.width / 2) + ',' + (r.y + r.height / 2); })()"; returnByValue = $true }
+                if (-not $r.result.value) { "OSCLICK TARGET NOT FOUND: $($step.osclick)"; continue }
+                $x, $y = $r.result.value -split ','
+            }
+            $h = Front-Window
+            if ($h -eq [IntPtr]::Zero -or [DogWalk.Win]::GetForegroundWindow() -ne $h) { "OSCLICK NOT SENT: DOG.ai is not the window in front"; continue }
+            # The page's area on screen is the browser control's document, found through UI Automation (screen pixels).
+            # Just after the window comes to the front UI Automation may not list it yet, so look a few times.
+            $doc = $null
+            foreach ($try in 1..10) {
+                $win = $A::RootElement.FindAll('Children', (ByPid)) | Select-Object -First 1
+                if ($win) { $doc = $win.FindFirst('Descendants', [Windows.Automation.PropertyCondition]::new($A::ControlTypeProperty, [Windows.Automation.ControlType]::Document)) }
+                if ($doc) { break }
+                Start-Sleep -Milliseconds 300
+            }
+            if (-not $doc) { "OSCLICK: page area not found"; continue }
+            $b = $doc.Current.BoundingRectangle
+            $r = Send 'Runtime.evaluate' @{ expression = "innerWidth"; returnByValue = $true }
+            $scale = $b.Width / [double]$r.result.value
+            $sx = [int]($b.Left + [double]$x * $scale); $sy = [int]($b.Top + [double]$y * $scale)
+            [DogWalk.Win]::SetCursorPos($sx, $sy) | Out-Null
+            Start-Sleep -Milliseconds 150
+            [DogWalk.Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 60
+            [DogWalk.Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 500
+            "clicked through Windows at page $x,$y (screen $sx,$sy; page area $([int]$b.Left),$([int]$b.Top) $([int]$b.Width)x$([int]$b.Height), scale $([Math]::Round($scale,3)))"
         }
         if ($step.winshot) { Win-Shot $step.winshot }
         if ($step.trayclick) { Tray-Click }
