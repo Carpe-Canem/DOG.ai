@@ -12,7 +12,7 @@ public enum ThinkingOnlyReason
     /// <summary>The model ended after thinking without answering, with room to spare.</summary>
     Ended,
 
-    /// <summary>It finished, but whether room ran out cannot be told (another model, or none, is loaded now).</summary>
+    /// <summary>It finished, but whether room ran out cannot be told (the prompt's size was not recorded).</summary>
     Unknown,
 }
 
@@ -44,19 +44,23 @@ public static class ThinkingOnly
     public const int RoomMargin = 64;
 
     /// <summary>
-    /// The note for <paramref name="message"/>, or null when it has an answer (or no thinking). <paramref name="contextLength"/>
-    /// is the loaded model's context size when that model wrote the reply; null when it cannot be told.
+    /// The note for <paramref name="message"/>, or null when it has an answer (or no thinking). The engine stops exactly at
+    /// the context size it had when it wrote the reply, so a prompt plus reply that ends just under one of the sizes DOG.ai
+    /// offers (or <paramref name="contextLength"/>, the loaded model's size, for a model trained for less) ran out of room
+    /// at that size, even after the size was changed since. Anything else ended by itself.
     /// </summary>
-    public static ThinkingOnlyNote? Of(ChatMessage message, int? contextLength)
+    public static ThinkingOnlyNote? Of(ChatMessage message, int? contextLength = null)
     {
         if (message.Role != ChatRole.Assistant || !string.IsNullOrWhiteSpace(message.Content) || string.IsNullOrWhiteSpace(message.Reasoning))
             return null;
         if (message.CompletionTokens is not { } written || written <= 0)
             return new ThinkingOnlyNote(ThinkingOnlyReason.Stopped, null, null);
-        if (contextLength is not { } room || room <= 0 || message.PromptTokens is not { } prompt)
+        if (message.PromptTokens is not { } prompt || prompt <= 0)
             return new ThinkingOnlyNote(ThinkingOnlyReason.Unknown, written, null);
-        return prompt + written >= room - RoomMargin
+        var total = prompt + written;
+        var sizes = contextLength is > 0 and var loaded ? Models.ContextSizes.Offered.Append(loaded) : Models.ContextSizes.Offered;
+        return sizes.Where(size => total <= size && total >= size - RoomMargin).Order().FirstOrDefault() is var room and > 0
             ? new ThinkingOnlyNote(ThinkingOnlyReason.OutOfRoom, written, room)
-            : new ThinkingOnlyNote(ThinkingOnlyReason.Ended, written, room);
+            : new ThinkingOnlyNote(ThinkingOnlyReason.Ended, written, null);
     }
 }

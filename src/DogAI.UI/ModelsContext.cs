@@ -126,5 +126,5 @@ public sealed class ModelsContext(HardwareProbe probe, EngineManager engine, ISe
     public ModelVariant? Best(IEnumerable<ModelVariant> variants, Func<long, ModelShape> shape) =>
         Quantization.PickBest(variants.Select(v => (v, Fit(shape(v.Size)))));
 
-    public static string[] ContextSizes { get; } = ["4096", "8192", "16384", "32768", "65536", "131072"];
+    public static string[] ContextSizes { get; } = DogAI.Core.Models.ContextSizes.Offered.Select(s => s.ToString()).ToArray();
 }

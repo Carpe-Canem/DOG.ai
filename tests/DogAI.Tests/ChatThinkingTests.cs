@@ -36,14 +36,28 @@ public sealed class ThinkingOnlyTests
     {
         var note = ThinkingOnly.Of(Reply("", "Let me think.", 190, 1200), 8192)!;
         Assert.Equal(ThinkingOnlyReason.Ended, note.Reason);
+        Assert.Equal(ThinkingOnlyReason.Ended, ThinkingOnly.Of(Reply("", "Let me think.", 190, 1200), null)!.Reason);
         Assert.False(note.MoreRoomHelps);
         Assert.Contains("1,200 tokens", note.Text);
     }
 
     [Fact]
-    public void Without_the_context_size_it_cannot_tell_and_says_what_usually_happened()
+    public void A_reply_that_ran_out_of_room_still_says_so_after_the_context_size_was_raised()
     {
-        var note = ThinkingOnly.Of(Reply("", "Let me think."), null)!;
+        // Written at 4,096 tokens; the owner then followed the note's advice and the model loaded again at 8,192.
+        var note = ThinkingOnly.Of(Reply("", "Let me think.", 46, 4050), 8192)!;
+        Assert.Equal(ThinkingOnlyReason.OutOfRoom, note.Reason);
+        Assert.Equal(4096, note.ContextLength);
+        // With no model loaded, the sizes DOG.ai offers are enough to tell.
+        Assert.Equal(4096, ThinkingOnly.Of(Reply("", "Let me think.", 46, 4050), null)!.ContextLength);
+        // A model trained for less than any offered size stops at its own size.
+        Assert.Equal(2048, ThinkingOnly.Of(Reply("", "Let me think.", 40, 2000), 2048)!.ContextLength);
+    }
+
+    [Fact]
+    public void Without_the_prompts_size_it_cannot_tell_and_says_what_usually_happened()
+    {
+        var note = ThinkingOnly.Of(Reply("", "Let me think.", null, 3000), 8192)!;
         Assert.Equal(ThinkingOnlyReason.Unknown, note.Reason);
         Assert.True(note.MoreRoomHelps);
         Assert.Contains("Usually", note.Text);
