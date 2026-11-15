@@ -7,6 +7,7 @@
 @inject NetworkAudit Audit
 @inject ISettingsStore SettingsStore
 @inject DogAI.Core.Stories.StoryOptions StoryOptions
+@inject ChatOptions ChatThinking
 @inject InterfaceMemory Memory
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -103,15 +104,30 @@
         </div>
     </section>
     <section>
-        <h3>Stories</h3>
+        <h3>Thinking</h3>
         <div class="voice-settings">
+            <div id="set-general-thinking">
+                <label class="check">
+                    <input type="checkbox" name="general-thinking" checked="@ChatThinking.GeneralThinking" @onchange="e => ChatThinking.SetGeneralThinkingAsync(e.Value is true)" />
+                    @ChatOptions.GeneralSwitch
+                </label>
+                <p class="small">On, a model that thinks may plan its answer first. Slower, and a long think can leave no room to answer.</p>
+            </div>
+            <div id="set-roleplay-thinking">
+                <label class="check">
+                    <input type="checkbox" name="roleplay-thinking" checked="@ChatThinking.RoleplayThinking" @onchange="e => ChatThinking.SetRoleplayThinkingAsync(e.Value is true)" />
+                    @ChatOptions.RoleplaySwitch
+                </label>
+                <p class="small">Off, models that think answer at once.</p>
+            </div>
             <div id="set-story-thinking">
                 <label class="check">
                     <input type="checkbox" name="story-thinking" checked="@StoryOptions.Thinking" @onchange="e => StoryOptions.SetThinkingAsync(e.Value is true)" />
-                    Let the model think in stories
+                    @ChatOptions.StorySwitch
                 </label>
-                <p class="small">Off, models that think start a passage at once. Chats are not affected.<InfoButton About="thinking in stories">Some models think silently before they write. Off, they start a story passage at once and cannot use up the room meant for the story; on, they may plan more carefully but are slower, and can run out of room. Models that do not think, or cannot be told, are not affected.</InfoButton></p>
+                <p class="small">Off, models that think start a passage at once.</p>
             </div>
+            <p class="small">Each switch is for its own kind of chat.<InfoButton About="thinking">Some models think silently before they write. Off, they answer at once and cannot use up the room meant for the answer; on, they may plan more carefully but are slower, and a long think can fill the whole context and leave no answer at all. A reply like that says so. Models that do not think, or cannot be told, are not affected. Memory summaries never think.</InfoButton></p>
         </div>
     </section>
 </div>

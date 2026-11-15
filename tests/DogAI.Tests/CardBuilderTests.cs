@@ -58,6 +58,7 @@ public sealed class CardBuilderTests
         Assert.Equal(["sea", "cozy"], c.Tags);
         Assert.Equal(0, c.Id);
         Assert.NotNull(engine.LastSampler?.JsonSchema);
+        Assert.False(engine.LastSampler!.Thinking); // a draft is asked for without thinking
         Assert.NotNull(JsonNode.Parse(engine.LastSampler!.JsonSchema!)); // the schema itself is valid JSON
         Assert.Contains("a lighthouse keeper", engine.LastPrompt![^1].Content);
         Assert.Equal(2, lengths.Count);

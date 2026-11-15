@@ -43,7 +43,7 @@ public sealed class StoryThinkingRequestTests
 public sealed partial class ChatServiceTests
 {
     [Fact]
-    public async Task Story_passages_choices_and_drafts_are_asked_not_to_think_and_chats_are_not()
+    public async Task Story_passages_choices_and_drafts_are_asked_not_to_think()
     {
         var id = await NewStoryWithAsync(StoryKind.Interactive, null);
         ScriptStory();
@@ -54,11 +54,5 @@ public sealed partial class ChatServiceTests
         _engine.Reply = _ => FakeEngine.Say("""{"title":"Winter","premise":"A dog keeps watch.","genre":"","tone":"","cast":"","world":"","style_guide":""}""");
         await new StoryBuilder(_engine).DraftAsync("A dog in winter", StoryKind.Interactive);
         Assert.False(_engine.Samplers[^1].Thinking);
-
-        var rex = await SaveCharacterAsync();
-        var chat = await _chat.StartCharacterChatAsync(rex.Id);
-        _engine.Reply = _ => FakeEngine.Say("*sits*");
-        await _chat.SendAsync(chat.Id, "Sit.");
-        Assert.Null(_engine.Samplers[^1].Thinking);
     }
 }

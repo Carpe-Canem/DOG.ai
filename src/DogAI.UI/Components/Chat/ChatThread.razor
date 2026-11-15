@@ -27,6 +27,7 @@
                      Speech="@ColourSpeech" Tone="@who?.Tone"
                      Above="@(!isUser && _pics?.Src(m) is { } src ? PictureAbove(m, src) : null)"
                      Below="@(sources is null || _editingId == m.Id ? null : SourcesRow(sources))"
+                     Instead="@(isUser ? null : NoAnswer(m))"
                      Editor="@(_editingId == m.Id ? EditBox(m) : null)">
             <Actions>
                 @if (_editingId != m.Id)
@@ -311,6 +312,12 @@
         {
             <p class="small sources-note">@note</p>
         }
+    };
+
+    /// <summary>In place of a reply's answer when it has none: why (it was all thinking) and what to change.</summary>
+    private RenderFragment NoAnswer(ChatMessage message) => __builder =>
+    {
+        <NoAnswerNote Message="message" Mode="@Conversation.Mode" />
     };
 
     private RenderFragment EditBox(ChatMessage message) => __builder =>

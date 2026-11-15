@@ -461,10 +461,8 @@ public sealed partial class ChatServiceTests : IDisposable
         var request = _engine.Prompts.Last(p => p[0].Content.Contains("summarise stories"));
         Assert.Contains("Rex:", request[1].Content);
         Assert.DoesNotContain("turn 5", request[1].Content);
-        // A summary is asked for without thinking (a model that thinks first would spend the summary's length on it);
-        // the replies themselves are left as the style has them.
+        // A summary is asked for without thinking (a model that thinks first would spend the summary's length on it).
         Assert.False(_engine.Samplers[_engine.Prompts.IndexOf(request)].Thinking);
-        Assert.Null(_engine.Samplers[^1].Thinking);
     }
 
     [Fact]

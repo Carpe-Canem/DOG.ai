@@ -26,6 +26,10 @@
         {
             <div class="msg-body plain">@Content</div>
         }
+        else if (Instead is not null && !Streaming && string.IsNullOrWhiteSpace(Content))
+        {
+            <div class="msg-body" data-msg="@MessageId">@Instead</div>
+        }
         else
         {
             <div class="msg-body" data-msg="@MessageId">
@@ -49,6 +53,9 @@
     [Parameter] public bool Streaming { get; set; }
     [Parameter] public RenderFragment? Editor { get; set; }
     [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>Shown in place of the text when a finished reply has none (why a reply is thinking only).</summary>
+    [Parameter] public RenderFragment? Instead { get; set; }
 
     /// <summary>Shown above the text (a reply's kept picture).</summary>
     [Parameter] public RenderFragment? Above { get; set; }

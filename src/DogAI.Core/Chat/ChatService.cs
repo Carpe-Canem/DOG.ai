@@ -72,10 +72,13 @@ public sealed class ActiveReply(long conversationId, long? parentId, long? conti
 /// a story its bible (the story-only parts are in ChatService.Story.cs).
 /// </summary>
 public sealed partial class ChatService(IChatStore store, IChatEngine engine, PresetCatalog? presets = null, ICharacterStore? characters = null,
-    IStoryStore? stories = null, DocumentLibrary? documents = null, StoryOptions? storyOptions = null)
+    IStoryStore? stories = null, DocumentLibrary? documents = null, StoryOptions? storyOptions = null, ChatOptions? chatOptions = null)
 {
     /// <summary>Story-wide settings: whether a thinking model may think when it writes for a story.</summary>
     private readonly StoryOptions _storyOptions = storyOptions ?? new StoryOptions();
+
+    /// <summary>Whether a thinking model may think in General, and in character and group chats.</summary>
+    private readonly ChatOptions _chatOptions = chatOptions ?? new ChatOptions();
 
     public const string UntitledChat = "New chat";
     private static readonly TimeSpan UiInterval = TimeSpan.FromMilliseconds(50);
@@ -390,7 +393,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             layout.Directive = CharacterPrompt.Fill(CharacterPrompt.ImpersonateDirective, names.Everyone, names.User);
             layout.Add(PromptPartKind.Instruction, CharacterPrompt.Fill(CharacterPrompt.ImpersonateHint, names.Everyone, names.User));
             var built = await BuildPromptAsync(layout, path, PromptEnd.UserTurn, names, token);
-            var preset = _presets.Get(conversation.PresetId);
+            var preset = ThinkingFor(conversation, _presets.Get(conversation.PresetId));
             // Writing inside an open user turn makes the model speak as the user; asking it to is the fallback.
             // Stop where the template would close the user's turn, so the draft never runs on into the character's reply.
             var stream = built.OpenUserTurn
@@ -422,6 +425,10 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         Changed?.Invoke();
     }
 
+    /// <summary><paramref name="preset"/> told not to think unless the switch for this kind of chat allows it.</summary>
+    private SamplerPreset ThinkingFor(Conversation conversation, SamplerPreset preset) =>
+        conversation.Mode == Story.Mode ? _storyOptions.Apply(preset) : _chatOptions.Apply(preset, conversation.Mode);
+
     private void Begin(ActiveReply active, CancellationTokenSource cts)
     {
         _cts = cts;
@@ -441,7 +448,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     /// <param name="questionId">The message the reply follows.</param>
     /// <param name="continuing">When set, the reply to make longer instead of writing a new one.</param>
     /// <param name="speakerId">Group chats: the member writing the reply (a continued reply keeps its own).</param>
-    /// <returns>The saved reply's id when it finished without being stopped or failing; otherwise null.</returns>
+    /// <returns>The saved reply's id when it finished with some answer text, without being stopped or failing; otherwise null.</returns>
     private async Task<long?> GenerateAsync(long conversationId, long? questionId, ChatMessage? continuing = null, long? speakerId = null)
     {
         speakerId = continuing?.SpeakerId ?? speakerId;
@@ -475,7 +482,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             if (await StoryOfAsync(conversation, ct) is { } story) path = StoryPrompt.ForPrompt(story, path);
             var preset = _presets.Get(conversation.PresetId);
             reply.PresetId = preset.Id;
-            if (conversation.Mode == Story.Mode) preset = _storyOptions.Apply(preset);
+            preset = ThinkingFor(conversation, preset);
             reply.ModelName = engine.ModelName;
 
             var sources = new ReplySources();
@@ -526,7 +533,8 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             {
                 var saved = await store.AddMessageAsync(reply);
                 await store.SetActiveLeafAsync(conversationId, saved.Id);
-                result = saved.Id;
+                // A reply that is thinking only is kept (its note says why), but nothing follows it: no next speaker, no choices.
+                result = reply.Content.Length > 0 ? saved.Id : null;
             }
         }
         catch (Exception e)

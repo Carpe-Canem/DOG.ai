@@ -52,7 +52,8 @@ public sealed class CardBuilder(IChatEngine engine)
         idea = idea.Trim();
         if (idea.Length == 0) throw new InvalidOperationException("Describe the character first.");
 
-        var preset = SamplerPresets.Get(SamplerPresets.DefaultId) with { Temperature = 0.8, MaxTokens = MaxTokens, JsonSchema = Schema };
+        // Never thinks: a model that thinks first could spend the whole limit on it and draft nothing.
+        var preset = SamplerPresets.Get(SamplerPresets.DefaultId) with { Temperature = 0.8, MaxTokens = MaxTokens, JsonSchema = Schema, Thinking = false };
         var prompt = new List<PromptMessage>
         {
             new("system", Instruction),

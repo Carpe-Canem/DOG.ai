@@ -198,6 +198,9 @@ em.act { color: var(--act); }
 .thinking { margin: 4px 0 6px; padding: 6px 10px; border: 1px dashed var(--line); border-radius: min(var(--r), 10px); color: var(--muted); font-size: .9em; }
 .thinking summary { cursor: pointer; }
 .thinking div { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.thinking-only { padding: 8px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.thinking-only p { margin: 0; }
+.thinking-only p + p { margin-top: 6px; }
 .msg-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; min-height: 1.6em; font-size: .8em; color: var(--muted); }
 .msg-actions:empty { display: none; }
 .msg-actions button:hover:not([disabled]) { color: var(--accent); }

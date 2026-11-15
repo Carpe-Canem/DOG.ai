@@ -72,7 +72,14 @@
                 }
                 else
                 {
-                    <div class="msg-body"><MarkdownView Text="@m.Content" Speech="@Appearance.SpeechColours" Speakers="@Speakers" /></div>
+                    @if (string.IsNullOrWhiteSpace(m.Content))
+                    {
+                        <div class="msg-body"><NoAnswerNote Message="m" Mode="@DogAI.Core.Stories.Story.Mode" Again="Rewrite" /></div>
+                    }
+                    else
+                    {
+                        <div class="msg-body"><MarkdownView Text="@m.Content" Speech="@Appearance.SpeechColours" Speakers="@Speakers" /></div>
+                    }
                     <div class="msg-actions">
                         @Versions(siblings, position, "Other versions of this passage")
                         <button @onclick="() => Desktop.CopyText(m.Content)">Copy</button>

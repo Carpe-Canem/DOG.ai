@@ -1,0 +1,49 @@
+@* In place of the answer, for a reply that is thinking only: why there is no answer and what to change.
+   Worked out from the saved reply (ThinkingOnly, Core), so it also shows on replies written before it existed. *@
+@inject EngineManager Engine
+@inject ChatOptions ChatThinking
+@inject DogAI.Core.Stories.StoryOptions StoryThinking
+
+@if (Note is { } note)
+{
+    <div class="thinking-only" role="note" data-reason="@note.Reason.ToString().ToLowerInvariant()">
+        <p>@note.Text</p>
+        @if (note.Reason == ThinkingOnlyReason.Stopped)
+        {
+            <p class="small">Press @Again to write it again.</p>
+        }
+        else if (Allowed && note.MoreRoomHelps)
+        {
+            <p class="small">To get an answer, turn off <a href="settings/chats">@ChatOptions.SwitchFor(Mode)</a> in Settings › Chats and stories, or set a larger context size in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName</a>. Then press @Again.</p>
+        }
+        else if (Allowed)
+        {
+            <p class="small">Press @Again to try again, or turn off <a href="settings/chats">@ChatOptions.SwitchFor(Mode)</a> in Settings › Chats and stories.</p>
+        }
+        else if (note.MoreRoomHelps)
+        {
+            <p class="small">Thinking is off here now. If this keeps happening, the model cannot be told not to think: set a larger context size in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName</a>, then press @Again.</p>
+        }
+        else
+        {
+            <p class="small">Press @Again to try again.</p>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ChatMessage Message { get; set; } = new();
+
+    /// <summary>The chat's mode ("general", "characters", "group", "story"): which thinking switch applies.</summary>
+    [Parameter, EditorRequired] public string Mode { get; set; } = "general";
+
+    /// <summary>The button that writes the reply again, as named on it.</summary>
+    [Parameter] public string Again { get; set; } = "Regenerate";
+
+    /// <summary>The loaded model's context size, but only when that model wrote the reply; otherwise it cannot be compared.</summary>
+    private int? Room => Engine.ModelName is { } name && name == Message.ModelName && Engine.ContextLength > 0 ? Engine.ContextLength : null;
+
+    private ThinkingOnlyNote? Note => ThinkingOnly.Of(Message, Room);
+
+    private bool Allowed => Mode == DogAI.Core.Stories.Story.Mode ? StoryThinking.Thinking : ChatThinking.ThinksIn(Mode);
+}

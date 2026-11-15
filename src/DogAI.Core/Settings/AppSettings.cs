@@ -70,6 +70,13 @@ public sealed record AppSettings
     /// default: thinking made stories slow and could use up all the room before any story was written.</summary>
     public bool StoryThinking { get; init; }
 
+    /// <summary>Let a thinking model think before it answers in General chats. On by default (owner's decision, 2026-11-15).</summary>
+    public bool GeneralThinking { get; init; } = true;
+
+    /// <summary>Let a thinking model think in character and group chats. Off by default: its thinking could use up the whole
+    /// context and leave a reply with no answer (owner's decision, 2026-11-15).</summary>
+    public bool RoleplayThinking { get; init; }
+
     /// <summary>Models lists also show models too large for this PC. Off by default.</summary>
     public bool ModelsShowAll { get; init; }
 
@@ -93,6 +100,7 @@ public sealed record AppSettings
         ReadRepliesAloud == other.ReadRepliesAloud && HandsFreeSensitivity == other.HandsFreeSensitivity &&
         TrayIcon == other.TrayIcon && CloseToTray == other.CloseToTray && DictateAnywhere == other.DictateAnywhere &&
         ModelsShowAll == other.ModelsShowAll && ModelsFilter == other.ModelsFilter && StoryThinking == other.StoryThinking &&
+        GeneralThinking == other.GeneralThinking && RoleplayThinking == other.RoleplayThinking &&
         IdleLockMinutes == other.IdleLockMinutes && PlainExportNoted == other.PlainExportNoted &&
         ExtraModelFolders.SequenceEqual(other.ExtraModelFolders) &&
         DefaultModels.Count == other.DefaultModels.Count &&
@@ -101,7 +109,8 @@ public sealed record AppSettings
     public override int GetHashCode() => HashCode.Combine(
         HashCode.Combine(ModelsDirectory, Theme, Skin, ContextLength, LastModelPath, IdleUnloadMinutes),
         HashCode.Combine(SpeechModel, SpeechLanguage, Microphone, Speakers, Voice, VoiceSpeed, ReadRepliesAloud, HandsFreeSensitivity),
-        HashCode.Combine(TrayIcon, CloseToTray, DictateAnywhere, ModelsShowAll, ModelsFilter, StoryThinking, IdleLockMinutes, PlainExportNoted));
+        HashCode.Combine(TrayIcon, CloseToTray, DictateAnywhere, ModelsShowAll, ModelsFilter, StoryThinking, IdleLockMinutes, PlainExportNoted),
+        HashCode.Combine(GeneralThinking, RoleplayThinking));
 
     /// <summary>Where voice models are kept: a "voice" folder inside the models folder.</summary>
     public string? VoiceFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, "voice");

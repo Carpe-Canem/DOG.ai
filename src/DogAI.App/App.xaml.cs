@@ -119,6 +119,7 @@ public partial class App : Application
             await StartModelServicesAsync(_services, log);
             await _services.GetRequiredService<AppearanceState>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Stories.StoryOptions>().LoadAsync();
+            await _services.GetRequiredService<ChatOptions>().LoadAsync();
             await _services.GetRequiredService<PresetCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Library.LibraryCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Images.ImageModelCatalog>().LoadAsync();
@@ -260,6 +261,7 @@ public partial class App : Application
         services.AddSingleton<DogAI.Core.Images.PictureWriter>();
         services.AddSingleton<DogAI.Core.Stories.StoryBuilder>();
         services.AddSingleton<DogAI.Core.Stories.StoryOptions>();
+        services.AddSingleton<ChatOptions>();
         AddVoice(services);
         services.AddDogData();
         services.AddWpfBlazorWebView();
