@@ -9,6 +9,7 @@
 @inject StoryBuilder Builder
 @inject EngineManager Engine
 @inject NavigationManager Nav
+@inject UnsavedForms Held
 
 <SectionContent SectionName="title">
     <div class="head-row">
@@ -28,6 +29,13 @@
 @if (_loaded)
 {
     <div class="editor">
+        @if (_restored)
+        {
+            <div class="notice" id="unsaved-note">
+                <span>Your unsaved changes are back. They are kept only while DOG.ai is open; @(StoryId is null ? "create the story" : "Save") to keep them.</span>
+                <button class="btn" id="unsaved-discard" @onclick="DiscardAsync">Discard them</button>
+            </div>
+        }
         @if (_fromChat is not null)
         {
             <div class="notice">
@@ -230,7 +238,7 @@
             }
             <div class="row">
                 <button class="btn primary" id="editor-save" disabled="@(_saving || _draftCts is not null)" @onclick="SaveAsync">@(StoryId is null ? "Create story" : "Save")</button>
-                <a class="btn" href="@(StoryId is null ? "story" : $"story/{StoryId}")">Cancel</a>
+                <button class="btn" id="editor-cancel" @onclick="Cancel">Cancel</button>
             </div>
         </div>
     </div>
@@ -333,6 +341,16 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        // The same page opened for another story (or again): what was typed for the last one is held first.
+        HoldIfChanged();
+        _done = false;
+        _address = UnsavedForms.Key(Nav.ToBaseRelativePath(Nav.Uri));
+        await LoadAsync(takeHeld: true);
+    }
+
+    /// <summary>Reads the story (or starts a new one), then puts back unsaved typing held for this address when asked to.</summary>
+    private async Task LoadAsync(bool takeHeld)
+    {
         _error = null;
         _drafted = false;
         _addId = 0;
@@ -343,6 +361,8 @@
             var story = _conversation is null ? null : await Stories.GetAsync(id);
             if (story is null)
             {
+                Held.Forget(_address!);
+                _loaded = false;
                 Nav.NavigateTo("story", replace: true);
                 return;
             }
@@ -377,6 +397,14 @@
                 Link(character);
                 _title = $"A story with {character.Name}";
             }
+        }
+        _tab = EditorTabs.Basics;
+        _loadedPrint = PrintNow();
+        _restored = false;
+        if (takeHeld && Held.Take<Form>(_address!) is { } held)
+        {
+            (_s, _title, _idea, _openWithGreeting, _tab) = (held.Story, held.Title, held.Idea, held.OpenWithGreeting, held.Tab);
+            _restored = true;
         }
         _loaded = true;
     }
@@ -460,6 +488,7 @@
                 var conversation = _fromChat is not null
                     ? await Chat.StoryFromChatAsync(_fromChat.Id, title, _s)
                     : await Chat.StartStoryAsync(title, _s, opening);
+                Finished();
                 Nav.NavigateTo($"story/{conversation.Id}");
             }
             else
@@ -470,6 +499,7 @@
                     _conversation.Title = _title.Trim();
                     await Store.UpdateAsync(_conversation);
                 }
+                Finished();
                 Nav.NavigateTo($"story/{StoryId}");
             }
         }
@@ -493,8 +523,44 @@
 
     public void Dispose()
     {
+        HoldIfChanged();
         _draftCts?.Cancel();
         Engine.Changed -= Refresh;
         Chat.Changed -= Refresh;
+    }
+
+    // ---- Unsaved typing (M14) ----
+    // Leaving with changes holds the form in memory (UnsavedForms) under this address; coming back puts it back, with a
+    // note and Discard. Saving and Cancel forget it. Nothing is written anywhere.
+    private sealed record Form(StoryInfo Story, string Title, string Idea, bool OpenWithGreeting, string Tab);
+
+    private string? _address;
+    private string _loadedPrint = "";
+    private bool _done, _restored;
+
+    private string PrintNow() => UnsavedForms.Print(_s, _title, _idea, _openWithGreeting);
+
+    private void HoldIfChanged()
+    {
+        if (!_loaded || _done || _address is null || PrintNow() == _loadedPrint) return;
+        Held.Hold(_address, new Form(_s, _title, _idea, _openWithGreeting, _tab));
+    }
+
+    private void Finished()
+    {
+        _done = true;
+        if (_address is not null) Held.Forget(_address);
+    }
+
+    private void Cancel()
+    {
+        Finished();
+        Nav.NavigateTo(StoryId is null ? "story" : $"story/{StoryId}");
+    }
+
+    private async Task DiscardAsync()
+    {
+        if (_address is not null) Held.Forget(_address);
+        await LoadAsync(takeHeld: false);
     }
 }

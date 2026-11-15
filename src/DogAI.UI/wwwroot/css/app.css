@@ -515,6 +515,17 @@ button.cite:hover { border-color: var(--accent); }
 .seg label { position: relative; padding: 5px 14px; border-radius: calc(var(--r) - 2px); cursor: pointer; color: var(--muted); }
 .seg label.active { background: var(--accent); color: var(--ink); font-weight: 600; }
 .seg label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A .seg of buttons (the seed row's Keep / New seed): the same look as the radio labels. */
+.seg button { padding: 5px 14px; border: 0; border-radius: calc(var(--r) - 2px); background: none; color: var(--muted); font: inherit; cursor: pointer; }
+.seg button.active { background: var(--accent); color: var(--ink); font-weight: 600; }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg button:disabled { cursor: default; opacity: .5; }
+/* The seed row (SeedRow): the number, then Keep / New seed; the note under them. */
+.seed-row { display: grid; gap: 4px; }
+.seed-row > .field-label { font-weight: 600; font-size: .92em; }
+.seed-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.seed-controls .field { width: 15ch; font-variant-numeric: tabular-nums; }
+.seed-note { color: var(--bad); }
 
 /* Shared tidy-up pieces (M10): collapsible section, "⋯" menu, info button, page tabs. Use these; do not restyle per screen. */
 .shell [hidden] { display: none !important; }
@@ -636,7 +647,7 @@ button.cite:hover { border-color: var(--accent); }
 .skin-fireside .head h2 { font: 600 1.6em var(--read); }
 .skin-fireside .main { padding: 18px 28px; }
 .skin-fireside .empty h3 { font: 600 1.4em var(--read); }
-.skin-fireside .btn, .skin-fireside .seg, .skin-fireside .seg label { border-radius: 999px; }
+.skin-fireside .btn, .skin-fireside .seg, .skin-fireside .seg label, .skin-fireside .seg button { border-radius: 999px; }
 .skin-fireside .panel { border-top: 1px solid var(--line); padding-top: 10px; }
 .skin-fireside .panel h4, .skin-fireside .settings h3, .skin-fireside .fold-name { font: italic 1.15em var(--read); text-transform: none; letter-spacing: 0; }
 .skin-fireside .head-row { flex-direction: column; gap: 10px; }
@@ -674,7 +685,7 @@ button.cite:hover { border-color: var(--accent); }
 .skin-playhouse .aside { flex: none; width: 290px; }
 .skin-playhouse .head { border: 0; padding: 16px 22px 0; }
 .skin-playhouse .head h2 { font-size: 1.25em; font-weight: 800; }
-.skin-playhouse .btn, .skin-playhouse .seg, .skin-playhouse .seg label { border-radius: 999px; }
+.skin-playhouse .btn, .skin-playhouse .seg, .skin-playhouse .seg label, .skin-playhouse .seg button { border-radius: 999px; }
 .skin-playhouse .about { background: var(--surface2); }
 .skin-playhouse .li { border-radius: 14px; }
 .skin-playhouse .li.active { background: color-mix(in srgb, var(--accent) 20%, var(--surface)); }

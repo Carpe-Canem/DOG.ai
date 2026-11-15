@@ -10,6 +10,9 @@
 #               @{ ok = 'window title' }         press OK in a Windows message box the previous step opened
 #               @{ press = 'ctrl+l' }            press a key in the page (ctrl/alt/shift + one letter, or 'esc'); it goes to
 #                                                whatever has the focus in the page, as a person's key would
+#               @{ type = 'some words' }         type text into whatever has the focus in the page, as typing would (the box
+#                                                gets input events, and change when it loses the focus); give the focus first
+#                                                with a mouse step
 #               @{ adopt = 30 }                  DOG.ai restarted itself (Lock now, idle lock, restore): wait up to this many
 #                                                seconds for the old process to end and the new one to start, and follow it
 #               @{ lock = @( <lock steps> ) }    drive the lock screen of the (adopted) process, then reconnect to its page;
@@ -483,6 +486,7 @@ try {
         }
         if ($step.ok) { Press-Ok $step.ok }
         if ($step.press) { Press-Key $step.press }
+        if ($step.type) { Send 'Input.insertText' @{ text = [string]$step.type } | Out-Null; Start-Sleep -Milliseconds 200 }
         if ($step.eval) {
             $r = Send 'Runtime.evaluate' @{ expression = $step.eval; awaitPromise = $true; returnByValue = $true }
             if ($r.exceptionDetails) { "EVAL ERROR: $($r.exceptionDetails.exception.description)" }

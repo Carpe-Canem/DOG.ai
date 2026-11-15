@@ -9,6 +9,7 @@
 @inject ChatService Chat
 @inject PictureWriter Writer
 @inject IPictureStore Pictures
+@inject UnsavedForms Held
 @implements IDisposable
 
 <SectionContent SectionName="title">
@@ -29,6 +30,13 @@
 @if (_loaded)
 {
     <div class="editor">
+        @if (_restored)
+        {
+            <div class="notice" id="unsaved-note">
+                <span>Your unsaved changes are back. They are kept only while DOG.ai is open; Save to keep them.</span>
+                <button class="btn" id="unsaved-discard" @onclick="DiscardAsync">Discard them</button>
+            </div>
+        }
         @if (CharacterId is null)
         {
             <div class="card-text builder">
@@ -172,7 +180,7 @@
             }
             <div class="row">
                 <button class="btn primary" id="editor-save" disabled="@_saving" @onclick="SaveAsync">@(CharacterId is null ? "Create character" : "Save")</button>
-                <a class="btn" href="@(CharacterId is null ? "characters" : $"characters/{CharacterId}")">Cancel</a>
+                <button class="btn" id="editor-cancel" @onclick="Cancel">Cancel</button>
             </div>
             <span class="small" title="How much of the model's context window the card takes in every reply">@TokenText</span>
         </div>
@@ -258,9 +266,41 @@
 
     public void Dispose()
     {
+        HoldIfChanged();
         _draftCts?.Cancel();
         Engine.Changed -= Refresh;
         Chat.Changed -= Refresh;
+    }
+
+    // ---- Unsaved typing (M14) ----
+    // Leaving with changes holds the form in memory (UnsavedForms) under this address; coming back puts it back, with a
+    // note and Discard. Save and Cancel forget it. Nothing is written anywhere.
+    private sealed record Form(Character Card, DogAI.Core.Images.Looks Looks, string Tags, List<string> GroupGreetings, string PresetId,
+        PictureTry? Portrait, bool PortraitReplaced, string Tab, string Idea);
+
+    private string? _address;
+    private string _loadedPrint = "";
+    private bool _done, _restored;
+
+    private string PrintNow() => UnsavedForms.Print(_c, _looks, _tags, _groupGreetings, _presetId, _portraitReplaced, _idea);
+
+    private void HoldIfChanged()
+    {
+        if (!_loaded || _done || _address is null || PrintNow() == _loadedPrint) return;
+        Held.Hold(_address, new Form(_c, _looks, _tags, _groupGreetings, _presetId, _portrait, _portraitReplaced, _tab, _idea));
+    }
+
+    private void Cancel()
+    {
+        _done = true;
+        if (_address is not null) Held.Forget(_address);
+        Nav.NavigateTo(CharacterId is null ? "characters" : $"characters/{CharacterId}");
+    }
+
+    private async Task DiscardAsync()
+    {
+        if (_address is not null) Held.Forget(_address);
+        await LoadAsync(takeHeld: false);
     }
 
     private bool _cropping;
@@ -321,12 +361,24 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        // The same page opened for another character (or again): what was typed for the last one is held first.
+        HoldIfChanged();
+        _done = false;
+        _address = UnsavedForms.Key(Nav.ToBaseRelativePath(Nav.Uri));
+        await LoadAsync(takeHeld: true);
+    }
+
+    /// <summary>Reads the character (or a new one), then puts back unsaved typing held for this address when asked to.</summary>
+    private async Task LoadAsync(bool takeHeld)
+    {
         _error = null;
         if (CharacterId is { } id)
         {
             var found = await Characters.GetAsync(id);
             if (found is null)
             {
+                Held.Forget(_address!);
+                _loaded = false;
                 Nav.NavigateTo("characters", replace: true);
                 return;
             }
@@ -344,6 +396,17 @@
         _portrait = null;
         _portraitReplaced = false;
         _making = false;
+        _idea = "";
+        _drafted = false;
+        _tab = EditorTabs.Basics;
+        _loadedPrint = PrintNow();
+        _restored = false;
+        if (takeHeld && Held.Take<Form>(_address!) is { } held)
+        {
+            (_c, _looks, _tags, _groupGreetings, _presetId, _portrait, _portraitReplaced, _tab, _idea) =
+                (held.Card, held.Looks, held.Tags, held.GroupGreetings, held.PresetId, held.Portrait, held.PortraitReplaced, held.Tab, held.Idea);
+            _restored = true;
+        }
         _loaded = true;
         Measure();
     }
@@ -443,6 +506,8 @@
                 _tab = EditorTabs.ForCharacterProblem(EditorTabs.CharacterProblem.Picture);
                 return;
             }
+            _done = true;
+            if (_address is not null) Held.Forget(_address);
             Nav.NavigateTo($"characters/{saved.Id}");
         }
         finally

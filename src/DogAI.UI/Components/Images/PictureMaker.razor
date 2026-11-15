@@ -1,5 +1,5 @@
-@* The picture maker: plan a picture with the chat model, draw it, try again with a new seed, redraw with one thing changed
-   (same seed), and hand the chosen one back with "Use this picture". Every try lives in memory only; nothing is written
+@* The picture maker: plan a picture with the chat model, draw it, try again with a new seed, redraw with things changed
+   (the seed kept unless the seed row says otherwise), and hand the chosen one back with "Use this picture". Every try lives in memory only; nothing is written
    anywhere here. The page that opens it keeps the chosen one (IPictureStore) when the owner saves.
    Shared: portraits (character editor, personas) and story illustrations (StoryThread). *@
 @using DogAI.Engine.Images
@@ -126,7 +126,7 @@
             @if (_editing && !Busy)
             {
                 <div class="maker-edit" id="maker-edit-box">
-                    <p class="small">Change one thing and draw it again with the same seed.<InfoButton About="edit and redraw">A different quality alone keeps the picture and draws it faster or finer; a different shape or prompt changes more.</InfoButton></p>
+                    <p class="small">Change what you like and draw it again as a new try. Keep the seed to keep the picture close.<InfoButton About="edit and redraw">With the seed kept, a different quality alone keeps the picture and draws it faster or finer; a different shape or prompt changes more. A new seed gives another take on it. The picture you started from stays as it is until you use another one.</InfoButton></p>
                     <label class="field-block">
                         <span class="field-label">Prompt</span>
                         <textarea class="field" id="maker-edit-prompt" rows="4" @bind="_editPrompt"></textarea>
@@ -152,6 +152,7 @@
                             </select>
                         </label>
                     </div>
+                    <SeedRow Id="maker-seed" Original="@shown.Base.Seed" @bind-Value="_editSeed" />
                     @if (_editLoras.Count > 0)
                     {
                         <div class="field-block">
@@ -172,7 +173,7 @@
                         </div>
                     }
                     <div class="row">
-                        <button class="btn primary" id="maker-redraw" @onclick="() => RedrawAsync(shown)">Redraw</button>
+                        <button class="btn primary" id="maker-redraw" disabled="@(_editSeed.Problem is not null)" @onclick="() => RedrawAsync(shown)">Redraw</button>
                         <button class="btn" @onclick="() => _editing = false">Close</button>
                     </div>
                 </div>
@@ -243,6 +244,7 @@
     }
 
     private List<EditLora> _editLoras = [];
+    private SeedChoice _editSeed = SeedChoice.Keep;
 
     private PictureTries _tries = default!;
     private PictureTry? _selected;
@@ -452,16 +454,19 @@
         _editQuality = shown.Quality;
         _editShape = shown.Shape;
         _editLoras = (shown.Base.Loras ?? []).Select(l => new EditLora(l.Path, l.Strength)).ToList();
+        _editSeed = SeedChoice.Keep;
     }
 
     private async Task RedrawAsync(PictureTry from)
     {
         _error = null;
+        if (_editSeed.Problem is not null) return; // the seed row says why; Redraw is disabled meanwhile
+        var seed = _editSeed;
         using var cts = Begin();
         try
         {
             await DrawAsync(() => _tries.RedrawAsync(_root!, from, _editPrompt ?? "", _editQuality, _editShape,
-                _editLoras.Where(l => l.On).Select(l => new LoraUse(l.Path, l.Strength)).ToList(), Progress(), cts.Token));
+                _editLoras.Where(l => l.On).Select(l => new LoraUse(l.Path, l.Strength)).ToList(), seed, Progress(), cts.Token));
             if (_error is null) _editing = false;
         }
         finally

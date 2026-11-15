@@ -3,6 +3,7 @@
 @inject AppearanceState Appearance
 @inject NavigationManager Nav
 @inject SidePanelDrawer Drawer
+@inject ReturnPlace Return
 
 @* Pages fill named regions (title, list, composer, aside) plus the body; the active skin decides where they go. *@
 <div class="@ShellClass" data-theme="@Appearance.EffectiveTheme" data-screen="@Screen">
@@ -44,10 +45,17 @@
         Appearance.Changed += Refresh;
         Drawer.Changed += Refresh;
         Nav.LocationChanged += OnLocationChanged;
+        // The first address raises no LocationChanged: remember it too, so Settings can go back to it.
+        Return.Visited(Nav.ToBaseRelativePath(Nav.Uri));
     }
 
     private void Refresh() => InvokeAsync(StateHasChanged);
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => Refresh();
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        Return.Visited(Nav.ToBaseRelativePath(e.Location));
+        Refresh();
+    }
 
     public void Dispose()
     {

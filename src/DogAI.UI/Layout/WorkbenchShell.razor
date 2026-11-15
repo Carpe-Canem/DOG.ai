@@ -2,8 +2,8 @@
     <Logo />
     <div class="nav"><NavButtons /></div>
     <div class="rail-foot">
-        <NavLink class="nav-btn" href="search" aria-label="Search" title="Search (Ctrl+K jumps to a chat, character, story or setting)"><Icon Name="search" /><span>Search</span></NavLink>
-        <NavLink class="nav-btn" href="settings"><Icon Name="settings" /><span>Settings</span></NavLink>
+        <PlaceButton Place="@ReturnPlace.Search" Name="Search" Tip="Search (Ctrl+K jumps to a chat, character, story or setting)" />
+        <PlaceButton Place="@ReturnPlace.Settings" Name="Settings" />
         <OfflineBadge />
     </div>
 </nav>

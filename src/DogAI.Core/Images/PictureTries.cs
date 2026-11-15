@@ -107,17 +107,24 @@ public sealed class PictureTries(IImageEngine engine)
         DrawAsync(imageRoot, like.Checkpoint, like.Settings, like.Base with { Seed = -1 }, like.Quality, like.Shape, like.Moment, like.Notes, progress, ct);
 
     /// <summary>
-    /// The same picture with one thing changed and the seed kept: the prompt, the quality, the shape or the LoRAs. A changed
-    /// quality alone gives the same picture drawn faster or finer (with the Euler sampler); anything else changes more.
+    /// The same picture with things changed: the prompt, the quality, the shape, the LoRAs, and the seed when the owner
+    /// asks (Keep is the default). With the seed kept, a changed quality alone gives the same picture drawn faster or finer
+    /// (with the Euler sampler); anything else changes more. It is always a new try: the one it came from is not touched.
     /// </summary>
     /// <param name="loras">The LoRAs and strengths to draw with; null keeps the try's own. A LoRA's trigger words stay in the
     /// prompt until the owner takes them out.</param>
+    /// <param name="seed">The seed row's choice; null keeps the try's own seed.</param>
     public Task<PictureTry> RedrawAsync(string imageRoot, PictureTry from, string prompt, PictureQuality quality, PictureShape shape,
-        IReadOnlyList<LoraUse>? loras = null, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)
+        IReadOnlyList<LoraUse>? loras = null, SeedChoice? seed = null, IProgress<ImageProgress>? progress = null, CancellationToken ct = default)
     {
         prompt = string.Join(' ', prompt.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).Trim();
         if (prompt.Length == 0) throw new InvalidOperationException("The prompt is empty.");
-        var @base = from.Base with { Prompt = prompt, Loras = loras is null ? from.Base.Loras : [.. loras] };
+        var @base = from.Base with
+        {
+            Prompt = prompt,
+            Loras = loras is null ? from.Base.Loras : [.. loras],
+            Seed = (seed ?? SeedChoice.Keep).For(from.Base.Seed),
+        };
         return DrawAsync(imageRoot, from.Checkpoint, from.Settings, @base, quality, shape,
             prompt == from.Base.Prompt ? from.Moment : null, prompt == from.Base.Prompt ? from.Notes : TagNotes.None, progress, ct);
     }

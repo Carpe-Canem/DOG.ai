@@ -6,6 +6,7 @@ using DogAI.Core.Chat;
 using DogAI.Core.Models;
 using DogAI.Core.Net;
 using DogAI.Core.Privacy;
+using DogAI.Core.Search;
 using DogAI.Engine;
 using DogAI.Core.Settings;
 using DogAI.Data;
@@ -255,6 +256,8 @@ public partial class App : Application
         services.AddSingleton(sp => new DogAI.Core.Images.ImageModelCatalog(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton(sp => new InterfaceMemory(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton<SidePanelDrawer>();
+        services.AddSingleton<ReturnPlace>();
+        services.AddSingleton<UnsavedForms>();
         services.AddSingleton<ChatService>();
         services.AddSingleton<DogAI.Core.Search.QuickJumpIndex>();
         services.AddSingleton<DogAI.Core.Search.JumpKey>();

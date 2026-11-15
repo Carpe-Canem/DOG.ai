@@ -1,0 +1,30 @@
+@* The Settings and Search buttons of every shell (M14). Clicking one while already there goes back to the screen the
+   owner was on (ReturnPlace, Core); its tooltip then says "Back to …". Rendered as a plain link with its own "active"
+   class, not a NavLink: a NavLink would judge "active" from the changing address it points at. *@
+@implements IDisposable
+@inject NavigationManager Nav
+@inject ReturnPlace Return
+
+<a class="nav-btn @(Here ? "active" : "")" id="@($"nav-{Place}")" href="@Return.Target(Current, Place)"
+   aria-label="@Label" title="@Label" aria-current="@(Here ? "page" : null)"><Icon Name="@Place" /><span>@Name</span></a>
+
+@code {
+    /// <summary><see cref="ReturnPlace.Settings"/> or <see cref="ReturnPlace.Search"/>; also the icon's name.</summary>
+    [Parameter, EditorRequired] public string Place { get; set; } = "";
+
+    /// <summary>The words on the button.</summary>
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+
+    /// <summary>The tooltip while the button leads into its place.</summary>
+    [Parameter] public string? Tip { get; set; }
+
+    private string Current => Nav.ToBaseRelativePath(Nav.Uri);
+    private bool Here => ReturnPlace.IsIn(Current, Place);
+    private string Label => Return.Title(Current, Place, Tip ?? Name);
+
+    protected override void OnInitialized() => Nav.LocationChanged += Moved;
+
+    private void Moved(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Nav.LocationChanged -= Moved;
+}

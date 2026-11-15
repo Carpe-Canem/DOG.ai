@@ -1,0 +1,73 @@
+@* The seed row (M14): the number (editable), Keep (the picture's own seed, the default) and New seed (the engine picks
+   one). Shared: the picture maker's Edit and redraw, and later the Images section. What a typed number means, and whether
+   it can be drawn, is SeedChoice (Core). The box is text, not a number input: seeds are read as whole numbers in C#. *@
+
+<div class="seed-row" id="@Id">
+    <span class="field-label" id="@($"{Id}-label")">Seed</span>
+    <div class="seed-controls">
+        <input class="field" id="@($"{Id}-number")" type="text" inputmode="numeric" autocomplete="off" spellcheck="false"
+               aria-labelledby="@($"{Id}-label")" value="@_text" placeholder="@(Value.Mode == SeedMode.New ? "A new one when drawn" : "")"
+               @oninput="TypedAsync" />
+        <div class="seg" role="group" aria-labelledby="@($"{Id}-label")">
+            <button type="button" id="@($"{Id}-keep")" class="@(Value.Mode == SeedMode.Keep ? "active" : "")" aria-pressed="@Pressed(SeedMode.Keep)"
+                    disabled="@(Original < 0)" title="This picture’s own seed: with nothing else changed, the same picture" @onclick="KeepAsync">Keep</button>
+            <button type="button" id="@($"{Id}-new")" class="@(Value.Mode == SeedMode.New ? "active" : "")" aria-pressed="@Pressed(SeedMode.New)"
+                    title="A seed picked when it is drawn: another take on the same prompt" @onclick="NewAsync">New seed</button>
+        </div>
+    </div>
+    @if (Value.Problem is { } problem)
+    {
+        <span class="small seed-note" id="@($"{Id}-note")" role="alert">@problem</span>
+    }
+</div>
+
+@code {
+    /// <summary>The row's id; its parts are <c>{Id}-number</c>, <c>{Id}-keep</c>, <c>{Id}-new</c> and <c>{Id}-note</c>.</summary>
+    [Parameter] public string Id { get; set; } = "seed";
+
+    /// <summary>The seed of the picture this starts from (what Keep means); below zero when there is none.</summary>
+    [Parameter] public long Original { get; set; } = -1;
+
+    [Parameter] public SeedChoice Value { get; set; } = SeedChoice.Keep;
+    [Parameter] public EventCallback<SeedChoice> ValueChanged { get; set; }
+
+    private string _text = "";
+    private SeedChoice? _shownValue;
+    private long _shownOriginal = long.MinValue;
+
+    protected override void OnParametersSet()
+    {
+        // The parent set a new choice or a new picture: show what it means. A typed number keeps what was typed.
+        if (ReferenceEquals(Value, _shownValue) && Original == _shownOriginal) return;
+        if (Value.Mode != SeedMode.Typed || _shownValue is null) _text = Value.Shown(Original);
+        _shownValue = Value;
+        _shownOriginal = Original;
+    }
+
+    private Task TypedAsync(ChangeEventArgs e)
+    {
+        _text = e.Value?.ToString() ?? "";
+        return SetAsync(SeedChoice.Typed(_text, Original));
+    }
+
+    private Task KeepAsync()
+    {
+        _text = SeedChoice.Keep.Shown(Original);
+        return SetAsync(SeedChoice.Keep);
+    }
+
+    private Task NewAsync()
+    {
+        _text = "";
+        return SetAsync(SeedChoice.New);
+    }
+
+    private Task SetAsync(SeedChoice choice)
+    {
+        Value = choice;
+        _shownValue = choice;
+        return ValueChanged.InvokeAsync(choice);
+    }
+
+    private string Pressed(SeedMode mode) => Value.Mode == mode ? "true" : "false";
+}
