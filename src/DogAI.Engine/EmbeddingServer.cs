@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DogAI.Core.Documents;
+using DogAI.Core.Images;
 using DogAI.Core.Models;
 using DogAI.Core.Settings;
 
@@ -7,17 +8,21 @@ namespace DogAI.Engine;
 
 /// <summary>
 /// The document search model: a second, small llama-server started with --embedding on its own port, next to whatever
-/// chat model is loaded. It starts the first time something needs a vector and stops after ten idle minutes.
+/// chat model is loaded. It starts the first time something needs a vector and stops after two idle minutes
+/// (<see cref="IdleStop"/>), or at once when the graphics card needs the room (it is a <see cref="ICardGuest"/>), but
+/// never while it is being used: a request in progress, or documents being indexed (<see cref="KeepWhile"/>).
 /// The model is the one chosen as "Default for Document search" in the library; without a choice, the first embedding
 /// model found in the model folders.
 /// </summary>
-public sealed class EmbeddingServer : IEmbedder, IDisposable
+public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
 {
     /// <summary>Key in <see cref="AppSettings.DefaultModels"/> for the document search model.</summary>
     public const string UseCase = "embedding";
 
     private static readonly TimeSpan StartTimeout = TimeSpan.FromMinutes(3);
-    private static readonly TimeSpan IdleStop = TimeSpan.FromMinutes(10);
+
+    /// <summary>How often the idle time is looked at; the model stops at most this long after <see cref="IdleStop"/>.</summary>
+    private static readonly TimeSpan IdleCheck = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan ChoiceCache = TimeSpan.FromSeconds(20);
 
     private readonly LoopbackHttp _http;
@@ -41,11 +46,38 @@ public sealed class EmbeddingServer : IEmbedder, IDisposable
         _locator = locator;
         _settings = settings;
         _records = records;
-        _idleTimer = new Timer(_ => StopIfIdle(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+        _idleTimer = new Timer(_ => StopIfIdle(), null, IdleCheck, IdleCheck);
     }
+
+    /// <summary>
+    /// How long the model may sit unused, counted from the end of its last request, before it is stopped. Two minutes,
+    /// like the picture model: it holds graphics memory the chat model and pictures can use, and starting it again
+    /// takes a couple of seconds.
+    /// </summary>
+    public TimeSpan IdleStop { get; set; } = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// Set by the app: true while something will need the model again in a moment (documents are being indexed, one
+    /// batch of passages after another). The model is not stopped while it says so.
+    /// </summary>
+    public Func<bool>? KeepWhile { get; set; }
 
     /// <summary>True while the search model is running.</summary>
     public bool IsRunning => _api is not null && _process is { HasExited: false };
+
+    /// <summary>True while a request is being answered or documents are being indexed: it must not be stopped.</summary>
+    public bool IsBusy => Volatile.Read(ref _busy) > 0 || KeepWhile?.Invoke() == true;
+
+    string ICardGuest.Name => "the document search model";
+
+    /// <summary>In graphics memory, or on its way in.</summary>
+    bool ICardGuest.HoldsMemory => _process is { } p && Alive(p);
+
+    private static bool Alive(Process process)
+    {
+        try { return !process.HasExited; }
+        catch (InvalidOperationException) { return false; }
+    }
 
     public bool IsStarting { get; private set; }
 
@@ -228,10 +260,48 @@ public sealed class EmbeddingServer : IEmbedder, IDisposable
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Gives the graphics memory back because the card needs the room, or the owner unloads everything. False, with the
+    /// model left running, while it is being used. The next search or document starts it again.
+    /// </summary>
+    public async Task<bool> LetGoAsync()
+    {
+        if (IsBusy) return false;
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            // Looked at again with the start lock held: a request counts as busy before it takes the lock.
+            if (IsBusy) return false;
+            StopProcess();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+        Changed?.Invoke();
+        return true;
+    }
+
     private void StopIfIdle()
     {
-        if (_api is null || Volatile.Read(ref _busy) > 0 || DateTime.UtcNow - _lastUse < IdleStop) return;
-        _ = StopAsync();
+        if (_api is null || IsBusy || DateTime.UtcNow - _lastUse < IdleStop) return;
+        _ = StopIfStillIdleAsync();
+    }
+
+    /// <summary>Checks again while holding the start lock, so a request that began after the timer looked is not cut off.</summary>
+    private async Task StopIfStillIdleAsync()
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (_api is null || IsBusy || DateTime.UtcNow - _lastUse < IdleStop) return;
+            StopProcess();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+        Changed?.Invoke();
     }
 
     private void StopProcess()

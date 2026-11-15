@@ -47,6 +47,58 @@ public interface IChatModelSlot
     CardTurn? CardTurn { get; set; }
 }
 
+/// <summary>
+/// Something besides the chat model and the picture model that can hold graphics memory: the document search model, a
+/// speech model. It is let go when the card needs the room and it is not being used, and by "Unload everything". It
+/// comes back by itself the next time it is needed.
+/// </summary>
+public interface ICardGuest
+{
+    /// <summary>What to call it in a sentence, e.g. "the document search model".</summary>
+    string Name { get; }
+
+    /// <summary>It is in graphics memory now (or on its way in).</summary>
+    bool HoldsMemory { get; }
+
+    /// <summary>It is being used right now, so it must not be let go.</summary>
+    bool IsBusy { get; }
+
+    /// <summary>Gives its graphics memory back. False, with nothing changed, when it is being used.</summary>
+    Task<bool> LetGoAsync();
+}
+
+/// <summary>What "Unload everything" did.</summary>
+/// <param name="Gone">What was taken out of graphics memory, as names for a sentence.</param>
+/// <param name="Stayed">What was left because it is being used.</param>
+/// <param name="Refused">Why nothing was done (a reply or a picture is being made), or null.</param>
+public sealed record CardCleared(IReadOnlyList<string> Gone, IReadOnlyList<string> Stayed, string? Refused = null)
+{
+    /// <summary>One or two sentences for the owner.</summary>
+    public string Text
+    {
+        get
+        {
+            if (Refused is not null) return Refused;
+            var stayed = Stayed.Count == 0 ? "" : $" {Sentence(Stayed)} {(Stayed.Count == 1 ? "is" : "are")} being used, so {(Stayed.Count == 1 ? "it stays" : "they stay")}.";
+            return (Gone.Count == 0 ? (Stayed.Count == 0 ? "Nothing was loaded." : "Nothing else was loaded.") : $"Unloaded {List(Gone)}.") + stayed;
+        }
+    }
+
+    /// <summary>"a", "a and b", "a, b and c".</summary>
+    public static string List(IReadOnlyList<string> names) => names.Count switch
+    {
+        0 => "",
+        1 => names[0],
+        _ => string.Join(", ", names.Take(names.Count - 1)) + " and " + names[^1],
+    };
+
+    private static string Sentence(IReadOnlyList<string> names)
+    {
+        var list = List(names);
+        return list.Length == 0 ? list : char.ToUpperInvariant(list[0]) + list[1..];
+    }
+}
+
 /// <summary>What the coordinator did about the chat model for the latest picture.</summary>
 public enum CardChoice
 {
@@ -117,6 +169,11 @@ public static class PictureMemory
 /// the picture: a picture takes seconds, and the message that was sent is then answered instead of failing. Before the
 /// chat model comes back, the idle picture model is let go unless both fit.
 /// </para>
+/// <para>
+/// The other things on the card (<see cref="ICardGuest"/>: the document search model, a speech model) make way first:
+/// when a picture or a returning chat model would not fit, the idle ones are let go before anything larger is moved.
+/// "Unload everything" (<see cref="ClearAsync"/>) is the owner emptying the card.
+/// </para>
 /// </summary>
 public sealed class CardCoordinator : IImageEngine
 {
@@ -126,23 +183,31 @@ public sealed class CardCoordinator : IImageEngine
     /// <summary>Progress stage while the chat model is taken out of graphics memory.</summary>
     public const string MakingRoom = "making_room";
 
+    /// <summary>The names used on the screen and in <see cref="CardCleared"/>.</summary>
+    public const string ChatName = "the chat model";
+    public const string PictureName = "the picture model";
+
     private const string NoModel = "No picture model is loaded. Choose a checkpoint first.";
 
     private readonly IImageEngine _images;
     private readonly IChatModelSlot _chat;
     private readonly ICardMeter _meter;
     private readonly Func<string, long> _fileSize;
+    private readonly IReadOnlyList<ICardGuest> _guests;
     private readonly SemaphoreSlim _turn = new(1, 1);
     private int _pictures;
     private long _restedBytes;
 
     /// <param name="fileSize">The size of a file in bytes, 0 when it is missing (tests pass their own).</param>
-    public CardCoordinator(IImageEngine images, IChatModelSlot chat, ICardMeter meter, Func<string, long>? fileSize = null)
+    /// <param name="guests">What else can hold graphics memory (see <see cref="ICardGuest"/>).</param>
+    public CardCoordinator(IImageEngine images, IChatModelSlot chat, ICardMeter meter, Func<string, long>? fileSize = null,
+        IEnumerable<ICardGuest>? guests = null)
     {
         _images = images;
         _chat = chat;
         _meter = meter;
         _fileSize = fileSize ?? SizeOf;
+        _guests = guests?.ToList() ?? [];
         _images.Changed += () => Changed?.Invoke();
         _chat.CardTurn = TakeChatTurnAsync;
     }
@@ -169,6 +234,85 @@ public sealed class CardCoordinator : IImageEngine
 
     /// <summary>What the coordinator did, in plain words, for the app log. Never contains a prompt.</summary>
     public event Action<string>? Noted;
+
+    /// <summary>What is in graphics memory now, as names for a sentence ("the chat model", "the picture model", …).</summary>
+    public IReadOnlyList<string> InMemory
+    {
+        get
+        {
+            var names = new List<string>();
+            if (_chat.IsLoaded) names.Add(ChatName);
+            if (_images.IsRunning) names.Add(PictureName);
+            names.AddRange(_guests.Where(g => g.HoldsMemory).Select(g => g.Name));
+            return names;
+        }
+    }
+
+    /// <summary>Why "Unload everything" must wait, in words for the owner, or null when it may run.</summary>
+    public string? BusyReason =>
+        _chat.IsBusy ? "A reply is being written. Unload when it has finished."
+        : IsBusy ? "A picture is being drawn. Unload when it has finished."
+        : null;
+
+    /// <summary>
+    /// The owner's "Unload everything": the chat model, the picture model (its checkpoint stays chosen) and every guest
+    /// leave graphics memory. Refused, with the reason, while a reply or a picture is being made. A guest that is being
+    /// used (documents being indexed) stays and is named.
+    /// </summary>
+    /// <param name="unloadChat">
+    /// Unloads the chat model as the owner's own unload, so nothing brings it back until a model is asked for; true when
+    /// there was one (loaded, loading or set aside). It runs before the turn is taken: a model that is still loading
+    /// holds the turn until its load ends, and unloading is what ends it.
+    /// </param>
+    public async Task<CardCleared> ClearAsync(Func<Task<bool>> unloadChat, CancellationToken ct = default)
+    {
+        if (BusyReason is { } why) return new CardCleared([], [], why);
+        var gone = new List<string>();
+        var stayed = new List<string>();
+        if (await unloadChat().ConfigureAwait(false)) gone.Add(ChatName);
+        await _turn.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // Nothing is set aside any more, so nothing is measured against it when a model is next loaded.
+            Interlocked.Exchange(ref _restedBytes, 0);
+            if (_images.IsRunning)
+            {
+                await _images.ReleaseAsync(ct).ConfigureAwait(false);
+                gone.Add(PictureName);
+            }
+            foreach (var guest in _guests)
+            {
+                if (!guest.HoldsMemory) continue;
+                (await guest.LetGoAsync().ConfigureAwait(false) ? gone : stayed).Add(guest.Name);
+            }
+        }
+        finally
+        {
+            _turn.Release();
+        }
+        var cleared = new CardCleared(gone, stayed);
+        Noted?.Invoke("the owner asked to unload everything. " + cleared.Text);
+        Changed?.Invoke();
+        return cleared;
+    }
+
+    /// <summary>
+    /// Lets the guests that are not being used go, because the card needs the room. Call it only while holding a turn
+    /// (a chat model load does, see <see cref="CardTurn"/>). True when something was let go, so the card is worth
+    /// measuring again.
+    /// </summary>
+    /// <param name="because">The reason for the log, e.g. "a chat model is being loaded and would not fit beside it".</param>
+    public async Task<bool> MakeWayAsync(string because)
+    {
+        var any = false;
+        foreach (var guest in _guests)
+        {
+            if (!guest.HoldsMemory || guest.IsBusy || !await guest.LetGoAsync().ConfigureAwait(false)) continue;
+            any = true;
+            Noted?.Invoke($"{guest.Name} was let go because {because}. It loads again when it is next needed.");
+        }
+        return any;
+    }
 
     /// <summary>Choosing another checkpoint waits for a picture being drawn rather than cutting it off.</summary>
     public async Task LoadAsync(ImageModel model, CancellationToken ct = default)
@@ -252,13 +396,23 @@ public sealed class CardCoordinator : IImageEngine
     {
         var need = PictureMemory.Need(_fileSize(model.CheckpointPath), LoraBytes(model, request), request);
         var stopped = Interlocked.Exchange(ref _stoppedLoad, 0) == 1;
-        if (!_chat.IsLoaded)
+        var guests = _guests.Any(g => g.HoldsMemory);
+        if (!_chat.IsLoaded && !guests)
         {
             LastDecision = new CardDecision(stopped && _chat.IsResting ? CardChoice.SetChatAside : CardChoice.NothingLoaded, need, -1);
             return;
         }
 
         var now = await _meter.ReadAsync(ct).ConfigureAwait(false);
+        // The small things make way first: an idle document search model takes seconds to bring back, a chat model half a minute.
+        if (guests && !PictureMemory.FitsBeside(now, need) && await MakeWayAsync("a picture needs the room").ConfigureAwait(false))
+            now = await _meter.ReadAsync(ct).ConfigureAwait(false);
+        if (!_chat.IsLoaded)
+        {
+            LastDecision = new CardDecision(stopped && _chat.IsResting ? CardChoice.SetChatAside : CardChoice.NothingLoaded, need, -1);
+            return;
+        }
+
         var free = now?.FreeBytes ?? -1;
         if (PictureMemory.FitsBeside(now, need))
         {
@@ -300,11 +454,21 @@ public sealed class CardCoordinator : IImageEngine
         await _turn.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            var need = waking ? Interlocked.Read(ref _restedBytes) : 0;
+            // The model that was set aside comes back with the settings it had, so it must find the room it had: the
+            // idle guests go too unless it is known to fit beside them. (Any other load is measured by the model
+            // launcher, which asks for the room itself: see MakeWayAsync.)
+            if (waking && _guests.Any(g => g.HoldsMemory && !g.IsBusy))
+            {
+                var beside = need > 0 ? await _meter.ReadAsync(ct).ConfigureAwait(false) : null;
+                // What the picture model holds counts as free here: it is let go below when the model does not fit beside it.
+                if (beside is null || beside.FreeBytes + beside.PictureBytes < need + PictureMemory.Margin)
+                    await MakeWayAsync("the chat model is coming back and needs the room").ConfigureAwait(false);
+            }
             if (_images.IsRunning)
             {
                 // Another model than the one set aside is measured by the model launcher itself, against a card that
                 // is free of the picture model; its size is not known here.
-                var need = waking ? Interlocked.Read(ref _restedBytes) : 0;
                 var now = need > 0 ? await _meter.ReadAsync(ct).ConfigureAwait(false) : null;
                 if (now is null || now.FreeBytes < need + PictureMemory.Margin)
                 {

@@ -68,6 +68,10 @@
                     {
                         <div class="chips">@foreach (var d in defaults) {<span class="chip default-chip">Default for @CuratedPicks.Label(d)</span>}</div>
                     }
+                    @if (!search)
+                    {
+                        <BesidePicturesChip Fit="m.Fit" Measured="@record?.MeasuredAt(Ctx.Context)" />
+                    }
                 </div>
                 <FitBadge Fit="m.Fit" MeasuredTokensPerSecond="record?.BenchTokensPerSecond" />
                 <div class="actions">

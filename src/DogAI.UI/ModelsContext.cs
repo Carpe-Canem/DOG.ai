@@ -1,6 +1,8 @@
 using DogAI.Core.Models;
 using DogAI.Core.Settings;
+using DogAI.Core.Images;
 using DogAI.Engine;
+using DogAI.Engine.Images;
 using DogAI.Hub;
 
 namespace DogAI.UI;
@@ -9,15 +11,58 @@ namespace DogAI.UI;
 /// What the Models screens share: this PC's measured hardware, the memory budget for fit badges,
 /// the context size being planned for, and file lists fetched from Hugging Face this session.
 /// </summary>
-public sealed class ModelsContext(HardwareProbe probe, EngineManager engine, ISettingsStore settings, HuggingFaceClient hf)
+public sealed class ModelsContext
 {
     private readonly Dictionary<string, Task<IReadOnlyList<ModelVariant>>> _variants = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HardwareProbe probe;
+    private readonly EngineManager engine;
+    private readonly ISettingsStore settings;
+    private readonly HuggingFaceClient hf;
+    private readonly ImageServer pictures;
+    private readonly SdServerLocator pictureEngine;
+    private readonly ImageModelCatalog catalog;
+
+    public ModelsContext(HardwareProbe probe, EngineManager engine, ISettingsStore settings, HuggingFaceClient hf,
+        ImageServer pictures, SdServerLocator pictureEngine, ImageModelCatalog catalog, ModelLauncher launcher)
+    {
+        this.probe = probe;
+        this.engine = engine;
+        this.settings = settings;
+        this.hf = hf;
+        this.pictures = pictures;
+        this.pictureEngine = pictureEngine;
+        this.catalog = catalog;
+        // Another checkpoint was chosen: what a picture needs changes, and with it which models fit beside one.
+        catalog.Changed += () => _ = RefreshPicturesAsync();
+        // A moment after a load the model's real graphics memory is known (Windows' per-program counters lag behind the
+        // load itself): measure again, so the readout, the fit badges and the "Fits beside pictures" marks are right.
+        launcher.MemoryMeasured += () => { if (Measured) _ = RefreshAsync(); };
+    }
 
     public HardwareProfile Hardware { get; private set; } = HardwareProfile.Unknown;
     public FitBudget Budget { get; private set; } = new(0, 0, 0, FitBudget.RamGbps);
 
     /// <summary>Graphics memory the loaded model holds now.</summary>
     public long EngineVram { get; private set; }
+
+    /// <summary>Graphics memory the picture model holds now.</summary>
+    public long PictureVram { get; private set; }
+
+    /// <summary>
+    /// What a Standard picture needs with the checkpoint in use (<see cref="BesidePictures.PictureNeed"/>); null when
+    /// there is no picture engine or no checkpoint, and then no model is marked as fitting beside pictures.
+    /// </summary>
+    public long? PictureNeed { get; private set; }
+
+    /// <summary>The checkpoint <see cref="PictureNeed"/> was worked out for, by name.</summary>
+    public string? PictureCheckpoint { get; private set; }
+
+    /// <summary>Graphics memory DOG.ai's own models can have: what is free, plus what its chat and picture models hold now.</summary>
+    public long CardBytes => (Hardware.MainGpu?.FreeBytes ?? 0) + EngineVram + PictureVram;
+
+    /// <summary>True for a chat model that can stay in graphics memory while a picture is drawn (the "Fits beside pictures" mark).</summary>
+    /// <param name="measuredBytes">What the model really held when it was last loaded at this context size, when known (<see cref="ModelRecord.MeasuredAt"/>).</param>
+    public bool FitsBesidePictures(FitResult? fit, long? measuredBytes = null) => Measured && BesidePictures.Fits(fit, CardBytes, PictureNeed, measuredBytes);
 
     public int Context { get; private set; } = 8192;
     public bool Measured { get; private set; }
@@ -34,13 +79,41 @@ public sealed class ModelsContext(HardwareProbe probe, EngineManager engine, ISe
     {
         Hardware = await probe.ProbeAsync();
         EngineVram = engine.ProcessId is int pid ? await probe.VramOfProcessAsync(pid) : 0;
-        Budget = FitBudget.From(Hardware, EngineVram);
+        PictureVram = pictures.ProcessId is int picturePid ? await probe.VramOfProcessAsync(picturePid) : 0;
+        // What the picture model holds counts as free for a chat model: loading one lets the idle picture model go.
+        Budget = FitBudget.From(Hardware, EngineVram + PictureVram);
         var saved = await settings.LoadAsync();
+        await ReadPicturesAsync(saved);
         Context = saved.ContextLength;
         ShowAll = saved.ModelsShowAll;
         Filter = ModelFilters.Normalize(saved.ModelsFilter);
         Measured = true;
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Looks again at the picture engine and the checkpoint in use (a quick look at files; nothing is measured). Called
+    /// when a Models tab opens, since either can change on another tab.
+    /// </summary>
+    public async Task RefreshPicturesAsync()
+    {
+        var (need, name) = (PictureNeed, PictureCheckpoint);
+        await ReadPicturesAsync(await settings.LoadAsync());
+        if (need != PictureNeed || name != PictureCheckpoint) Changed?.Invoke();
+    }
+
+    private async Task ReadPicturesAsync(AppSettings saved)
+    {
+        ImageFile? checkpoint = null;
+        if (pictureEngine.Find() is not null)
+        {
+            var root = saved.ImageFolder();
+            var checkpoints = (await Task.Run(() => ImageLibrary.Scan(root))).Where(f => f.Usable && f.Kind == ImageFileKind.Checkpoint).ToList();
+            var chosen = catalog.ChosenAmong(checkpoints.Select(c => c.RelativePath).ToList());
+            checkpoint = checkpoints.FirstOrDefault(c => c.RelativePath == chosen);
+        }
+        PictureNeed = checkpoint is null ? null : BesidePictures.PictureNeed(checkpoint.SizeBytes);
+        PictureCheckpoint = checkpoint?.Name;
     }
 
     public async Task SetShowAllAsync(bool showAll)

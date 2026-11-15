@@ -295,8 +295,8 @@ public class LoadDecisionTests
     [Fact]
     public void Partial_fits_load_with_the_estimated_layers_and_full_fits_with_all()
     {
-        Assert.Equal(new LoadDecision(37, null), LoadDecision.Decide("m", 8192, new FitResult(FitKind.Partial, 37, 80, 1, 1), Budget, null));
-        Assert.Equal(new LoadDecision(-1, null), LoadDecision.Decide("m", 8192, new FitResult(FitKind.Full, 40, 40, 1, 1), Budget, null));
+        Assert.Equal(new LoadDecision(37, null, FitKind.Partial), LoadDecision.Decide("m", 8192, new FitResult(FitKind.Partial, 37, 80, 1, 1), Budget, null));
+        Assert.Equal(new LoadDecision(-1, null, FitKind.Full), LoadDecision.Decide("m", 8192, new FitResult(FitKind.Full, 40, 40, 1, 1), Budget, null));
     }
 
     [Fact]
@@ -308,7 +308,7 @@ public class LoadDecisionTests
     {
         var record = new ModelRecord { Path = "x", TunedGpuLayers = 50, TunedContext = 8192 };
         var tooLarge = new FitResult(FitKind.TooLarge, 0, 80, 1, 0);
-        Assert.Equal(new LoadDecision(50, null), LoadDecision.Decide("m", 8192, tooLarge, Budget, record));
+        Assert.Equal(new LoadDecision(50, null, FitKind.TooLarge), LoadDecision.Decide("m", 8192, tooLarge, Budget, record));
         Assert.NotNull(LoadDecision.Decide("m", 32768, tooLarge, Budget, record).Refusal);
     }
 }

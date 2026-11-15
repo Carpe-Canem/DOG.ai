@@ -245,8 +245,12 @@ public partial class App : Application
         // Everything that draws gets the coordinator, which shares the graphics card with the chat model; only the
         // engine's own screens (install, update) know the server itself.
         services.AddSingleton<DogAI.Core.Images.ICardMeter, DogAI.Engine.Images.CardMeter>();
+        // Its guests are the other things that can sit in graphics memory: they make way when the card needs the
+        // room, and "Unload everything" lets them go.
         services.AddSingleton(sp => new DogAI.Core.Images.CardCoordinator(sp.GetRequiredService<DogAI.Engine.Images.ImageServer>(),
-            sp.GetRequiredService<EngineManager>(), sp.GetRequiredService<DogAI.Core.Images.ICardMeter>()));
+            sp.GetRequiredService<EngineManager>(), sp.GetRequiredService<DogAI.Core.Images.ICardMeter>(),
+            guests: new DogAI.Core.Images.ICardGuest[] { sp.GetRequiredService<EmbeddingServer>() }
+                .Concat(sp.GetRequiredService<DogAI.Core.Voice.ISpeechRecognizer>() is DogAI.Core.Images.ICardGuest speech ? [speech] : [])));
         services.AddSingleton<DogAI.Core.Images.IImageEngine>(sp => sp.GetRequiredService<DogAI.Core.Images.CardCoordinator>());
         services.AddSingleton<DogAI.Core.Documents.DocumentLibrary>();
         services.AddSingleton<WindowsIntegration>();
@@ -305,6 +309,10 @@ public partial class App : Application
         var engine = services.GetRequiredService<EngineManager>();
         engine.IdleUnloadAfter = settings.IdleUnloadMinutes > 0 ? TimeSpan.FromMinutes(settings.IdleUnloadMinutes) : null;
         engine.UnloadedForIdle += () => log.LogInformation("Model unloaded after {Minutes} idle minutes", settings.IdleUnloadMinutes);
+
+        // The document search model is not stopped between two batches of passages while documents are being indexed.
+        var library = services.GetRequiredService<DogAI.Core.Documents.DocumentLibrary>();
+        services.GetRequiredService<EmbeddingServer>().KeepWhile = () => library.IsIndexing;
 
         var downloads = services.GetRequiredService<DownloadManager>();
         var records = services.GetRequiredService<IModelRecordStore>();

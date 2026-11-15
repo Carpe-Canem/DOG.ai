@@ -9,7 +9,7 @@ public sealed record BenchmarkResult(double TokensPerSecond, double ReadPerSecon
 /// graphics-card layers the fit estimate suggests; if loading fails (usually out of graphics memory) it
 /// retries with fewer layers. The speed and the layer count that worked are saved for later loads.
 /// </summary>
-public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher, IModelRecordStore records)
+public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher, IModelRecordStore records, HardwareProbe? probe = null)
 {
     private const int MaxAttempts = 4;
 
@@ -24,6 +24,8 @@ public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher,
         {
             // The whole measurement has the graphics card to itself: no picture starts, and the idle picture model is let go.
             using var turn = await engine.TakeCardTurnAsync(waking: false, ct).ConfigureAwait(false);
+            // The document search model and a speech model too, when idle: what they hold would count against the model.
+            await launcher.MakeWayAsync("a chat model is being measured").ConfigureAwait(false);
             status("Working out how much fits on the graphics card…");
             var plan = await launcher.PlanAsync(file, context, ct).ConfigureAwait(false);
             if (plan is { Kind: FitKind.TooLarge })
@@ -55,6 +57,12 @@ public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher,
             record.TunedGpuLayers = layers;
             record.TunedContext = engine.ContextLength > 0 ? context : null;
             record.BenchAt = DateTime.UtcNow;
+            // Whole on the card: what it really holds there is remembered too (the "Fits beside pictures" mark).
+            if (layers < 0 && probe is not null && engine.ProcessId is int pid && await probe.VramOfProcessAsync(pid, ct).ConfigureAwait(false) is > 0 and var held)
+            {
+                record.MeasuredVramBytes = held;
+                record.MeasuredVramContext = context;
+            }
             await records.SaveAsync(record, ct).ConfigureAwait(false);
 
             return new BenchmarkResult(timings.GenerateTokensPerSecond, timings.ReadTokensPerSecond, layers, engine.ContextLength, 0);

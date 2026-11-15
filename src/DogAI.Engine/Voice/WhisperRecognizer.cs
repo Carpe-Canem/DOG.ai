@@ -12,7 +12,7 @@ namespace DogAI.Engine.Voice;
 /// the driver keeps them), so the model is loaded and tried as soon as the microphone turns on.
 /// The model is let go after ten idle minutes.
 /// </summary>
-public sealed class WhisperRecognizer : ISpeechRecognizer, IDisposable
+public sealed class WhisperRecognizer : ISpeechRecognizer, DogAI.Core.Images.ICardGuest, IDisposable
 {
     private static readonly TimeSpan IdleUnload = TimeSpan.FromMinutes(10);
     private static readonly object RuntimeLock = new();
@@ -126,6 +126,26 @@ public sealed class WhisperRecognizer : ISpeechRecognizer, IDisposable
         _factory?.Dispose();
         _factory = null;
         _loadedPath = null;
+    }
+
+    string DogAI.Core.Images.ICardGuest.Name => "the speech recognition model";
+
+    /// <summary>True while a model is loaded on the graphics card (one that runs on the processor holds none of its memory).</summary>
+    public bool HoldsMemory => _factory is not null && RunsOn == "graphics card";
+
+    /// <summary>True while speech is being recognised (or a model is being loaded for it).</summary>
+    public bool IsBusy => _gate.CurrentCount == 0;
+
+    /// <summary>
+    /// Lets the model go because the graphics card needs the room, or the owner unloads everything. False while speech
+    /// is being recognised. The next thing said loads it again.
+    /// </summary>
+    public Task<bool> LetGoAsync()
+    {
+        if (!_gate.Wait(0)) return Task.FromResult(false);
+        try { Unload(); }
+        finally { _gate.Release(); }
+        return Task.FromResult(true);
     }
 
     private void UnloadIdle()

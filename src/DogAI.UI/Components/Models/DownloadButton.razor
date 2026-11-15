@@ -2,8 +2,11 @@
 @inject DownloadManager Downloads
 @inject OnlineGate Gate
 @inject ISettingsStore SettingsStore
+@inject ModelsContext Ctx
 
-@* Download control for one variant: shows progress if it is already queued, "Installed" if it is on disk. *@
+@* Download control for one variant: shows progress if it is already queued, "Installed" if it is on disk. A model
+   judged too large for this PC can still be downloaded: its fit badge stays beside the button, and one confirmation
+   names the size and why it will not run here. *@
 @if (Job is { } job && job.Status != DownloadStatus.Done)
 {
     <div class="progress" title="@StatusText(job)">
@@ -17,8 +20,22 @@ else if (Installed || Job?.Status == DownloadStatus.Done)
 }
 else
 {
-    <button class="btn @(Primary ? "primary" : "")" disabled="@(!Gate.IsOnline || Variant is null || TooLarge)"
-            title="@(Gate.IsOnline ? "" : "Go online to download")" @onclick="StartAsync">Download</button>
+    <button class="btn download-btn @(Primary && !TooLarge ? "primary" : "")" disabled="@(!Gate.IsOnline || Variant is null)" data-too-large="@(TooLarge ? "true" : null)"
+            title="@(!Gate.IsOnline ? "Go online to download" : TooLarge ? "Too large to run on this PC. It can still be downloaded." : "")" @onclick="AskOrStartAsync">Download</button>
+}
+@if (_confirm && Variant is { } asked && Fit is { } fit)
+{
+    <Modal Title="@TooLargeDownload.Title" OnClose="() => _confirm = false">
+        <p id="too-large-warning">@TooLargeDownload.Warning(asked.Quant is { Length: > 0 } q ? $"{Repo.Split('/')[^1]} ({q})" : asked.Name, asked.Size, Ctx.Context, fit, Ctx.Budget)</p>
+        <p class="small">@TooLargeDownload.Advice</p>
+        <div class="modal-foot">
+            <span></span>
+            <div class="row">
+                <button class="btn" id="too-large-cancel" @onclick="() => _confirm = false">Cancel</button>
+                <button class="btn danger" id="too-large-download" @onclick="ConfirmedAsync">Download anyway</button>
+            </div>
+        </div>
+    </Modal>
 }
 @if (_error is not null)
 {
@@ -31,9 +48,14 @@ else
     [Parameter] public string? UseCase { get; set; }
     [Parameter] public bool Primary { get; set; }
     [Parameter] public bool Installed { get; set; }
-    [Parameter] public bool TooLarge { get; set; }
+
+    /// <summary>How the file was judged for this PC. A too-large one asks before it downloads.</summary>
+    [Parameter] public FitResult? Fit { get; set; }
+
+    private bool TooLarge => Fit?.Kind == FitKind.TooLarge;
 
     private string? _error;
+    private bool _confirm;
 
     private DownloadJob? Job => Variant is null ? null
         : Downloads.Jobs.LastOrDefault(j => j.Repo.Equals(Repo, StringComparison.OrdinalIgnoreCase) &&
@@ -51,6 +73,19 @@ else
     {
         Downloads.Changed -= Refresh;
         Gate.Changed -= Refresh;
+    }
+
+    private Task AskOrStartAsync()
+    {
+        if (!TooLarge) return StartAsync();
+        _confirm = true;
+        return Task.CompletedTask;
+    }
+
+    private Task ConfirmedAsync()
+    {
+        _confirm = false;
+        return StartAsync();
     }
 
     private async Task StartAsync()

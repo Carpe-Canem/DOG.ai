@@ -14,7 +14,8 @@ public sealed class ModelRefusedException(string message) : Exception(message);
 /// otherwise the number of graphics-card layers the fit estimate says will fit. Models that cannot
 /// fit at all are refused before anything is unloaded.
 /// </summary>
-public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IModelRecordStore records)
+/// <param name="card">The graphics-card coordinator, when there is one: it lets the other things on the card make way.</param>
+public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IModelRecordStore records, DogAI.Core.Images.CardCoordinator? card = null)
 {
     /// <summary>How this file would run at the given context size, judged from its header and free memory now.</summary>
     public async Task<FitResult?> PlanAsync(ModelFile file, int context, CancellationToken ct = default)
@@ -68,6 +69,31 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
         _heldUnloaded = true;
         await engine.UnloadAsync().ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// The owner's "Unload everything": the chat model (as <see cref="UnloadByUserAsync"/>, so nothing brings it back
+    /// until a model is asked for), the picture model, the document search model and a speech model on the graphics
+    /// card. Nothing is done while a reply or a picture is being made; the result says so.
+    /// </summary>
+    public async Task<DogAI.Core.Images.CardCleared> UnloadEverythingAsync(CancellationToken ct = default)
+    {
+        if (card is not null) return await card.ClearAsync(UnloadChatAsync, ct).ConfigureAwait(false);
+        if (engine.IsBusy) return new DogAI.Core.Images.CardCleared([], [], "A reply is being written. Unload when it has finished.");
+        return new DogAI.Core.Images.CardCleared(await UnloadChatAsync().ConfigureAwait(false) ? [DogAI.Core.Images.CardCoordinator.ChatName] : [], []);
+
+        async Task<bool> UnloadChatAsync()
+        {
+            var had = engine.State is EngineState.Ready or EngineState.Loading or EngineState.Resting;
+            await UnloadByUserAsync().ConfigureAwait(false);
+            return had;
+        }
+    }
+
+    /// <summary>
+    /// Lets the idle things on the graphics card that are not chat or picture models go (the document search model, a
+    /// speech model), to make room for a chat model. Call it while holding the card turn. True when something went.
+    /// </summary>
+    public Task<bool> MakeWayAsync(string because) => card is null ? Task.FromResult(false) : card.MakeWayAsync(because);
 
     /// <summary>
     /// Makes sure a chat model is ready for one of DOG.ai's own jobs (drafting looks, planning a picture): waits for a load
@@ -130,9 +156,46 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
         // A page's own load that had to wait for its turn: a model that was loaded or set aside meanwhile stays.
         if (automatic && engine.State != EngineState.Idle) return;
         var decision = await DecideAsync(path, context).ConfigureAwait(false);
+        // Before part of the model is sent to system memory (or it is refused): the document search model and a speech
+        // model sitting unused on the card make way, and the model is judged again against what is free then.
+        if (decision.WantsRoom && await MakeWayAsync("a chat model is being loaded and does not fit on the card beside it").ConfigureAwait(false))
+            decision = await DecideAsync(path, context).ConfigureAwait(false);
         if (decision.Refusal is { } why) throw new ModelRefusedException(why);
         _heldUnloaded = false;
         await engine.LoadAsync(path, new EngineOptions(context, decision.GpuLayers), automatic).ConfigureAwait(false);
+        // Every layer on the card: what it really holds there is worth remembering (the "Fits beside pictures" mark).
+        if (decision.GpuLayers < 0 && engine.State == EngineState.Ready) _ = RememberMemoryAsync(path, context);
+    }
+
+    /// <summary>Raised after a model's real graphics memory was measured and saved in its record.</summary>
+    public event Action? MemoryMeasured;
+
+    /// <summary>How long after a load the model's memory is measured: Windows' per-program counters lag by about a second.</summary>
+    public TimeSpan MeasureDelay { get; set; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Measures what the model that was just loaded really holds on the graphics card and saves it in the model's
+    /// record. Off the load's path and without the card turn; given up quietly when the model has changed meanwhile or
+    /// the card cannot be measured.
+    /// </summary>
+    private async Task RememberMemoryAsync(string path, int context)
+    {
+        try
+        {
+            await Task.Delay(MeasureDelay).ConfigureAwait(false);
+            if (engine.State != EngineState.Ready || !string.Equals(engine.ModelPath, path, StringComparison.OrdinalIgnoreCase) || engine.ProcessId is not int pid) return;
+            var held = await probe.VramOfProcessAsync(pid).ConfigureAwait(false);
+            if (held <= 0 || engine.State != EngineState.Ready || engine.ProcessId != pid) return;
+            var record = await records.FindAsync(path).ConfigureAwait(false) ?? new ModelRecord { Path = path, Quant = ModelLibrary.Describe(path)?.Quant };
+            record.MeasuredVramBytes = held;
+            record.MeasuredVramContext = context;
+            await records.SaveAsync(record).ConfigureAwait(false);
+            MemoryMeasured?.Invoke();
+        }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            // A mark that stays an estimate is not worth a failed load or a crash.
+        }
     }
 
     /// <summary>

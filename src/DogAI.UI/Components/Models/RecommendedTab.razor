@@ -37,11 +37,15 @@
                         <div class="model-name">@row.Pick.Title@if (i == bestIndex) {<span class="rec">Best pick</span>}</div>
                         <div class="model-meta">@row.Pick.Blurb</div>
                         <div class="model-meta">@Meta(row)</div>
+                        @if (useCase != "embedding")
+                        {
+                            <BesidePicturesChip Fit="row.Fit" />
+                        }
                     </div>
                     <FitBadge Fit="row.Fit" />
                     <DownloadButton Repo="@row.Pick.Repo" Variant="@(row.Real ? row.Variant : null)" UseCase="@useCase" Primary="@(i == bestIndex)"
                                     Installed="@(row.Variant is { } v && Installed.Contains(v.Main.Path.Split('/')[^1]))"
-                                    TooLarge="@(row.Fit?.Kind == FitKind.TooLarge)" />
+                                    Fit="row.Fit" />
                 </div>
             }
         </div>
@@ -73,10 +77,9 @@
         var variants = _real.GetValueOrDefault(pick.Repo);
         var real = variants is not null;
         variants ??= pick.EstimatedVariants();
-        var best = Ctx.Best(variants, pick.EstimatedShape);
-        var fit = best is null
-            ? Ctx.Fit(pick.EstimatedShape(variants.Min(v => v.Size)))
-            : Ctx.Fit(pick.EstimatedShape(best.Size));
+        // No version can run here: the smallest is listed, marked too large, and can still be downloaded.
+        var best = Ctx.Best(variants, pick.EstimatedShape) ?? variants.MinBy(v => v.Size);
+        var fit = best is null ? null : Ctx.Fit(pick.EstimatedShape(best.Size));
         return new Row(pick, best, fit, real);
     });
 
@@ -84,9 +87,9 @@
 
     private static string Meta(Row row)
     {
-        if (row.Variant is null) return "No version of this model can run on this PC.";
+        if (row.Variant is null) return "No files were found for this model.";
         var size = row.Real ? Sizes.Gb(row.Variant.Size) : "≈" + Sizes.Gb(row.Variant.Size);
-        return $"{row.Variant.Quant} · {size}";
+        return $"{row.Variant.Quant} · {size}" + (row.Fit?.Kind == FitKind.TooLarge ? " · the smallest version; none can run on this PC" : "");
     }
 
     protected override async Task OnInitializedAsync()

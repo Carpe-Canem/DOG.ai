@@ -1,0 +1,17 @@
+@* The "Fits beside pictures" mark on a chat model: it can stay in graphics memory while a picture is drawn
+   (BesidePictures in Core has the rule). Nothing is rendered for a model that does not, or when there is no picture
+   engine or checkpoint. *@
+@inject ModelsContext Ctx
+
+@if (Ctx.FitsBesidePictures(Fit, Measured))
+{
+    <div class="chips beside-row"><span class="chip beside-chip">@BesidePictures.Label</span><InfoButton About="fitting beside pictures">@BesidePictures.Explanation</InfoButton></div>
+}
+
+@code {
+    /// <summary>How the model was judged at the chosen context size.</summary>
+    [Parameter, EditorRequired] public FitResult? Fit { get; set; }
+
+    /// <summary>The graphics memory an installed model really took at this context size, when it has been loaded (it replaces the estimate).</summary>
+    [Parameter] public long? Measured { get; set; }
+}

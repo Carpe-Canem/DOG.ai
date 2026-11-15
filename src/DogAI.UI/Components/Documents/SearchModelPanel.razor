@@ -1,9 +1,9 @@
-@* Which document search model is used and whether it is running. It is picked in Models › On this PC › Chat models › Default models. *@
+@* Which document search model is used and whether it is in memory. It is picked in Models › On this PC › Chat models › Default models. *@
 @implements IDisposable
 @inject EmbeddingServer Search
 @inject DocumentLibrary Library
 
-<div class="panel">
+<div class="panel" id="search-model">
     <h4>Document search model</h4>
     @if (_path is null)
     {
@@ -13,8 +13,8 @@
     else
     {
         <div class="kv"><span>Model</span><span>@Path.GetFileNameWithoutExtension(_path)</span></div>
-        <div class="kv"><span>State</span><span>@State</span></div>
-        <p class="small">Starts when needed, stops after ten idle minutes.<InfoButton About="the document search model">It runs beside the chat model. To use another, pick it in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName › Default models</a>; documents are then indexed again.</InfoButton></p>
+        <div class="kv"><span>State</span><span id="search-model-state" data-state="@StateId">@State</span></div>
+        <p class="small">It loads when a search or a new document needs it, and leaves memory after two minutes unused.<InfoButton About="the document search model">It runs beside the chat model and takes some graphics memory while it is in. It also leaves at once when a chat model or a picture needs the room, but never while documents are being indexed or searched. To use another, pick it in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName › Default models</a>; documents are then indexed again.</InfoButton></p>
     }
     @if (Search.Error is { } error)
     {
@@ -29,7 +29,15 @@
 @code {
     private string? _path;
 
-    private string State => Search.IsStarting ? "Starting…" : Search.IsRunning ? "Running" : "Stopped (starts when needed)";
+    private string StateId => Search.IsStarting ? "loading" : !Search.IsRunning ? "out" : Library.IsIndexing ? "indexing" : "in";
+
+    private string State => StateId switch
+    {
+        "loading" => "Loading…",
+        "indexing" => "In memory, indexing documents",
+        "in" => "In memory",
+        _ => "Not in memory (loads when needed)",
+    };
 
     protected override async Task OnInitializedAsync()
     {

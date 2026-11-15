@@ -9,6 +9,11 @@
 @inject EngineUpdater Updater
 @inject ISettingsStore SettingsStore
 @inject NavigationManager Nav
+@inject EngineManager Engine
+@inject ModelLauncher Launcher
+@inject ModelBenchmark Bench
+@inject CardCoordinator Card
+@inject EmbeddingServer SearchModel
 
 @* The Models section: three groups (Get models, On this PC, Engines) with tabs inside the first two, and downloads as a
    button in the header. Which group and tab an address opens is ModelsPlaces (Core); addresses from before the
@@ -133,8 +138,24 @@ else
             <div class="panel" id="card-panel">
                 <h4>Graphics memory</h4>
                 <div class="meter full-w"><i style="width:@Pct(used, gpu.TotalBytes)%"></i></div>
-                <div class="small">@Sizes.Gb(used) of @Sizes.Gb(gpu.TotalBytes) in use@(Ctx.EngineVram > 0 ? $", {Sizes.Gb(Ctx.EngineVram)} by the loaded model" : "")</div>
-                <div class="row"><button class="btn" @onclick="Ctx.RefreshAsync">Measure again</button></div>
+                <div class="small" id="card-use">@Sizes.Gb(used) of @Sizes.Gb(gpu.TotalBytes) in use@(Ctx.EngineVram > 0 ? $", {Sizes.Gb(Ctx.EngineVram)} by the loaded model" : "")</div>
+                <div class="small" id="card-loaded">@(Card.InMemory is { Count: > 0 } loaded ? $"In memory: {CardCleared.List(loaded)}." : "None of DOG.ai’s models is in memory.")</div>
+                <div class="row">
+                    <button class="btn" id="unload-all" disabled="@(_unloading || UnloadBlocked is not null)" @onclick="UnloadEverythingAsync">@(_unloading ? "Unloading…" : "Unload everything")</button>
+                    <button class="btn" id="measure-again" @onclick="Ctx.RefreshAsync">Measure again</button>
+                </div>
+                @if (UnloadBlocked is { } blocked)
+                {
+                    <div class="small" id="unload-all-why">@blocked</div>
+                }
+                else if (_unloaded is { } done)
+                {
+                    <div class="small" id="unload-all-note">@done</div>
+                }
+                else
+                {
+                    <div class="small" id="unload-all-help">Frees graphics memory for other programs. Models load again when you next use them; the chat model waits until you pick one.</div>
+                }
             </div>
         }
         @if (ShowsHardware)
@@ -142,6 +163,10 @@ else
             <div class="panel" id="fit-panel">
                 <h4>How fit is judged</h4>
                 <div class="small" id="fit-context-note">For a @Ctx.Context.ToString("N0")-token conversation, the context size models load with. Change it in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">On this PC › Chat models › Default models</a>.</div>
+                @if (Ctx.PictureNeed is { } pictureNeed && Ctx.PictureCheckpoint is { } checkpoint)
+                {
+                    <div class="small" id="fit-pictures-note">@BesidePictures.Rule(checkpoint, pictureNeed)<InfoButton About="the Fits beside pictures mark">@BesidePictures.RuleMore</InfoButton></div>
+                }
             </div>
         }
         @if (ShowsConnection)
@@ -160,6 +185,43 @@ else
     private int _libraryCount;
     private long _librarySize;
     private bool _trayOpen;
+    private bool _unloading;
+    private Timer? _blockedWatch;
+
+    /// <summary>The reason shown at the last render, for the watch that notices it changing.</summary>
+    private string? _blockedShown;
+
+    protected override void OnAfterRender(bool firstRender) => _blockedShown = UnloadBlocked;
+
+    /// <summary>What the last "Unload everything" did, until something is loaded again.</summary>
+    private string? _unloaded;
+
+    /// <summary>Why "Unload everything" must wait, in words, or null.</summary>
+    private string? UnloadBlocked => Bench.IsRunning ? "A benchmark is running. Unload when it has finished." : Card.BusyReason;
+
+    private async Task UnloadEverythingAsync()
+    {
+        if (_unloading) return;
+        _unloading = true;
+        _unloaded = null;
+        try
+        {
+            var cleared = await Launcher.UnloadEverythingAsync();
+            await Ctx.RefreshAsync();
+            _unloaded = cleared.Text;
+        }
+        finally
+        {
+            _unloading = false;
+        }
+    }
+
+    /// <summary>A model came or went: the side panel says what is in memory, and a note about an earlier unload is stale.</summary>
+    private void OnCardChanged()
+    {
+        if (!_unloading && Card.InMemory.Count > 0) _unloaded = null;
+        Refresh();
+    }
 
     /// <summary>The tab shown last in each group while Models is open, so a click on a group comes back to it.</summary>
     private readonly Dictionary<string, string> _lastIn = [];
@@ -216,6 +278,14 @@ else
         Ctx.Changed += Refresh;
         Downloads.Changed += Refresh;
         Downloads.Completed += OnCompleted;
+        Engine.Changed += OnCardChanged;
+        Card.Changed += OnCardChanged;
+        SearchModel.Changed += OnCardChanged;
+        // A reply ending raises no event, so the reason beside "Unload everything" is looked at again every second.
+        _blockedWatch = new Timer(_ =>
+        {
+            if (UnloadBlocked != _blockedShown) Refresh();
+        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
         await Ctx.RefreshAsync();
         await ScanAsync();
     }
@@ -230,6 +300,8 @@ else
             return;
         }
         _lastIn[Place.Group] = Place.Id;
+        // The picture engine or the checkpoint in use may have changed on another tab.
+        if (Ctx.Measured && ShowsHardware) _ = Ctx.RefreshPicturesAsync();
     }
 
     private void Refresh() => InvokeAsync(StateHasChanged);
@@ -256,5 +328,9 @@ else
         Ctx.Changed -= Refresh;
         Downloads.Changed -= Refresh;
         Downloads.Completed -= OnCompleted;
+        Engine.Changed -= OnCardChanged;
+        Card.Changed -= OnCardChanged;
+        SearchModel.Changed -= OnCardChanged;
+        _blockedWatch?.Dispose();
     }
 }

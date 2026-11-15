@@ -27,6 +27,17 @@ public sealed class ModelRecord
     public int? TunedGpuLayers { get; set; }
     public int? TunedContext { get; set; }
     public DateTime? BenchAt { get; set; }
+
+    /// <summary>
+    /// Graphics memory the model really held the last time it was loaded whole on the card, measured a moment after
+    /// the load, and the context size it was loaded with. The "Fits beside pictures" mark uses it in place of the
+    /// estimate, which errs high (see <see cref="BesidePictures"/>).
+    /// </summary>
+    public long? MeasuredVramBytes { get; set; }
+    public int? MeasuredVramContext { get; set; }
+
+    /// <summary>What the model really took at this context size, or null when it was never loaded whole at it.</summary>
+    public long? MeasuredAt(int context) => MeasuredVramBytes is > 0 and var bytes && MeasuredVramContext == context ? bytes : null;
 }
 
 public interface IModelRecordStore

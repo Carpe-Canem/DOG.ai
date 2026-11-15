@@ -137,8 +137,15 @@ public static class FitEstimator
 /// <summary>What to do when asked to load a model: how many layers to put on the card, or why not to load it.</summary>
 /// <param name="GpuLayers">-1 means every layer.</param>
 /// <param name="Refusal">Set when the model should not be loaded; says why in plain words.</param>
-public sealed record LoadDecision(int GpuLayers, string? Refusal)
+/// <param name="Fit">How the model was judged against the memory free now; null when its header could not be read.</param>
+public sealed record LoadDecision(int GpuLayers, string? Refusal, FitKind? Fit = null)
 {
+    /// <summary>
+    /// True when the model does not fit on the graphics card as things are: worth letting go what else sits there
+    /// unused (the document search model, a speech model) and judging again, before layers are sent to system memory.
+    /// </summary>
+    public bool WantsRoom => Fit is FitKind.Partial or FitKind.TooLarge;
+
     /// <summary>
     /// Uses settings a benchmark proved for this context size; otherwise follows the fit estimate.
     /// A model that does not fit even with system memory is refused, because trying only ends in an
@@ -147,12 +154,12 @@ public sealed record LoadDecision(int GpuLayers, string? Refusal)
     public static LoadDecision Decide(string name, int context, FitResult? plan, FitBudget? budget, ModelRecord? record)
     {
         if (record is { TunedGpuLayers: { } tuned, TunedContext: { } tunedContext } && tunedContext == context)
-            return new LoadDecision(tuned, null);
+            return new LoadDecision(tuned, null, plan?.Kind);
         return plan?.Kind switch
         {
-            FitKind.Partial => new LoadDecision(plan.GpuLayers, null),
-            FitKind.TooLarge => new LoadDecision(0, TooLargeText(name, context, plan, budget)),
-            _ => new LoadDecision(-1, null),
+            FitKind.Partial => new LoadDecision(plan.GpuLayers, null, FitKind.Partial),
+            FitKind.TooLarge => new LoadDecision(0, TooLargeText(name, context, plan, budget), FitKind.TooLarge),
+            _ => new LoadDecision(-1, null, plan?.Kind),
         };
     }
 

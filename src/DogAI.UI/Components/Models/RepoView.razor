@@ -67,7 +67,7 @@ else
     }
     else
     {
-        <div class="notice bad"><span>None of these files can run on this PC at a @Ctx.Context.ToString("N0")-token context.</span></div>
+        <div class="notice bad" id="repo-none-fit"><span>None of these files can run on this PC at a @Ctx.Context.ToString("N0")-token context.@(Ctx.ShowAll ? " They can still be downloaded." : " Turn on “Show models too large for this PC” to list them; they can still be downloaded.")</span></div>
     }
     var hidden = _variants.Count(v => Ctx.Measured && Ctx.Fit(Shape(v.Size)).Kind != FitKind.Full);
     <h4 class="group-title">Files</h4>
@@ -82,10 +82,14 @@ else
                 <div class="li-text">
                     <div class="model-name">@(v.Quant ?? v.Name)@if (best) {<span class="rec">Best pick</span>}</div>
                     <div class="model-meta">@Sizes.Gb(v.Size)@(v.Parts.Count > 1 ? $" · {v.Parts.Count} parts" : "") · @v.Name</div>
+                    @if (_info?.IsEmbedding(v.Main.Path) != true)
+                    {
+                        <BesidePicturesChip Fit="fit" />
+                    }
                 </div>
                 <FitBadge Fit="fit" />
                 <DownloadButton Repo="@Repo" Variant="v" Primary="best" Installed="@Installed.Contains(v.Main.Path.Split('/')[^1])"
-                                TooLarge="@(fit.Kind == FitKind.TooLarge)" />
+                                Fit="fit" />
             </div>
         }
     </div>

@@ -626,6 +626,12 @@ namespace DogAI.Data.Migrations
                     b.Property<double?>("BenchTokensPerSecond")
                         .HasColumnType("REAL");
 
+                    b.Property<long?>("MeasuredVramBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MeasuredVramContext")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Path")
                         .IsRequired()
                         .HasMaxLength(1024)
