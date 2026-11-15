@@ -66,7 +66,7 @@ public sealed class IllustrationTests
 
         var cast = Illustrations.CastFor(people);
         Assert.Equal([true, false, false, false], cast.Select(c => c.HasLooks));
-        Assert.Equal("Premise: A courier crosses a flooded city.\nWorld: Canals everywhere.", Illustrations.Background(story));
+        Assert.Equal("World: Canals everywhere.\nPremise: A courier crosses a flooded city.", Illustrations.Setting(story));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class IllustrationTests
         new Looks("1girl, grey hair").SaveTo(mara);
         var people = Illustrations.People(story, [new StoryCastMember(mara, true), new StoryCastMember(new Character { Id = 2, Name = "Garrick" }, false)]);
 
-        var scene = await Illustrations.PlanAsync(new PictureWriter(engine), story, people, Passage(5, null, "Mara stood by the canal at night."), PromptStyle.Tags, PictureRating.General);
+        var scene = await Illustrations.PlanAsync(new PictureWriter(engine), story, people, [], Passage(5, null, "Mara stood by the canal at night."), PromptStyle.Tags, PictureRating.General);
 
         Assert.Equal(Illustrations.MaxPeople, scene.People.Count);
         Assert.Contains("Mara stood by the canal at night.", engine.User);

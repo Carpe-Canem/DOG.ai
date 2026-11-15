@@ -68,17 +68,17 @@ public sealed class ChatPictureTests
         var people = ChatPictures.People([rex, new Character { Id = 2, Name = "Ann" }], new Persona { Name = "Sam" });
         var path = new[] { Said(1, ChatRole.Assistant, "Woof.", 1), Said(2, ChatRole.User, "Guard the gate."), Said(3, ChatRole.Assistant, "I sit by the gate.", 1) };
 
-        var scene = await ChatPictures.PlanAsync(new PictureWriter(engine), people, path, path[2],
+        var scene = await ChatPictures.PlanAsync(new PictureWriter(engine), people, null, path, path[2],
             m => m.Role == ChatRole.User ? "Sam" : "Rex", PromptStyle.Tags, PictureRating.General);
 
         Assert.Equal(ChatPictures.MaxPeople, scene.People.Count);
         Assert.Contains("Passage:\nRex: I sit by the gate.", engine.User);
-        Assert.Contains("What was said just before:\nRex: Woof.\nSam: Guard the gate.", engine.User);
+        Assert.Contains("What was said just before (it tells where they are):\nRex: Woof.\nSam: Guard the gate.", engine.User);
         Assert.Contains("Rex: A loyal dog.", engine.User);
         Assert.Contains("at most 2", engine.System);
         Assert.Contains("Leave it empty for Rex", engine.System);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => ChatPictures.PlanAsync(new PictureWriter(engine), people, path,
+        await Assert.ThrowsAsync<InvalidOperationException>(() => ChatPictures.PlanAsync(new PictureWriter(engine), people, null, path,
             Said(4, ChatRole.Assistant, "  "), _ => "Rex", PromptStyle.Tags, PictureRating.General));
     }
 

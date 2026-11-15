@@ -20,7 +20,7 @@ public static class ChatPictures
     public const int BackgroundMessages = 6;
 
     /// <summary>The longest one earlier message may be in the background, and the background as a whole
-    /// (the planner cuts its background at 1,500 characters from the end, which would lose the newest message).</summary>
+    /// (under the planner's own limit for "what was said just before", <see cref="PictureWriter.MaxBeforeLength"/>).</summary>
     public const int BackgroundMessageLength = 500, BackgroundLength = 1400;
 
     /// <summary>
@@ -30,11 +30,15 @@ public static class ChatPictures
     public static IReadOnlyList<IllustrationPerson> People(IReadOnlyList<Character> characters, Persona? persona)
     {
         var list = new List<IllustrationPerson>();
+        var user = persona?.Name.Trim() is { Length: > 0 } you ? you : "the user";
         foreach (var card in characters)
         {
             var name = card.Name.Trim();
             if (name.Length == 0 || list.Any(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))) continue;
-            list.Add(new IllustrationPerson(name, Looks.Of(card), PictureWriter.About(card) is { Length: > 0 } about ? about : null));
+            // The Scenario has a block of its own, in full (M18 step 3): inside "about" it was cut off after a long description.
+            var scenario = CharacterPrompt.Fill(card.Scenario, name, user).Trim();
+            list.Add(new IllustrationPerson(name, Looks.Of(card), PictureWriter.About(card, withSetting: false) is { Length: > 0 } about ? about : null,
+                scenario.Length > 0 ? scenario : null));
         }
         if (persona?.Name.Trim() is { Length: > 0 } personaName && !list.Any(p => p.Name.Equals(personaName, StringComparison.OrdinalIgnoreCase)))
         {
@@ -71,6 +75,40 @@ public static class ChatPictures
         return string.Join("\n", lines);
     }
 
+    /// <summary>
+    /// The chat's setting (M18 step 3): each character's Scenario in full (under their name in a group; the same text
+    /// once), then the chat's summary when it covers messages before <paramref name="reply"/> on the branch shown.
+    /// Empty when there is neither.
+    /// </summary>
+    public static string Setting(IReadOnlyList<IllustrationPerson> people, Conversation? conversation, IReadOnlyList<ChatMessage> path, ChatMessage reply)
+    {
+        var scenarios = people.Where(p => !string.IsNullOrWhiteSpace(p.Setting))
+            .GroupBy(p => p.Setting!.Trim(), StringComparer.Ordinal)
+            .ToList();
+        var parts = new List<string>();
+        if (people.Count(p => p.Setting is not null) == 1)
+            parts.Add(scenarios[0].Key);
+        else
+            parts.AddRange(scenarios.Select(g => string.Join(" and ", g.Select(p => p.Name)) + ": " + g.Key));
+        if (SummaryBefore(conversation, path, reply) is { } summary)
+            parts.Add("What has happened in the chat so far: " + summary);
+        return string.Join("\n\n", parts);
+    }
+
+    /// <summary>The chat's summary, only while the last message it covers is on the branch before the reply.</summary>
+    private static string? SummaryBefore(Conversation? conversation, IReadOnlyList<ChatMessage> path, ChatMessage reply)
+    {
+        if (conversation is not { SummaryThroughId: { } through } || conversation.Summary.Trim() is not { Length: > 0 } summary) return null;
+        for (var i = 0; i < path.Count && path[i].Id != reply.Id; i++)
+            if (path[i].Id == through) return summary.ReplaceLineEndings(" ");
+        return null;
+    }
+
+    /// <summary>What the planner is told besides the reply and the people: the setting, the messages before, the last picture's place.</summary>
+    public static SceneContext Context(IReadOnlyList<IllustrationPerson> people, Conversation? conversation, IReadOnlyList<ChatMessage> path,
+        ChatMessage reply, Func<ChatMessage, string> nameOf) =>
+        new(SceneSource.Chat, Setting(people, conversation, path, reply), Background(path, reply, nameOf), Illustrations.LastPlace(path, reply));
+
     /// <summary>The reply as the planner reads it: who wrote it, then the text, so "I" has an owner.</summary>
     public static string Passage(ChatMessage reply, Func<ChatMessage, string> nameOf) => Line(nameOf(reply), reply.Content.Trim());
 
@@ -78,13 +116,12 @@ public static class ChatPictures
     /// The chat model plans a picture of one moment of <paramref name="reply"/>, with at most <see cref="MaxPeople"/>
     /// people. <paramref name="nameOf"/> gives the name a message was written under (the persona, the character, the group member).
     /// </summary>
-    public static Task<PictureScene> PlanAsync(PictureWriter writer, IReadOnlyList<IllustrationPerson> people, IReadOnlyList<ChatMessage> path,
-        ChatMessage reply, Func<ChatMessage, string> nameOf, PromptStyle style, PictureRating rating, CancellationToken ct = default)
+    public static Task<PictureScene> PlanAsync(PictureWriter writer, IReadOnlyList<IllustrationPerson> people, Conversation? conversation,
+        IReadOnlyList<ChatMessage> path, ChatMessage reply, Func<ChatMessage, string> nameOf, PromptStyle style, PictureRating rating, CancellationToken ct = default)
     {
         if (reply.Content.Trim().Length == 0) throw new InvalidOperationException("There is nothing to illustrate yet.");
-        var background = Background(path, reply, nameOf);
         return writer.SceneAsync(Passage(reply, nameOf), Illustrations.CastFor(people), style, MaxPeople,
-            background.Length > 0 ? "What was said just before:\n" + background : null, rating, ct);
+            Context(people, conversation, path, reply, nameOf), rating, ct);
     }
 
     private static string Line(string? name, string text)

@@ -935,6 +935,7 @@ div.math[data-math] { margin: .6em 0; text-align: center; }
 .maker-picture { display: block; max-width: 100%; max-height: 56vh; margin: 0 auto; border-radius: min(var(--r), 12px); border: 1px solid var(--line); background: var(--surface2); }
 .maker-review, .maker-edit { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: min(var(--r), 12px); background: var(--surface2); }
 .maker-review p { margin: 0; }
+.maker-place { align-items: end; }
 .maker-details summary { cursor: pointer; color: var(--muted); font-size: .85em; }
 .maker-details p { overflow-wrap: anywhere; }
 /* min-height (a 96px picture, its border and the padding): a row that scrolls sideways is otherwise squeezed to nothing when the maker is taller than the window. */

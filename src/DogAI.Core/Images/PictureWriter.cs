@@ -11,6 +11,21 @@ namespace DogAI.Core.Images;
 /// <param name="About">A few words on who they are and what they usually wear (from their card), so the model does not invent it.</param>
 public sealed record CastEntry(string Name, bool HasLooks, string? About = null);
 
+/// <summary>Where the picture's words come from: a story or a chat (only the headings' words differ).</summary>
+public enum SceneSource { Story, Chat }
+
+/// <summary>
+/// What the scene planner is told besides the passage and the people (M18 step 3), each block with room of its own:
+/// <paramref name="Setting"/> is to be drawn (the story's world and premise; a chat's scenarios and summary), unless the
+/// passage says this moment is elsewhere; <paramref name="Before"/> is what happened just before (the end of the passage
+/// before, or the messages before a reply), which tells where they are; <paramref name="LastPlace"/> is where the last
+/// picture of the story or chat was.
+/// </summary>
+public sealed record SceneContext(SceneSource Source = SceneSource.Story, string? Setting = null, string? Before = null, PicturePlace? LastPlace = null)
+{
+    public string What => Source == SceneSource.Story ? "the story" : "this chat";
+}
+
 /// <summary>Looks the chat model drafted from a description, for the owner to change before saving.</summary>
 public sealed record LooksDraft(string Tags, TagNotes Notes);
 
@@ -30,12 +45,19 @@ public sealed partial class PictureWriter(IChatEngine engine)
     public const int MaxPassageLength = 8000;
     public const int MaxCastAboutLength = 500;
 
-    /// <summary>What a card says about its character, for <see cref="PortraitAsync"/> and <see cref="DraftLooksAsync"/>.</summary>
-    public static string About(Character c)
+    /// <summary>The longest the setting block and the "just before" block may be (each has room of its own).</summary>
+    public const int MaxSettingLength = 2500, MaxBeforeLength = 1500;
+
+    /// <summary>
+    /// What a card says about its character. With <paramref name="withSetting"/> (portraits, drafting looks) the Scenario
+    /// is added as "Usual setting"; a scene's cast leaves it out, because a chat's Scenario has a block of its own
+    /// (<see cref="SceneContext.Setting"/>) and a story's place is its World box.
+    /// </summary>
+    public static string About(Character c, bool withSetting = true)
     {
         var text = new StringBuilder(CharacterPrompt.Fill(c.Description, c.Name, "the user").Trim());
         if (c.Personality.Trim().Length > 0) text.Append("\n\nPersonality: ").Append(CharacterPrompt.Fill(c.Personality, c.Name, "the user").Trim());
-        if (c.Scenario.Trim().Length > 0) text.Append("\n\nUsual setting: ").Append(CharacterPrompt.Fill(c.Scenario, c.Name, "the user").Trim());
+        if (withSetting && c.Scenario.Trim().Length > 0) text.Append("\n\nUsual setting: ").Append(CharacterPrompt.Fill(c.Scenario, c.Name, "the user").Trim());
         return text.ToString().Trim();
     }
 
@@ -60,19 +82,17 @@ public sealed partial class PictureWriter(IChatEngine engine)
 
     /// <summary>
     /// Plans a picture of one moment of a passage. <paramref name="cast"/> are the people who may be in it;
-    /// <paramref name="background"/> is anything that helps to understand the passage (the story's setting) without being drawn.
+    /// <paramref name="context"/> is the setting, what happened just before and where the last picture was.
     /// </summary>
     /// <exception cref="InvalidOperationException">No model is loaded, or its answer was not usable.</exception>
     public async Task<PictureScene> SceneAsync(string passage, IReadOnlyList<CastEntry> cast, PromptStyle style, int maxPeople = 2,
-        string? background = null, PictureRating rating = PictureRating.General, CancellationToken ct = default)
+        SceneContext? context = null, PictureRating rating = PictureRating.General, CancellationToken ct = default)
     {
         passage = Cut(passage, MaxPassageLength);
         if (passage.Length == 0) throw new InvalidOperationException("There is nothing to illustrate yet.");
         maxPeople = Math.Clamp(maxPeople, 1, PictureScene.MaxPeople);
         var names = cast.Select(c => c.Name.Trim()).Where(n => n.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var user = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(background))
-            user.Append("Background, for understanding only (do not draw it):\n").Append(Cut(background, 1500)).Append("\n\n");
+        var user = new StringBuilder(SceneBlocks(context ?? new SceneContext()));
         var known = cast.Where(c => !string.IsNullOrWhiteSpace(c.About)).ToList();
         if (known.Count > 0)
         {
@@ -224,6 +244,24 @@ public sealed partial class PictureWriter(IChatEngine engine)
             ["required"] = new JsonArray("moment", "prompt"),
         }).ToJsonString();
 
+    /// <summary>
+    /// The blocks put before the people and the passage, in this order: the setting (to be drawn), what happened just
+    /// before, the last picture's place. Each is cut to its own length; an empty one is left out.
+    /// </summary>
+    public static string SceneBlocks(SceneContext context)
+    {
+        var text = new StringBuilder();
+        if (Cut(context.Setting, MaxSettingLength) is { Length: > 0 } setting)
+            text.Append($"Setting: where {context.What} takes place. It is to be drawn: take the place, the light and the weather from it, unless the passage clearly says this moment is somewhere else.\n")
+                .Append(setting).Append("\n\n");
+        if (CutStart(context.Before, MaxBeforeLength) is { Length: > 0 } before)
+            text.Append(context.Source == SceneSource.Story ? "What happened just before (it tells where they are):\n" : "What was said just before (it tells where they are):\n")
+                .Append(before).Append("\n\n");
+        if (context.LastPlace is { IsEmpty: false } last)
+            text.Append($"The last picture of {context.What} took place in: {last.Line}. Stay there unless the passage or the setting says otherwise.\n\n");
+        return text.ToString();
+    }
+
     // ---- The instructions ----
 
     public static string SceneInstruction(PromptStyle style, IReadOnlyList<CastEntry> cast, int maxPeople, bool portrait,
@@ -251,7 +289,8 @@ public sealed partial class PictureWriter(IChatEngine engine)
         else
         {
             text.Append("- moment: first choose ONE moment of the passage that works as a still picture: people or a place seen at a single instant, not a thought, a conversation's content or a chain of events. Prefer the moment with the strongest image. Say in one plain sentence what the picture shows.\n");
-            text.Append($"- people: the people visible at that moment, at most {maxPeople}; fewer is better, and none for a picture of a place.");
+            text.Append($"- people: the people visible at that moment, at most {maxPeople}; fewer is better, and none for a picture of a place. " +
+                        "Only people the passage itself shows there: never someone who is only in the setting or in what happened just before, and when the passage says someone is alone, nobody else.");
             var names = cast.Select(c => c.Name.Trim()).Where(n => n.Length > 0).ToList();
             text.Append(names.Count > 0
                 ? $" Use these names exactly: {string.Join(", ", names)}. Use \"{PictureScene.SomeoneElse}\" for anyone else.\n"
@@ -269,13 +308,21 @@ public sealed partial class PictureWriter(IChatEngine engine)
         text.Append("  - clothing: what they wear at this moment.\n");
         text.Append(tags
             ? "  - expression: their face (\"smile\", \"frown\", \"closed eyes\", \"blush\", \"open mouth\").\n" +
-              "  - pose: what their body is doing (\"standing\", \"sitting\", \"running\", \"looking back\", \"holding lantern\").\n" +
-              "- place: where it is (\"forest\", \"bedroom\", \"tavern\", \"street\", \"indoors\", \"outdoors\").\n" +
-              "- light: time of day, light and weather (\"night\", \"sunset\", \"sunlight\", \"moonlight\", \"candlelight\", \"rain\").\n"
+              "  - pose: what their body is doing (\"standing\", \"sitting\", \"running\", \"looking back\", \"holding lantern\").\n"
             : "  - expression: their face.\n" +
-              "  - pose: what their body is doing.\n" +
-              "- place: where it is.\n" +
-              "- light: time of day, light and weather.\n");
+              "  - pose: what their body is doing.\n");
+        // M18 step 3: a scene's place comes first and is taken from the setting when the passage does not say (the trial:
+        // with no place words the checkpoint draws a room). A portrait keeps its own short line.
+        text.Append((tags, portrait) switch
+        {
+            (true, true) => "- place: where it is (\"forest\", \"bedroom\", \"tavern\", \"street\", \"indoors\", \"outdoors\").\n",
+            (true, false) => $"- place: where it is, up to {PicturePlace.MaxWritten} tags: the place itself first (\"forest\", \"tavern\", \"bedroom\", \"beach\", \"ship deck\", \"city street\"), then \"indoors\" or \"outdoors\", then what is seen there (\"tree\", \"campfire\", \"moss\", \"bookshelf\", \"wooden floor\"). When the passage does not say where it is, take it from the setting and from what happened just before. No people here, and no time of day or light: they go in light.\n",
+            (false, true) => "- place: where it is.\n",
+            (false, false) => $"- place: where it is, up to {PicturePlace.MaxWritten} short phrases: the place itself first, then indoors or outdoors, then what is seen there. When the passage does not say where it is, take it from the setting and from what happened just before. No people here, and no time of day or light.\n",
+        });
+        text.Append(tags
+            ? "- light: time of day, light and weather, up to three (\"night\", \"sunset\", \"sunlight\", \"moonlight\", \"candlelight\", \"rain\").\n"
+            : "- light: time of day, light and weather.\n");
         text.Append(portrait
             ? "- framing: how much of them is shown: \"portrait\", \"upper body\", \"cowboy shot\" (head to thighs) or \"full body\".\n"
             : "- framing: how much is shown. \"close-up\" and \"portrait\" only for one person; \"upper body\" or \"cowboy shot\" (head to thighs) for two or three; \"full body\" when what they do with their whole body matters; \"wide shot\" for a place.\n");
@@ -353,5 +400,16 @@ public sealed partial class PictureWriter(IChatEngine engine)
     {
         text = (text ?? "").Trim();
         return text.Length <= max ? text : text[..max];
+    }
+
+    /// <summary>The end of <paramref name="text"/> when it is too long (what happened last matters most), from a word, after "…".</summary>
+    public static string CutStart(string? text, int max)
+    {
+        text = (text ?? "").Trim();
+        if (text.Length <= max) return text;
+        var tail = text[^(max - 1)..];
+        var space = tail.IndexOfAny([' ', '\n']);
+        if (space is > 0 and < 60) tail = tail[(space + 1)..];
+        return "…" + tail.TrimStart();
     }
 }

@@ -17,6 +17,8 @@ namespace DogAI.Core.Images;
 /// larger beside a chat model where only that fitted (<see cref="PictureLevels.LargerScaleAsync"/>).</param>
 /// <param name="Moment">The planned moment, for the owner to read; null for a redraw of a kept picture.</param>
 /// <param name="KeptId">The <see cref="Picture"/> row this is, when it is already kept.</param>
+/// <param name="Place">Where the picture is (its place and light words), kept with a story or chat picture so the next one
+/// can be told; null when not known (a kept picture taken back in, a prompt changed by hand that lost them).</param>
 public sealed record PictureTry(
     int Number,
     string Checkpoint,
@@ -31,7 +33,8 @@ public sealed record PictureTry(
     int ImageHeight,
     string? Moment,
     TagNotes Notes,
-    long? KeptId = null)
+    long? KeptId = null,
+    PicturePlace? Place = null)
 {
     /// <summary>What was sent to the engine for this picture (WebP, the way kept pictures are drawn).</summary>
     public ImageRequest Request => PictureTries.Levelled(Base, Quality, Shape, Size, Scale);
@@ -98,7 +101,7 @@ public sealed class PictureTries(IImageEngine engine)
     /// </summary>
     public async Task<PictureTry> DrawAsync(string imageRoot, string checkpoint, CheckpointSettings settings, ImageRequest @base,
         PictureQuality quality, PictureShape shape, PictureSize size, string? moment, TagNotes notes, IProgress<ImageProgress>? progress = null,
-        CancellationToken ct = default, double scale = PictureLevels.FineScale)
+        CancellationToken ct = default, double scale = PictureLevels.FineScale, PicturePlace? place = null)
     {
         if (quality != PictureQuality.Fine) scale = PictureLevels.FineScale;
         var request = Levelled(@base, quality, shape, size, scale) with { Preview = progress is not null, PreviewEvery = 4 };
@@ -108,13 +111,13 @@ public sealed class PictureTries(IImageEngine engine)
         var image = result.Images[0];
         var pixels = WebpInfo.Read(image);
         return Add(new PictureTry(++_number, ImageModelCatalog.Normalise(checkpoint), settings, @base with { Seed = result.Seed }, quality, shape, size, scale,
-            image, pixels?.Width ?? 0, pixels?.Height ?? 0, moment, notes));
+            image, pixels?.Width ?? 0, pixels?.Height ?? 0, moment, notes, Place: place));
     }
 
     /// <summary>The same plan again with a new seed, at the try's own quality, shape and size.</summary>
     public Task<PictureTry> TryAgainAsync(string imageRoot, PictureTry like, IProgress<ImageProgress>? progress = null, CancellationToken ct = default) =>
         DrawAsync(imageRoot, like.Checkpoint, like.Settings, like.Base with { Seed = -1 }, like.Quality, like.Shape, like.Size, like.Moment, like.Notes,
-            progress, ct, like.Scale);
+            progress, ct, like.Scale, like.Place);
 
     /// <summary>
     /// Make larger: the same picture (same seed, prompt and size) redrawn with a hires fix at <paramref name="scale"/>, so
@@ -125,7 +128,7 @@ public sealed class PictureTries(IImageEngine engine)
     {
         if (!PictureLevels.CanMakeLarger(from.Quality)) throw new InvalidOperationException("This picture is already as large as Make larger goes.");
         return DrawAsync(imageRoot, from.Checkpoint, from.Settings, from.Base, PictureQuality.Fine, from.Shape, from.Size, from.Moment, from.Notes,
-            progress, ct, scale);
+            progress, ct, scale, from.Place);
     }
 
     /// <summary>
@@ -150,7 +153,8 @@ public sealed class PictureTries(IImageEngine engine)
         // A picture made larger keeps its scale while it stays at its size; any other Fine is ×1.5.
         var scale = from.Quality == PictureQuality.Fine && size == from.Size ? from.Scale : PictureLevels.FineScale;
         return DrawAsync(imageRoot, from.Checkpoint, from.Settings, @base, quality, shape, size,
-            prompt == from.Base.Prompt ? from.Moment : null, prompt == from.Base.Prompt ? from.Notes : TagNotes.None, progress, ct, scale);
+            prompt == from.Base.Prompt ? from.Moment : null, prompt == from.Base.Prompt ? from.Notes : TagNotes.None, progress, ct, scale,
+            from.Place is { } place && place.StillIn(prompt) ? place : null);
     }
 
     /// <summary>

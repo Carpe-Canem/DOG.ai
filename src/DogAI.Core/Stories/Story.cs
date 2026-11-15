@@ -145,6 +145,28 @@ public sealed class StoryTurn
     [JsonPropertyName("picture"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? Picture { get; set; }
 
+    /// <summary>
+    /// On a passage or reply with a <see cref="Picture"/>: its place words and light words, so the next picture can be
+    /// told where the last one was (M18 step 3). Cleared with the picture. Read through <see cref="Where"/>.
+    /// </summary>
+    [JsonPropertyName("place"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Place { get; set; }
+
+    [JsonPropertyName("light"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Light { get; set; }
+
+    /// <summary>Where the picture is, cleaned (the JSON is on a message and is read as untrusted); null when none is kept.</summary>
+    [JsonIgnore]
+    public DogAI.Core.Images.PicturePlace? Where
+    {
+        get => Picture is null ? null : DogAI.Core.Images.PicturePlace.Of(Place, Light);
+        set
+        {
+            Place = value is { Place.Count: > 0 } ? [.. value.Place] : null;
+            Light = value is { Light.Count: > 0 } ? [.. value.Light] : null;
+        }
+    }
+
     public static StoryTurn Of(ChatMessage message)
     {
         if (string.IsNullOrEmpty(message.ExtraJson)) return new StoryTurn();
@@ -159,7 +181,7 @@ public sealed class StoryTurn
     }
 
     public string? ToJson() =>
-        Choices is null && State is null && Roll is null && Chapter is null && Picture is null ? null : JsonSerializer.Serialize(this);
+        Choices is null && State is null && Roll is null && Chapter is null && Picture is null && Place is null && Light is null ? null : JsonSerializer.Serialize(this);
 
     /// <summary>The state left by the newest passage on <paramref name="path"/> that has one.</summary>
     public static StoryState? LatestState(IReadOnlyList<ChatMessage> path)

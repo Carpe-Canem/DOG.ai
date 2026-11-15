@@ -514,7 +514,7 @@ public sealed class PicturePromptTests : IDisposable
     {
         var engine = new ScriptedEngine(SceneAnswer[..60], SceneAnswer[60..]);
         var scene = await new PictureWriter(engine).SceneAsync("Mara poured the ale while the stranger watched the door.",
-            [new CastEntry("Mara", HasLooks: true, "A scout\nin leather armor."), new CastEntry("Ben", HasLooks: false)], PromptStyle.Tags, background: "A border town in winter.");
+            [new CastEntry("Mara", HasLooks: true, "A scout\nin leather armor."), new CastEntry("Ben", HasLooks: false)], PromptStyle.Tags, context: new SceneContext(Setting: "A border town in winter."));
 
         // Names come back as the cast spells them; anyone else is "someone else".
         Assert.Equal(["Mara", PictureScene.SomeoneElse], scene.People.Select(p => p.Name));

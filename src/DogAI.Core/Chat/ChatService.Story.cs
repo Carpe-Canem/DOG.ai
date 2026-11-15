@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using DogAI.Core.Characters;
+using DogAI.Core.Images;
 using DogAI.Core.Stories;
 
 namespace DogAI.Core.Chat;
@@ -204,11 +205,15 @@ public sealed partial class ChatService
     /// <summary>
     /// Records which kept picture a passage shows (null for none), keeping the passage's other story details. Read fresh,
     /// so it never undoes choices or state saved a moment earlier. Use <see cref="Illustrations"/>, which keeps the row too.
+    /// <paramref name="place"/> is where the picture is (<see cref="StoryTurn.Where"/>): no picture clears it; a null place
+    /// for the picture already shown keeps the one recorded (a kept picture chosen again knows none of its own).
     /// </summary>
-    public async Task SetPassagePictureAsync(long conversationId, long passageId, long? pictureId, CancellationToken ct = default)
+    public async Task SetPassagePictureAsync(long conversationId, long passageId, long? pictureId, PicturePlace? place = null, CancellationToken ct = default)
     {
         var passage = await FindAsync(conversationId, passageId, ChatRole.Assistant, ct);
         var turn = StoryTurn.Of(passage);
+        if (pictureId is null) turn.Where = null;
+        else if (place is not null || turn.Picture != pictureId) turn.Where = place is null ? null : PicturePlace.Of(place.Place, place.Light);
         turn.Picture = pictureId;
         await store.SetMessageExtraAsync(passageId, turn.ToJson(), ct);
         Changed?.Invoke();

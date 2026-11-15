@@ -106,6 +106,20 @@
         {
             <div class="maker-review" id="maker-review">
                 <p><b>The picture:</b> <span id="maker-moment">@review.Moment</span></p>
+                <div class="two maker-place" id="maker-place-row">
+                    <label class="field-block">
+                        <span class="field-label">Place <span class="small">Where it is: the place first, then indoors or outdoors, then what is seen there.</span></span>
+                        <input class="field" id="maker-place" @bind="_reviewPlace" @bind:after="PlaceChangedAsync" placeholder="forest, outdoors, campfire" />
+                    </label>
+                    <label class="field-block">
+                        <span class="field-label">Light <span class="small">Time of day, light and weather.</span></span>
+                        <input class="field" id="maker-light" @bind="_reviewLight" @bind:after="PlaceChangedAsync" placeholder="night, moonlight" />
+                    </label>
+                </div>
+                @if (_placeNote is not null)
+                {
+                    <p class="small" id="maker-place-note">@_placeNote</p>
+                }
                 @NotesLine(review.Planned.Notes, "maker-notes")
                 <label class="field-block">
                     <span class="field-label">Prompt <span class="small">Change it if you like. The negative prompt and the numbers come from the checkpoint’s settings.</span></span>
@@ -258,7 +272,8 @@
     [Parameter] public EventCallback<Used> OnUse { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
-    private sealed record Review(PlannedPicture Planned, string Moment, ImageRequest Base);
+    /// <summary>A plan shown before drawing: the scene and the order it was built from, so a changed place builds it again.</summary>
+    private sealed record Review(PlannedPicture Planned, string Moment, ImageRequest Base, PictureScene Scene, PictureOrder Order);
 
     /// <summary>A LoRA in the Edit and redraw box: used or not, and how strongly.</summary>
     private sealed class EditLora(string path, double strength)
@@ -274,7 +289,7 @@
     private PictureTries _tries = default!;
     private PictureTry? _selected;
     private bool _ready, _editing, _using, _drawing, _planning;
-    private string? _root, _engine, _status, _error, _preview, _reviewPrompt, _editPrompt;
+    private string? _root, _engine, _status, _error, _preview, _reviewPrompt, _editPrompt, _reviewPlace, _reviewLight, _placeNote;
     private ImageFile? _checkpoint;
     private CheckpointSettings? _settings;
     private IReadOnlyList<ImageFile> _files = [];
@@ -409,17 +424,22 @@
             {
                 _planning = false;
             }
-            var planned = PicturePrompt.Assemble(scene, new PictureOrder(_settings, PeopleLooks(), _styleLoras, _shape, PictureQuality.Standard, -1, _prefs.Rating, _size));
+            var order = new PictureOrder(_settings, PeopleLooks(), _styleLoras, _shape, PictureQuality.Standard, -1, _prefs.Rating, _size);
+            var planned = PicturePrompt.Assemble(scene, order);
             if (_prefs.ShowPromptFirst)
             {
-                _review = new Review(planned, scene.Moment, planned.Request);
+                _review = new Review(planned, scene.Moment, planned.Request, scene, order);
                 _reviewPrompt = planned.Request.Prompt;
+                _reviewPlace = string.Join(", ", planned.Place?.Place ?? []);
+                _reviewLight = string.Join(", ", planned.Place?.Light ?? []);
+                _placeNote = null;
                 _status = null;
                 return;
             }
             // The plan job has ended: only now may the picture take the graphics card.
             var size = await StartSizeAsync(_checkpoint.RelativePath, _settings, planned.Request, cts.Token);
-            await DrawAsync(() => _tries.DrawAsync(_root!, _checkpoint.RelativePath, _settings, planned.Request, _quality, _shape, size, scene.Moment, planned.Notes, Progress(), cts.Token));
+            await DrawAsync(() => _tries.DrawAsync(_root!, _checkpoint.RelativePath, _settings, planned.Request, _quality, _shape, size, scene.Moment, planned.Notes, Progress(), cts.Token,
+                place: planned.Place));
         }
         catch (OperationCanceledException)
         {
@@ -447,13 +467,16 @@
         }
         _review = null;
         var changed = prompt != review.Base.Prompt;
+        // Where the picture is, kept with it for the next one: the place as planned (or as typed in its boxes); with the
+        // prompt changed by hand, only while the prompt still holds those words.
+        var place = review.Planned.Place is { } planned && (!changed || planned.StillIn(prompt)) ? planned : null;
         using var cts = Begin();
         try
         {
             var @base = review.Base with { Prompt = prompt };
             var size = await StartSizeAsync(_checkpoint.RelativePath, _settings, @base, cts.Token);
             await DrawAsync(() => _tries.DrawAsync(_root!, _checkpoint.RelativePath, _settings, @base, _quality, _shape, size,
-                changed ? null : review.Moment, review.Planned.Notes, Progress(), cts.Token));
+                changed ? null : review.Moment, review.Planned.Notes, Progress(), cts.Token, place: place));
         }
         catch (OperationCanceledException)
         {
@@ -463,6 +486,28 @@
         {
             End(cts);
         }
+    }
+
+    /// <summary>
+    /// The place or light was changed in the review: the prompt is built again with them as typed (never checked, like
+    /// Looks). A prompt already changed by hand is left alone and the note says so.
+    /// </summary>
+    private Task PlaceChangedAsync()
+    {
+        if (_review is not { } review) return Task.CompletedTask;
+        var typed = new PicturePlace(PicturePlace.Words(_reviewPlace), PicturePlace.Words(_reviewLight));
+        if (typed.Line == (review.Planned.Place?.Line ?? "")) return Task.CompletedTask;
+        var handEdited = (_reviewPrompt ?? "").Trim() != review.Base.Prompt;
+        if (handEdited)
+        {
+            _placeNote = "You changed the prompt by hand, so the place was not put into it. Change the place in the prompt, or put the prompt back.";
+            return Task.CompletedTask;
+        }
+        var again = PicturePrompt.Assemble(review.Scene, review.Order with { TypedPlace = typed });
+        _review = review with { Planned = again, Base = again.Request };
+        _reviewPrompt = again.Request.Prompt;
+        _placeNote = null;
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -517,7 +562,7 @@
             var again = PictureRatings.Reapply(like.Base, like.Settings, _prefs.Rating) with { Seed = -1 };
             _sizeNote = null;
             await DrawAsync(() => _tries.DrawAsync(_root!, like.Checkpoint, like.Settings, again, _quality, _shape, like.Size, like.Moment, like.Notes,
-                Progress(), cts.Token, like.Scale));
+                Progress(), cts.Token, like.Scale, like.Place));
         }
         finally
         {

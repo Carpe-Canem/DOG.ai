@@ -368,7 +368,10 @@ public sealed class TagList
             yield return tag.Replace('-', ' ');
             yield return tag.Replace("-", "");
         }
-        if (tag.EndsWith("es", StringComparison.Ordinal) && tag.Length > 4) yield return tag[..^2];
+        // "-es" only after the sounds that take it ("boxes", "dresses", "branches", "tomatoes"): "pines" is not "pin".
+        if (tag.EndsWith("es", StringComparison.Ordinal) && tag.Length > 4 && tag[..^2] is var stem
+            && (stem.EndsWith('s') || stem.EndsWith('x') || stem.EndsWith('z') || stem.EndsWith('o') || stem.EndsWith("ch", StringComparison.Ordinal) || stem.EndsWith("sh", StringComparison.Ordinal)))
+            yield return stem;
         if (tag.EndsWith('s') && tag.Length > 3) yield return tag[..^1];
         else
         {

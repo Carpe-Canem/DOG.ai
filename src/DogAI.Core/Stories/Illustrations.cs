@@ -4,7 +4,9 @@ using DogAI.Core.Images;
 namespace DogAI.Core.Stories;
 
 /// <summary>Someone who may be in a story picture: their name, their looks (used exactly as typed) and a few words on who they are.</summary>
-public sealed record IllustrationPerson(string Name, Looks Looks, string? About)
+/// <param name="Setting">In a chat, their card's Scenario (filled in): the chat's setting, which has a block of its own
+/// (<see cref="ChatPictures.Setting"/>). Null in stories, whose setting is the World box.</param>
+public sealed record IllustrationPerson(string Name, Looks Looks, string? About, string? Setting = null)
 {
     /// <summary>True when their looks come from their card, so the chat model must not describe them.</summary>
     public bool HasLooks => !string.IsNullOrWhiteSpace(Looks.Tags);
@@ -20,9 +22,6 @@ public static class Illustrations
 {
     /// <summary>At most this many people in a story picture (the owner's choice: two, unless asked for three).</summary>
     public const int MaxPeople = 2;
-
-    /// <summary>The longest the story's premise and world may be when given to the planner as background.</summary>
-    public const int BackgroundLength = 1500;
 
     /// <summary>The picture a passage shows, or null.</summary>
     public static long? Shown(ChatMessage passage) => passage.Role == ChatRole.Assistant ? StoryTurn.Of(passage).Picture : null;
@@ -43,7 +42,8 @@ public static class Illustrations
             if (i < cast.Count)
             {
                 var card = cast[i].Character;
-                list.Add(new IllustrationPerson(name, Looks.Of(card), PictureWriter.About(card) is { Length: > 0 } about ? about : null));
+                // Without the card's Scenario: a story's place is its World box (M18 step 3).
+                list.Add(new IllustrationPerson(name, Looks.Of(card), PictureWriter.About(card, withSetting: false) is { Length: > 0 } about ? about : null));
             }
             else
             {
@@ -69,24 +69,89 @@ public static class Illustrations
         return null;
     }
 
-    /// <summary>The story's premise and world, for the planner to understand a passage (not to draw).</summary>
-    public static string Background(Story story)
+    /// <summary>
+    /// The story's world and premise: the setting, which the planner is told to draw unless the passage says this moment is
+    /// somewhere else (M18 step 3; before, it was "for understanding only"). World first: it is the place.
+    /// </summary>
+    public static string Setting(Story story)
     {
         var parts = new List<string>();
-        if (story.Bible.Premise.Trim() is { Length: > 0 } premise) parts.Add("Premise: " + premise);
         if (story.Bible.World.Trim() is { Length: > 0 } world) parts.Add("World: " + world);
-        var text = string.Join("\n", parts);
-        return text.Length <= BackgroundLength ? text : text[..BackgroundLength];
+        if (story.Bible.Premise.Trim() is { Length: > 0 } premise) parts.Add("Premise: " + premise);
+        return string.Join("\n", parts);
+    }
+
+    /// <summary>The longest the reader's action or the author's direction before a passage may be in "what happened just before".</summary>
+    public const int TurnLength = 400;
+
+    /// <summary>
+    /// What happened just before <paramref name="passage"/> on <paramref name="path"/>: the end of the passage before it,
+    /// then the action or direction that asked for this one (as typed). It tells the planner where they are when the place
+    /// was set only earlier (the trial: a talk-only passage got the forest campfire 3 of 3 with it, a tavern without).
+    /// Empty for the opening passage.
+    /// </summary>
+    public static string Before(Story story, IReadOnlyList<ChatMessage> path, ChatMessage passage)
+    {
+        var at = IndexOf(path, passage);
+        if (at <= 0) return "";
+        string? turn = null, previous = null;
+        for (var i = at - 1; i >= 0; i--)
+        {
+            var text = path[i].Content.Trim();
+            if (path[i].Role == ChatRole.User && turn is null && previous is null && text.Length > 0) turn = text;
+            if (path[i].Role == ChatRole.Assistant && text.Length > 0)
+            {
+                previous = text;
+                break;
+            }
+        }
+        var room = PictureWriter.MaxBeforeLength;
+        var parts = new List<string>();
+        if (turn is not null)
+        {
+            if (turn.Length > TurnLength) turn = turn[..TurnLength] + "…";
+            turn = (story.Kind == StoryKind.Interactive ? "The reader's action: " : "The author's direction: ") + turn.ReplaceLineEndings(" ");
+            room -= turn.Length + 2;
+        }
+        if (previous is not null) parts.Add(PictureWriter.CutStart(previous, room));
+        if (turn is not null) parts.Add(turn);
+        return string.Join("\n\n", parts);
+    }
+
+    /// <summary>
+    /// Where the nearest picture before <paramref name="message"/> on <paramref name="path"/> took place (kept with it, see
+    /// <see cref="StoryTurn.Where"/>); null when no earlier picture has one. The message's own picture never counts.
+    /// </summary>
+    public static PicturePlace? LastPlace(IReadOnlyList<ChatMessage> path, ChatMessage message)
+    {
+        var at = IndexOf(path, message);
+        for (var i = (at < 0 ? path.Count : at) - 1; i >= 0; i--)
+            if (path[i].Role == ChatRole.Assistant && StoryTurn.Of(path[i]).Where is { } where) return where;
+        return null;
+    }
+
+    /// <summary>What the planner is told besides the passage and the people.</summary>
+    public static SceneContext Context(Story story, IReadOnlyList<ChatMessage> path, ChatMessage passage) =>
+        new(SceneSource.Story, Setting(story), Before(story, path, passage), LastPlace(path, passage));
+
+    private static int IndexOf(IReadOnlyList<ChatMessage> path, ChatMessage message)
+    {
+        for (var i = 0; i < path.Count; i++)
+            if (path[i].Id == message.Id) return i;
+        return -1;
     }
 
     /// <summary>The people as the planner is told about them.</summary>
     public static IReadOnlyList<CastEntry> CastFor(IReadOnlyList<IllustrationPerson> people) =>
         people.Select(p => new CastEntry(p.Name, p.HasLooks, p.About)).ToList();
 
-    /// <summary>The chat model plans a picture of one moment of <paramref name="passage"/>: at most <see cref="MaxPeople"/> people.</summary>
-    public static Task<PictureScene> PlanAsync(PictureWriter writer, Story story, IReadOnlyList<IllustrationPerson> people, ChatMessage passage,
-        PromptStyle style, PictureRating rating, CancellationToken ct = default) =>
-        writer.SceneAsync(passage.Content, CastFor(people), style, MaxPeople, Background(story), rating, ct);
+    /// <summary>
+    /// The chat model plans a picture of one moment of <paramref name="passage"/>: at most <see cref="MaxPeople"/> people,
+    /// with the story's setting, what happened just before and the last picture's place (<see cref="Context"/>).
+    /// </summary>
+    public static Task<PictureScene> PlanAsync(PictureWriter writer, Story story, IReadOnlyList<IllustrationPerson> people, IReadOnlyList<ChatMessage> path,
+        ChatMessage passage, PromptStyle style, PictureRating rating, CancellationToken ct = default) =>
+        writer.SceneAsync(passage.Content, CastFor(people), style, MaxPeople, Context(story, path, passage), rating, ct);
 
     /// <summary>
     /// Makes <paramref name="chosen"/> the passage's picture: the row is added (unless it is the one already kept), the passage
@@ -102,7 +167,7 @@ public static class Illustrations
             : (await pictures.AddAsync(chosen.ToKeep(PictureOwners.Message, passageId), ct).ConfigureAwait(false)).Id;
         try
         {
-            await chat.SetPassagePictureAsync(conversationId, passageId, keep, ct).ConfigureAwait(false);
+            await chat.SetPassagePictureAsync(conversationId, passageId, keep, chosen.Place, ct).ConfigureAwait(false);
         }
         catch
         {
@@ -117,7 +182,7 @@ public static class Illustrations
     /// <summary>Takes the picture off the passage and deletes it.</summary>
     public static async Task RemoveAsync(IPictureStore pictures, ChatService chat, long conversationId, long passageId, CancellationToken ct = default)
     {
-        await chat.SetPassagePictureAsync(conversationId, passageId, null, ct).ConfigureAwait(false);
+        await chat.SetPassagePictureAsync(conversationId, passageId, null, null, ct).ConfigureAwait(false);
         await pictures.DeleteForAsync(PictureOwners.Message, passageId, ct).ConfigureAwait(false);
     }
 

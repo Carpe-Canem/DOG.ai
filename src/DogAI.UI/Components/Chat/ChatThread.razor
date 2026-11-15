@@ -125,7 +125,7 @@
 @if (PicturePeople is { } people)
 {
     <MessagePictures @ref="_pics" ConversationId="@Conversation.Id" Path="@Path" People="@people" What="reply" ChatMode="@PictureChatMode"
-                     Plan="(reply, style, rating, ct) => ChatPictures.PlanAsync(Writer, people, Path, reply, NameOf, style, rating, ct)"
+                     Plan="(reply, style, rating, ct) => ChatPictures.PlanAsync(Writer, people, Conversation, Path, reply, NameOf, style, rating, ct)"
                      OnLoaded="StateHasChanged" />
 }
 

@@ -175,7 +175,7 @@
 }
 
 <MessagePictures @ref="_pics" ConversationId="@Conversation.Id" Path="@Path" People="@People" What="passage" ChatMode="story"
-                 Plan="(passage, style, rating, ct) => Illustrations.PlanAsync(Writer, Info, People, passage, style, rating, ct)"
+                 Plan="(passage, style, rating, ct) => Illustrations.PlanAsync(Writer, Info, People, Path, passage, style, rating, ct)"
                  OnLoaded="StateHasChanged" />
 
 @if (_revise is { } revise)

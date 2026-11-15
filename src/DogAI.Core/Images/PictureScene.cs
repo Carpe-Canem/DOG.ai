@@ -86,7 +86,7 @@ public sealed record PictureScene(string Moment, IReadOnlyList<ScenePerson> Peop
             {
                 ["moment"] = new JsonObject { ["type"] = "string" },
                 ["people"] = people,
-                ["place"] = Tags(4),
+                ["place"] = Tags(PicturePlace.MaxWritten),
                 ["light"] = Tags(3),
                 ["framing"] = new JsonObject { ["type"] = "string", ["enum"] = Strings(Sizes) },
                 ["view"] = new JsonObject { ["type"] = "string", ["enum"] = Strings([StraightOn, .. Views]) },
@@ -127,6 +127,31 @@ public sealed record PictureScene(string Moment, IReadOnlyList<ScenePerson> Peop
         return new PictureScene(moment.Length > 400 ? moment[..400] : moment, people, List(o, "place"), List(o, "light"), [.. List(o, "framing"), .. List(o, "view")]);
     }
 
+    /// <summary>
+    /// The scene's place and light as they should reach the prompt (M18 step 3): a place entry that is a light word
+    /// ("night", "moonlight", or anything also in the light list) leaves the place, and goes to the light when it is not
+    /// there yet, so the place's room goes to real place words. Nothing is checked against the tag list here.
+    /// </summary>
+    public (IReadOnlyList<string> Place, IReadOnlyList<string> Light) PlaceAndLight()
+    {
+        var light = Light.ToList();
+        var lightKeys = new HashSet<string>(light.Select(TagList.Normalise), StringComparer.Ordinal);
+        var place = new List<string>();
+        foreach (var p in Place)
+        {
+            var key = TagList.Normalise(p);
+            if (lightKeys.Contains(key)) continue;
+            if (PicturePlace.IsLightWord(key))
+            {
+                light.Add(p);
+                lightKeys.Add(key);
+                continue;
+            }
+            place.Add(p);
+        }
+        return (place, light);
+    }
+
     private static string Text(JsonObject o, string key) =>
         o[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s.Trim() : "";
 
@@ -146,4 +171,65 @@ public sealed record PictureScene(string Moment, IReadOnlyList<ScenePerson> Peop
             .Take(12)
             .ToList();
     }
+}
+
+/// <summary>
+/// Where a picture is: its place words and its light words as they went into the prompt (unescaped). Kept with a story
+/// passage's or a chat reply's picture (<see cref="Stories.StoryTurn"/>), so the next picture can be told "the last
+/// picture took place in …" (M18 step 3). Never logged.
+/// </summary>
+public sealed record PicturePlace(IReadOnlyList<string> Place, IReadOnlyList<string> Light)
+{
+    /// <summary>Place words the planner may write, and the most kept in the prompt (the trial: six written gave
+    /// "indoors"/"outdoors" and real detail; five kept leaves room for the people).</summary>
+    public const int MaxWritten = 6, MaxPlace = 5, MaxLight = 3;
+
+    /// <summary>The longest one word may be when kept with a picture.</summary>
+    public const int MaxWordLength = 60;
+
+    public static PicturePlace None { get; } = new([], []);
+
+    public bool IsEmpty => Place.Count == 0 && Light.Count == 0;
+
+    /// <summary>"forest, outdoors, campfire, night": place then light, as the planner is told.</summary>
+    public string Line => string.Join(", ", Place.Concat(Light));
+
+    /// <summary>
+    /// The words cleaned for keeping or for the planner (they came from a model, or from JSON on a message): one line each,
+    /// at most <see cref="MaxWordLength"/> characters, no repeats, at most <see cref="MaxPlace"/> and <see cref="MaxLight"/>.
+    /// Null when nothing is left.
+    /// </summary>
+    public static PicturePlace? Of(IEnumerable<string>? place, IEnumerable<string>? light)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        List<string> Clean(IEnumerable<string>? words, int max) => (words ?? [])
+            .Select(w => string.Join(' ', (w ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).Trim(' ', ',', '.'))
+            .Where(w => w.Length is > 0 and <= MaxWordLength && seen.Add(w))
+            .Take(max)
+            .ToList();
+        var p = Clean(place, MaxPlace);
+        var l = Clean(light, MaxLight);
+        return p.Count == 0 && l.Count == 0 ? null : new PicturePlace(p, l);
+    }
+
+    /// <summary>Words typed by the owner in a box ("forest, outdoors, moss"): split at commas, used as written.</summary>
+    public static IReadOnlyList<string> Words(string? typed) =>
+        (typed ?? "").Split([',', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(w => w.Length > 0).ToList();
+
+    /// <summary>True when every word is still in <paramref name="prompt"/> (as written or escaped for the prompt), so a prompt
+    /// changed by hand still has this place.</summary>
+    public bool StillIn(string prompt) =>
+        Place.Concat(Light).All(w => prompt.Contains(w, StringComparison.OrdinalIgnoreCase) || prompt.Contains(TagList.ForPrompt(w), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Time of day, light and weather words: a place entry that is one of these is moved to the light.</summary>
+    private static readonly HashSet<string> LightWords = new(StringComparer.Ordinal)
+    {
+        "night", "day", "daytime", "morning", "evening", "afternoon", "dawn", "dusk", "sunset", "sunrise", "twilight", "midnight",
+        "sunlight", "moonlight", "candlelight", "firelight", "lamplight", "starlight", "dappled sunlight", "sunbeam", "light rays",
+        "backlighting", "dim lighting", "dark", "darkness", "rain", "raining", "snow", "snowing", "fog", "foggy", "mist", "misty",
+        "overcast", "storm", "thunderstorm", "lightning", "golden hour", "blue hour", "night sky", "cloudy",
+    };
+
+    /// <summary>True for a word of time of day, light or weather (normalised as <see cref="TagList.Normalise"/> does).</summary>
+    public static bool IsLightWord(string normalised) => LightWords.Contains(normalised);
 }

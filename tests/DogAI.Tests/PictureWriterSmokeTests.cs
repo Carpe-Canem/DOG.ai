@@ -89,7 +89,7 @@ public class PictureWriterSmokeTests(ITestOutputHelper output)
         {
             clock.Restart();
             var scene = await writer.SceneAsync(Passage, [new CastEntry("Mara", true, PictureWriter.About(Mara)), new CastEntry("Rask", false, PictureWriter.About(Rask))], PromptStyle.Tags,
-                background: "A low-fantasy border country.");
+                context: new SceneContext(Setting: "A low-fantasy border country."));
             var picture = PicturePrompt.Assemble(scene, new PictureOrder(illustrious, [new PersonLooks("Mara", looks["Mara"])], Shape: PictureShape.Wide));
             output.WriteLine($"PASSAGE {i + 1} ({clock.Elapsed.TotalSeconds:0.0} s): {scene.Moment}");
             output.WriteLine($"  PEOPLE: {string.Join("; ", scene.People.Select(p => $"{p.Name} ({p.Kind})"))}");
