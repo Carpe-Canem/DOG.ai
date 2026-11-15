@@ -3,7 +3,7 @@
 ## Status (updated 2026-11-15)
 
 - **Done:** M0a (skeleton, offline guard), the design gate, M0b (shell and looks), M1 (engine + General chat), M2 (Models section), M3 (characters, lore, memory, group chat), M4 (Story), M5 (Documents), M6 (Voice), M7 (Polish), M8 (Locked data), M9 (Pictures), M10 (Defaults and Settings), M11 (Models section), M12 (Chats and editors), M13 (Quick-jump and final pass), M14 (Quick fixes), M15 (Graphics memory and downloads), M16 step 1 (Images section: Core and storage), M16 step 2 (Images section: Make), M16 step 3 (Images section: Kept pictures), M16 step 4 (Images section: Helpers), M16 step 5 (Images section: Upscale), **M16 step 6 (Images section: Finish). M16 is finished: every milestone in this plan is done.**
-- **Next:** **M17 step 1, the trial** (see "M17: Image understanding" under Milestones; the owner approved the plan on 2026-11-15). Nothing of M17 is built. Its step 1 is a trial by hand and needs a download the owner is asked about first.
+- **Next:** **M17 step 1, the trial** (see "M17: Image understanding" under Milestones; the owner approved the plan on 2026-11-15). Nothing of M17 is built. Its step 1 is a trial by hand and needs a download the owner is asked about first. **M18 is planned too** (smaller pictures, settings in pictures, a thinking budget; see "M18" under Milestones; asked by the owner 2026-11-15). It does not depend on M17, so the owner may build it first; its step 1 is a trial by hand that needs no download.
 - **Decided by the owner after M16 (2026-11-15).** The three points left open by M16 are settled. (1) **Upscale on a kept picture stays as built**: the result is shown with Keep it / Discard and reaches the disk only on Keep it. (2) **The upscalers folder rule stays**: the picture engine is given the folder only while no `.pth`, `.pt`, `.ckpt` or `.bin` file is at its top. (3) **A LoRA file's own trigger words are sent cleaned**, as they are shown: the picture maker and the test picture will clean an unsaved LoRA card's file words the way Models and the Images chips do (no paths, web addresses, overlong words or left-out tags; no limit of eight). New pictures with such a LoRA can come out different; kept pictures redraw as before (their prompt is in their row); the owner's two LoRAs have no hidden words. **Not built yet: it is in M17 step 2.** (4) **The next milestone is image understanding** (M17). Two of the unchecked points that carry real risk are taken into it (the upgrade of a locked database in the app; Unload everything while a chat model is loading); the other points under "Not checked" below stay open.
 - **M16 step 6, Images section: Finish (2026-11-15). Step 6 is done, and with it M16.**
   - *Decided by the owner (2026-11-15).* **Pictures up to Fine's size stay decoded whole** (only larger ones in tiles), so kept pictures keep redrawing byte for byte; the question from step 5 is closed. The upscaler was downloaded through the app (Get models › Pictures), with the owner's yes.
@@ -639,6 +639,7 @@ Each ends with a runnable app, passing tests, and a git commit.
 | M16 ✅ | Images section | A section of its own for making pictures, with the feel of automatic1111. Design choice first, then its own steps (details below) |
 
 | M17 | Image understanding | The chat model sees pictures: attach one to a message in General, character and group chats; "From a picture" in the Images prompt helper; Models marks the chat models that can see and downloads their extra file. Trial first (details below). Planned and approved 2026-11-15 |
+| M18 | Smaller pictures, settings in pictures, thinking budget | Pictures start smaller and are made larger on demand; chat and story pictures take their place and light from the story's world and the character's setting; a thinking budget per kind of chat with an "Answer now" button. Trial first (details below). Planned 2026-11-15 |
 
 Possible later additions, not planned: local OpenAI-compatible API for other tools. (Image understanding became M17.)
 
@@ -686,6 +687,71 @@ Why this split: steps 1, 2 and 6 are where a wrong judgement costs most (what th
 **Checks that decide whether it is done:** a real model answers correctly about a photo, a screenshot with text and a kept picture, in each of the three kinds of chat; a chat with pictures survives lock, backup and restore, and a portable move; a deleted picture is nowhere on disk; a chat model without a projector behaves exactly as before M17 (same prompt, same memory, same speed); a picture in a chat makes the context meter move by what the engine then reports; From a picture on a kept picture gives tags a person would agree with.
 
 **Not in M17 (could follow):** pictures in stories; drafting a character's Looks from their portrait; reading scanned pages for Documents with the model; video and sound as input; anything that draws from a picture. The other points under "Not checked" in Status (an upscaler that enlarges ×2, a sentence checkpoint, more than 420 kept pictures and the rest) stay open, as does unsaved typing in the lore editor, personas and Assistants and prompts.
+
+## M18: Smaller pictures, settings in pictures, thinking budget (planned 2026-11-15)
+
+The owner's three requests (2026-11-15), in the owner's words: (1) "Images should be defaulted to a lower resolution. It may be expanded on manually." (2) "When in character or story chat, the tags generated should try and pull all the detail about the background as well as the character. For example, if the story is in a forest, those tags should be used so the image doesn't show an indoor scene." (3) "I believe thinking is important to the character and story mode, but we have to have options to dial it back if it takes too long. Can there be a throttle on the thinking?"
+
+M18 does not depend on M17 and M17 does not depend on it: the owner may build either first. Building M18 first gives M17's "Illustrate in General" the better place words for free.
+
+### 1. Pictures start smaller, made larger by hand
+
+**Today.** Every picture starts at about one megapixel: Tall 832 × 1216, Square 1024 × 1024, Wide 1216 × 832 (`PictureLevels`), in the Images section (`ImagesControls.StartFor`), the picture maker (portraits, story and chat pictures) and the test picture. Draft makes fewer steps, not a smaller picture. Larger already exists: Fine (hires fix), and in Images Upscale › Redraw larger (same seed, same layout).
+
+**What changes.**
+
+- **A size choice: Small or Normal**, beside shape and quality. Small is the new default everywhere a picture is started; Normal is today's size. Small is about 0.55 to 0.6 megapixels (for example 640 × 960 tall); the trial picks the numbers by looking, since these checkpoints learned at one megapixel and get worse well below it.
+- **Making it larger by hand:** every try has **Make larger**, which redraws it from the same seed with a hires fix (Small → about Normal, ×1.5; Normal → Fine's size), so the layout stays and only the detail grows. In Images it is the existing Upscale › Redraw larger offered from a Small try; in the picture maker it is a button beside Try again. Typing a width and height in the Images side panel stays as it is.
+- **Fits beside the chat model:** where the chat model is loaded, the size offered first is the largest one that fits beside it (`PictureMemory.FitsBeside`), so a Small picture never sets the chat model aside when a Normal one would. If even Small does not fit, it is drawn as today (the chat model set aside) and the note says so.
+- **Settings › Pictures** gets "Start pictures at: Small / Normal" (`PicturePreferences`); the Images section's remembered size wins there once the owner has chosen one.
+
+**Must not change.** A kept picture redraws byte for byte (its size is in its row). `PictureTries.Adopt` / `BaseOf` tell a kept picture's size from its row as they tell quality from steps and hires fix; Try again on a kept Normal picture stays Normal. `ImageRequest.TiledAbovePixels` stays where it is.
+
+### 2. Chat and story pictures take their place from the setting
+
+**Today (the cause).** The scene planner (`PictureWriter.SceneAsync`) gets the story's premise and World box under the heading **"Background, for understanding only (do not draw it)"** (`Illustrations.Background`). A passage that never says "forest" leaves the planner guessing the place, and it often guesses indoors. Character and group chats pass only up to six earlier messages (`ChatPictures.Background`); the character's Scenario reaches the planner only inside "Who these people are… use it for what they wear" (`PictureWriter.About`). The model gives at most four place words and `PicturePrompt` keeps three.
+
+**What changes.**
+
+- **The setting is to be drawn.** The planner is told: the setting below is where the story takes place; use it for the place, light and weather unless the passage clearly says otherwise. Stories pass the World box and premise; character chats pass the card's Scenario (and the chat's own summary, which often says where they are); group chats each member's Scenario.
+- **Where the last picture was** is remembered with that picture (its place and light words, in the message's story details beside `picture`, through `StoryTurn`; no new table). When the newest passage does not say where it is, the planner is given "the last picture took place in: forest, night", so a scene stays in the forest instead of jumping indoors.
+- **More place words:** up to six place words and three for light (the trial confirms they help and do not crowd out the people), checked against the tag list as today.
+- **The place shown before drawing:** when "Show me the prompt before drawing" is on, the review shows the place and light words on a line of their own, easy to correct.
+
+**Must not change.** The owner's Looks are put in as typed; at most two people; the rating rules; nothing the planner reads is logged.
+
+### 3. A thinking budget
+
+**Today.** Thinking is on or off per kind of chat: General on, character and group chats off, stories off (`ChatOptions`, `StoryOptions`; owner's decision 2026-11-15). With it on, Huihui Qwen3.5 9B thinks for 2,500 to 4,000 tokens before answering, and a long think can use up the room and leave no answer (`ThinkingOnly`).
+
+**What the engine offers (looked at 2026-11-15).** The chat engine on this PC (llama.cpp build 12314) has `--reasoning-budget N` (a limit on thinking tokens; -1 for none, 0 for none at all) and `--reasoning-budget-message` (words put in just before thinking is ended, e.g. "Time to answer."), plus `--reasoning-effort`. Not known yet: whether the budget can be given per request or only when the model is started (that would mean reloading the model to change it), and whether the engine DOG.ai installs has the same switches. **If it is start-only, DOG.ai does it itself**: it counts the thinking as it streams in, and at the limit stops the request and asks again with the thinking so far closed and the budget message added, so the model writes its answer (the prompt is cached, so this costs about a second). The trial decides which.
+
+**What changes.**
+
+- **A thinking level** in place of each on/off switch, for General, character and group chats, and stories: **Off, Short, Normal, Long, No limit**. The trial sets the token counts (as a starting point: Short 512, Normal 1,536, Long 4,096). An old "on" becomes No limit and "off" becomes Off, so nothing changes until the owner chooses; backups made before M18 restore the same way. Summaries and DOG.ai's own jobs still never think.
+- **Answer now:** while a reply is thinking, a button beside Stop ends the thinking at once and makes the model answer (the same route as reaching the limit). Stop still stops everything.
+- **A count while it thinks:** "Thinking… 1,200 / 1,536" in the reply as it streams.
+- **Notes:** a reply whose thinking was cut by the budget or by Answer now shows that in small type under its thinking. `ThinkingOnly` keeps telling stopped, out of room and ended by itself apart, and learns "cut by the budget" (no answer after the cut would be a model that ignores the closing).
+
+### Decided here (say so to change one)
+
+1. Small becomes the default for every new picture: Images, portraits, story and chat pictures, and the test picture.
+2. The place in a picture follows the story's world and the character's setting unless the passage says otherwise.
+3. Thinking levels start as the switches are now (General No limit, the rest Off). **The owner said thinking matters for characters and stories:** say whether those two should start at Short or Normal instead.
+
+### Steps, and which model to use for each
+
+One step per session, each ending in a build, passing tests, a look at the app, this plan's Status updated and a commit, then the hand-over.
+
+| # | Step | Delivers | Model / effort |
+|---|---|---|---|
+| 1 | **Trial** (no app code) | By hand, in a scratch folder, with hard links to the owner's models. **Sizes:** draw the same three prompts and seeds (one person tall, two people wide, a place with nobody) with the Illustrious checkpoint at 576 × 864, 640 × 960, 704 × 1056 and 832 × 1216, and the square and wide sizes of the same area; seconds, graphics memory, and a look at each (faces, hands, two people kept apart); then the chosen small size made larger (hires fix ×1.3 and ×1.5) beside a plain Normal picture: same layout, as good? Whether Small fits beside Huihui Q8 loaded where Normal does not. **Place:** `PictureWriterSmokeTests` (or a scratch program) with five passages that do not name their place (a forest story, a ship, a city at night, a tavern, a character chat whose Scenario sets the place), with today's wording and the new one: place words, whether the passage still wins when it does name a place, six place words against three. **Thinking:** on the winget llama-server and on the one DOG.ai installs, whether the budget and its message can be given per request (try the body fields the engine accepts; read its source for the names if needed), what a cut looks like in the stream, whether the answer after a cut is good; the fallback route (stop, ask again with the thinking closed) with Huihui Qwen3.5 9B; seconds saved at 512, 1,536 and 4,096 against no limit on three character-chat turns and one story passage. Ends with the numbers, the route for the budget, and steps 2 to 5 corrected here. | Fable 5.2, high |
+| 2 | **Picture sizes** | `PictureSize` (Small, Normal) in Core beside quality and shape; `At(quality, shape, size)`; `Adopt`/`BaseOf` read the size from the row; the fits-beside choice; Make larger in the picture maker; Images: Small in `StartFor`, Make larger from a try (Redraw larger, ×1.5); Settings › Pictures; the test picture. Tests: a kept Normal and a kept Fine picture still redraw byte for byte; Try again keeps the size. In the app: a portrait, a story picture and Images, all three looks, dark and light. | Opus 5.5, high |
+| 3 | **Settings in pictures** | The planner's new wording; stories' World and premise, chats' Scenario and summary; the last picture's place kept with it and passed on; up to six place and three light words; the place line in the review. Tests with the fake engine for what the planner is given; the smoke test with the five passages. In the app: a story set in a forest whose passage does not say so, illustrated (forest); a character chat whose Scenario sets the place. All three looks for the review. | Opus 5.5, high |
+| 4 | **Thinking budget** | The levels in Settings › Chats and stories (`ChatOptions`, `StoryOptions`; old switches read as No limit / Off; backups); the budget sent per request or the fallback; Answer now; the count while thinking; the notes and `ThinkingOnly`. Tests with a fake engine that thinks forever. In the app with Huihui Qwen3.5 9B: General, a character chat, a group chat and a story at Short and No limit, Answer now in each; all three looks, dark and light. | Fable 5.2, high |
+| 5 | **Finish** | `/code-review high` over M18; every changed screen in three looks, dark and light, and narrow; the published portable build; `CLAUDE.md` (sizes, the planner's setting, the thinking budget); this plan's Status. | Opus 5.5, high |
+
+**Checks that decide whether it is done:** a new picture anywhere starts Small and Make larger keeps its layout; every kept picture still redraws byte for byte; a forest story's passage that does not say "forest" gets a forest picture; a passage that moves indoors gets an indoor one; a reply at Short thinks no more than its budget and then answers; Answer now gives an answer within seconds; with the old switches untouched, chats behave exactly as before M18.
 
 ## M14 to M16: The owner's six ideas (planned 2026-11-15)
 
