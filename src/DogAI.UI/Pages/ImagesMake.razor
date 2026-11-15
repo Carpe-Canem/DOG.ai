@@ -527,7 +527,7 @@ else
     /// found in the file (cleaned first: they come from the file's maker).
     /// </summary>
     private (IReadOnlyList<string> Chips, int Hidden) Chips(LoraRow row) => row.File is { } file
-        ? LoraChips.For(Catalog.LoraFor(file.RelativePath, file.Verdict.Lora).TriggerWords, owners: Catalog.IsLoraChanged(file.RelativePath))
+        ? LoraChips.ForLora(Catalog.LoraFor(file.RelativePath, file.Verdict.Lora).TriggerWords, Catalog.IsLoraChanged(file.RelativePath), file.Verdict.Lora?.Triggers)
         : ([], 0);
 
     /// <summary>A chip was clicked: its word goes after what is typed (never twice). The only way a trigger word reaches the prompt.</summary>

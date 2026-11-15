@@ -272,9 +272,24 @@ public static class LoraChips
     public const int Max = 8;
     public const int MaxLength = 60;
 
+    /// <summary>
+    /// The chips of a LoRA, and how many words from the file were not shown. <paramref name="cardWords"/> are the trigger
+    /// words in use (the card's, else the file's); <paramref name="cardSaved"/> says the owner saved its card. A word is
+    /// the owner's only when the card was saved and the word is not one the file gave: the card's editor starts filled
+    /// with the file's words, so a card saved for its strength alone still holds them, and they are cleaned as the file's.
+    /// </summary>
+    public static (IReadOnlyList<string> Chips, int Hidden) ForLora(string? cardWords, bool cardSaved, IReadOnlyList<string>? fileWords, TagList? tags = null)
+    {
+        var fromFile = (fileWords ?? []).Select(TagList.Normalise).ToHashSet(StringComparer.Ordinal);
+        return For(cardWords, word => cardSaved && !fromFile.Contains(TagList.Normalise(word)), tags);
+    }
+
     /// <summary>The chips, and how many words from the file were not shown.</summary>
     /// <param name="owners">True when the words were typed by the owner on the LoRA's card (Models › On this PC › Pictures › LoRAs).</param>
-    public static (IReadOnlyList<string> Chips, int Hidden) For(string? triggerWords, bool owners, TagList? tags = null)
+    public static (IReadOnlyList<string> Chips, int Hidden) For(string? triggerWords, bool owners, TagList? tags = null) =>
+        For(triggerWords, _ => owners, tags);
+
+    private static (IReadOnlyList<string> Chips, int Hidden) For(string? triggerWords, Func<string, bool> ownersWord, TagList? tags)
     {
         var chips = new List<string>();
         var hidden = 0;
@@ -282,7 +297,7 @@ public static class LoraChips
         {
             var word = raw.Trim();
             if (word.Length == 0 || chips.Contains(word, StringComparer.OrdinalIgnoreCase)) continue;
-            if (owners)
+            if (ownersWord(word))
             {
                 // The owner's own words, as typed; only what could not be shown on one chip is skipped.
                 if (word.Length > 200 || word.Any(char.IsControl)) continue;

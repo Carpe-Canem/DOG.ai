@@ -147,6 +147,16 @@ public sealed class ImagesHelpersTests
         Assert.Equal(["hidden thing", "my/word"], own);
         Assert.Equal(0, none);
 
+        // A card saved for its strength alone still holds the file's words (its editor starts with them): still cleaned.
+        // A word the owner added on the card is theirs.
+        string[] fileWords = ["mychar_v2", @"C:\Users\maker\set", "hidden thing"];
+        var (saved, cleaned) = LoraChips.ForLora(string.Join(", ", fileWords) + ", my/own word", cardSaved: true, fileWords, tags);
+        Assert.Equal(["mychar_v2", "my/own word"], saved);
+        Assert.Equal(2, cleaned);
+        var (unsaved, cleanedToo) = LoraChips.ForLora(string.Join(", ", fileWords), cardSaved: false, fileWords, tags);
+        Assert.Equal(["mychar_v2"], unsaved);
+        Assert.Equal(2, cleanedToo);
+
         var many = LoraChips.For(string.Join(", ", Enumerable.Range(1, 12).Select(i => "word" + i)), owners: false, tags).Chips;
         Assert.Equal(LoraChips.Max, many.Count);
     }
