@@ -1,0 +1,23 @@
+@* The small line under a reply's thinking: that it was cut by its limit or by Answer now, or that the chat engine is too
+   old for thinking limits (ThinkingCut, Core). Nothing when the thinking ended by itself. *@
+@if (Cut is not null)
+{
+    <p class="thinking-note small" role="note" data-cut="@Kind">
+        @Cut.Text
+        @if (Cut.Kind == ThinkingCutKind.EngineIgnored)
+        {
+            <text> Update it in <a href="@ModelsPlaces.Address(ModelsPlaces.Engines)">@ModelsPlaces.EnginesName</a> to use thinking limits and Answer now.</text>
+        }
+    </p>
+}
+
+@code {
+    [Parameter] public ThinkingCut? Cut { get; set; }
+
+    private string Kind => Cut?.Kind switch
+    {
+        ThinkingCutKind.Budget => "budget",
+        ThinkingCutKind.AnswerNow => "now",
+        _ => "engine",
+    };
+}

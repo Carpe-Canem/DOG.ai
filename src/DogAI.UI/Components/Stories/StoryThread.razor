@@ -59,7 +59,7 @@
                         <img src="@src" alt="Picture of this passage" />
                     </button>
                 }
-                @Thinking(m.Reasoning, false)
+                @Thinking(m.Reasoning, null, ThinkingCut.Of(m))
                 @if (_editingId == m.Id)
                 {
                     <div class="edit">
@@ -121,7 +121,7 @@
         @if (active.Kind == ReplyKind.Reply)
         {
             <div class="passage">
-                @Thinking(active.Reasoning, active.Content.Length == 0)
+                @Thinking(active.Reasoning, active.Content.Length == 0 ? ThinkingLevels.Counter(active.ThinkingTokens, active.ThinkingBudget) : null, ChatThread.LiveCut(active))
                 <div class="msg-body"><MarkdownView Text="@active.Content" Speech="@Appearance.SpeechColours" Speakers="@Speakers" /><span class="caret" aria-label="Writing"></span></div>
             </div>
         }
@@ -210,6 +210,7 @@
             <div class="row">
                 @if (running is not null)
                 {
+                    <AnswerNowButton />
                     <button class="btn" @onclick="Chat.Stop">Stop</button>
                 }
                 else
@@ -311,14 +312,16 @@
         }
     };
 
-    private static RenderFragment Thinking(string? reasoning, bool busy) => __builder =>
+    /// <param name="counter">While the passage thinks: the heading with its count. Null once it writes, and on saved passages.</param>
+    private static RenderFragment Thinking(string? reasoning, string? counter, ThinkingCut? cut) => __builder =>
     {
         if (!string.IsNullOrEmpty(reasoning))
         {
             <details class="thinking">
-                <summary>@(busy ? "Thinking…" : "Thinking")</summary>
+                <summary>@(counter ?? "Thinking")</summary>
                 <div>@reasoning</div>
             </details>
+            <ThinkingCutNote Cut="cut" />
         }
     };
 

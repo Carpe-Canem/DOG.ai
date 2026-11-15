@@ -14,9 +14,10 @@
         @if (!string.IsNullOrEmpty(Reasoning))
         {
             <details class="thinking">
-                <summary>@(Streaming && string.IsNullOrEmpty(Content) ? "Thinking…" : "Thinking")</summary>
+                <summary>@(Streaming && string.IsNullOrEmpty(Content) ? ThinkingLabel ?? "Thinking…" : "Thinking")</summary>
                 <div>@Reasoning</div>
             </details>
+            <ThinkingCutNote Cut="Cut" />
         }
         @if (Editor is not null)
         {
@@ -51,6 +52,12 @@
     [Parameter] public string Content { get; set; } = "";
     [Parameter] public string? Reasoning { get; set; }
     [Parameter] public bool Streaming { get; set; }
+
+    /// <summary>While the reply thinks: the heading with its count ("Thinking… 1,200 / 1,536").</summary>
+    [Parameter] public string? ThinkingLabel { get; set; }
+
+    /// <summary>The line under the thinking when it was cut short (by its limit or Answer now), or the engine could not.</summary>
+    [Parameter] public ThinkingCut? Cut { get; set; }
     [Parameter] public RenderFragment? Editor { get; set; }
     [Parameter] public RenderFragment? Actions { get; set; }
 

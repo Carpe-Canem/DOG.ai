@@ -580,7 +580,9 @@ public sealed partial class ChatServiceTests
 
         Assert.Equal("She cackled.", draft);
         // Two words selected (two tokens in the fake engine): the answer may take 2 x 2 + 48 tokens, at a calmer temperature.
-        Assert.Equal(52, _engine.Samplers[^1].MaxTokens);
+        // Stories think briefly (Short), but never longer than the answer may be, and that thinking comes on top.
+        Assert.Equal(52, _engine.Samplers[^1].ThinkingBudget);
+        Assert.Equal(52 + 52, _engine.Samplers[^1].MaxTokens);
         Assert.Equal(0.8, _engine.Samplers[^1].Temperature);
         Assert.Contains("[Selected text]\nShe laughed.", _engine.Prompts[^1][1].Content);
         Assert.Equal("Rain fell. She laughed. Then the lamp went out.", (await ShownAsync(id))[1].Content);

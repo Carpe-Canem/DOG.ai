@@ -367,6 +367,23 @@ public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlo
     public IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, SamplerPreset sampler, CancellationToken ct = default) =>
         TrackAsync(api => api.StreamCompletionAsync(prompt, sampler, ct), ct);
 
+    /// <summary>
+    /// Answer now: asks the running engine to end the thinking of the reply named <paramref name="replyId"/>. It takes no
+    /// turn and wakes nothing: the reply is being written, so the engine is there, or there is nothing to end.
+    /// </summary>
+    public async Task<ThinkingEnd> EndThinkingAsync(string replyId, CancellationToken ct = default)
+    {
+        if (_api is not { } api) return ThinkingEnd.TooLate;
+        try
+        {
+            return await api.EndThinkingAsync(replyId, ct).ConfigureAwait(false);
+        }
+        catch (HttpRequestException)
+        {
+            return ThinkingEnd.TooLate;
+        }
+    }
+
     /// <summary>Counts the reply as engine activity (for idle unload) and reports its speed.</summary>
     private async IAsyncEnumerable<ChatDelta> TrackAsync(Func<LlamaApi, IAsyncEnumerable<ChatDelta>> start,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)

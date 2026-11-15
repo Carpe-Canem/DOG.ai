@@ -33,6 +33,7 @@
     </span>
     @if (Chat.IsBusy)
     {
+        <AnswerNowButton />
         <button class="btn" @onclick="Chat.Stop">Stop</button>
     }
     else

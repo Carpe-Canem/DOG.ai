@@ -155,6 +155,13 @@ public sealed class StoryTurn
     [JsonPropertyName("light"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? Light { get; set; }
 
+    /// <summary>
+    /// On a reply or passage that thought: how long, under which budget, and whether Answer now ended it (M18 step 4).
+    /// Written once, when the reply is saved; the small note under the thinking is read from it (<see cref="Chat.ThinkingCut"/>).
+    /// </summary>
+    [JsonPropertyName("thinking"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Chat.ThinkingFacts? Thinking { get; set; }
+
     /// <summary>Where the picture is, cleaned (the JSON is on a message and is read as untrusted); null when none is kept.</summary>
     [JsonIgnore]
     public DogAI.Core.Images.PicturePlace? Where
@@ -181,7 +188,7 @@ public sealed class StoryTurn
     }
 
     public string? ToJson() =>
-        Choices is null && State is null && Roll is null && Chapter is null && Picture is null && Place is null && Light is null ? null : JsonSerializer.Serialize(this);
+        Choices is null && State is null && Roll is null && Chapter is null && Picture is null && Place is null && Light is null && Thinking is null ? null : JsonSerializer.Serialize(this);
 
     /// <summary>The state left by the newest passage on <paramref name="path"/> that has one.</summary>
     public static StoryState? LatestState(IReadOnlyList<ChatMessage> path)

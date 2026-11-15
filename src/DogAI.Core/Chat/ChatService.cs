@@ -55,14 +55,68 @@ public sealed class ActiveReply(long conversationId, long? parentId, long? conti
     }
     public string Reasoning { get { lock (_lock) return _reasoning.ToString(); } }
 
+    private int _thinkingTokens;
+    private bool _answering;
+    private volatile string? _engineId;
+
+    /// <summary>Thinking pieces that arrived in this request, counted here (one piece is one token; the engine gives no count).</summary>
+    public int ThinkingTokens => Volatile.Read(ref _thinkingTokens);
+
+    /// <summary>The thinking budget the request carries; null for no limit.</summary>
+    public int? ThinkingBudget { get; private set; }
+
+    /// <summary>True from the first thinking piece until the answer begins.</summary>
+    public bool IsThinking => ThinkingTokens > 0 && !Volatile.Read(ref _answering);
+
+    /// <summary>What became of Answer now for this reply.</summary>
+    public AnswerNowState AnswerNow { get; internal set; }
+
+    /// <summary>Whether Answer now can be pressed: the model is thinking, the engine named the reply, and it was not pressed yet.</summary>
+    public bool CanAnswerNow => IsThinking && _engineId is not null && AnswerNow == AnswerNowState.No;
+
+    /// <summary>The engine's name for this reply, once the stream gave it.</summary>
+    internal string? EngineId => _engineId;
+
+    /// <summary>The thinking as numbers, for the note under it; null when the model did not think.</summary>
+    public ThinkingFacts? Thinking => ThinkingTokens is > 0 and var tokens
+        ? new ThinkingFacts { Tokens = tokens, Budget = ThinkingBudget, AnswerNow = AnswerNow == AnswerNowState.Ended, Refused = AnswerNow == AnswerNowState.Refused }
+        : null;
+
+    /// <summary>Takes the request's thinking budget, for the count shown while it thinks.</summary>
+    internal void Expect(SamplerPreset preset) => ThinkingBudget = preset.ThinkingBudget;
+
+    /// <summary>Counts a piece and keeps the reply's name, without keeping its text (the choices step shows no text).</summary>
+    internal void Track(ChatDelta delta)
+    {
+        if (delta.ReplyId is not null) _engineId = delta.ReplyId;
+        if (delta.Reasoning is not null && !Volatile.Read(ref _answering)) Interlocked.Increment(ref _thinkingTokens);
+        if (delta.Content is not null) Volatile.Write(ref _answering, true);
+    }
+
     internal void Append(ChatDelta delta)
     {
+        Track(delta);
         lock (_lock)
         {
             if (delta.Content is not null) _content.Append(delta.Content);
             if (delta.Reasoning is not null) _reasoning.Append(delta.Reasoning);
         }
     }
+}
+
+/// <summary>What became of Answer now for the reply being written.</summary>
+public enum AnswerNowState
+{
+    No,
+
+    /// <summary>Pressed; the engine has not answered yet.</summary>
+    Asked,
+
+    /// <summary>The engine ended the thinking.</summary>
+    Ended,
+
+    /// <summary>The engine could not: it is too old for thinking limits.</summary>
+    Refused,
 }
 
 /// <summary>
@@ -115,6 +169,41 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     {
         if (_chain) _chainStopped = true;
         _cts?.Cancel();
+    }
+
+    /// <summary>
+    /// Answer now: ends the thinking of the reply being written, so the model answers at once. Stop still stops everything.
+    /// Does nothing unless the reply is thinking (<see cref="ActiveReply.CanAnswerNow"/>). An engine too old for it leaves
+    /// the reply thinking; the reply's note then says to update the engine.
+    /// </summary>
+    public async Task AnswerNowAsync()
+    {
+        if (Active is not { CanAnswerNow: true, EngineId: { } id } active) return;
+        active.AnswerNow = AnswerNowState.Asked;
+        Changed?.Invoke();
+        ThinkingEnd end;
+        try
+        {
+            end = await engine.EndThinkingAsync(id).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            end = ThinkingEnd.TooLate; // the engine went away meanwhile; the reply itself reports that
+        }
+        active.AnswerNow = end switch
+        {
+            ThinkingEnd.Ended => AnswerNowState.Ended,
+            ThinkingEnd.NotSupported => AnswerNowState.Refused,
+            _ => AnswerNowState.No,
+        };
+        Changed?.Invoke();
+    }
+
+    /// <summary>Asks the model through the chat route, telling <paramref name="active"/> the thinking budget the request carries.</summary>
+    private IAsyncEnumerable<ChatDelta> AskAsync(ActiveReply active, IReadOnlyList<PromptMessage> prompt, SamplerPreset preset, CancellationToken ct)
+    {
+        active.Expect(preset);
+        return engine.StreamChatAsync(prompt, preset, ct);
     }
 
     /// <summary>Adds the user's message to the end of the visible branch and answers it.</summary>
@@ -398,7 +487,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             // Stop where the template would close the user's turn, so the draft never runs on into the character's reply.
             var stream = built.OpenUserTurn
                 ? engine.StreamCompletionAsync(built.Text, preset with { Stop = built.TurnEnds }, token)
-                : engine.StreamChatAsync(built.Prompt, preset, token);
+                : AskAsync(active, built.Prompt, preset, token);
             stops = built.TurnEnds;
             await StreamAsync(stream, active, null, 0, token);
         }
@@ -425,7 +514,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         Changed?.Invoke();
     }
 
-    /// <summary><paramref name="preset"/> told not to think unless the switch for this kind of chat allows it.</summary>
+    /// <summary><paramref name="preset"/> with the thinking level of this kind of chat: told not to think, or how long it may.</summary>
     private SamplerPreset ThinkingFor(Conversation conversation, SamplerPreset preset) =>
         conversation.Mode == Story.Mode ? _storyOptions.Apply(preset) : _chatOptions.Apply(preset, conversation.Mode);
 
@@ -503,7 +592,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             // In a group, stop if the model starts writing someone else's line.
             if (names.Group) preset = preset with { Stop = names.StopsFor(names.Character) };
             var stream = continuing is null
-                ? engine.StreamChatAsync(built.Prompt, preset, ct)
+                ? AskAsync(active, built.Prompt, preset, ct)
                 : engine.StreamCompletionAsync(built.Text, preset, ct);
             await StreamAsync(stream, active, reply, tokensBefore, ct);
         }
@@ -531,6 +620,8 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             }
             else if (reply.Content.Length > 0 || reply.Reasoning is not null)
             {
+                // How long it thought and under which budget, for the note under the thinking (numbers only).
+                if (active.Thinking is { } thinking) reply.ExtraJson = new StoryTurn { Thinking = thinking }.ToJson();
                 var saved = await store.AddMessageAsync(reply);
                 await store.SetActiveLeafAsync(conversationId, saved.Id);
                 // A reply that is thinking only is kept (its note says why), but nothing follows it: no next speaker, no choices.

@@ -23,36 +23,31 @@ public sealed class StoryThinkingRequestTests
     [Fact]
     public void The_switch_is_never_saved_with_a_style() =>
         Assert.DoesNotContain("Thinking", System.Text.Json.JsonSerializer.Serialize(SamplerPresets.Get(null) with { Thinking = false }));
-
-    [Fact]
-    public async Task Allowing_thinking_is_saved_in_settings_and_lets_story_requests_think()
-    {
-        var settings = new VoiceFlowTests.MemorySettings();
-        var options = new StoryOptions(settings);
-        await options.LoadAsync();
-        Assert.False(options.Thinking);
-        Assert.False(options.Apply(SamplerPresets.Get(null)).Thinking);
-
-        await options.SetThinkingAsync(true);
-        Assert.True((await settings.LoadAsync()).StoryThinking);
-        Assert.Null(options.Apply(SamplerPresets.Get(null)).Thinking);
-    }
 }
 
 /// <summary>Which requests are told not to think.</summary>
 public sealed partial class ChatServiceTests
 {
     [Fact]
-    public async Task Story_passages_choices_and_drafts_are_asked_not_to_think()
+    public async Task With_story_thinking_off_passages_choices_and_drafts_are_asked_not_to_think()
     {
+        var options = new StoryOptions(new VoiceFlowTests.MemorySettings());
+        await options.SetLevelAsync(ThinkingLevel.Off);
+        var chat = new ChatService(_store, _engine, _presets, _characters, _stories, storyOptions: options);
         var id = await NewStoryWithAsync(StoryKind.Interactive, null);
         ScriptStory();
-        await _chat.BeginStoryAsync(id);
+        await chat.BeginStoryAsync(id);
         Assert.Equal(2, _engine.Samplers.Count); // the passage, then its choices
         Assert.All(_engine.Samplers, s => Assert.False(s.Thinking));
 
         _engine.Reply = _ => FakeEngine.Say("""{"title":"Winter","premise":"A dog keeps watch.","genre":"","tone":"","cast":"","world":"","style_guide":""}""");
-        await new StoryBuilder(_engine).DraftAsync("A dog in winter", StoryKind.Interactive);
+        await new StoryBuilder(_engine, options).DraftAsync("A dog in winter", StoryKind.Interactive);
         Assert.False(_engine.Samplers[^1].Thinking);
+
+        // As stories start (Short), the plan draft thinks briefly and keeps its room for the plan.
+        await new StoryBuilder(_engine).DraftAsync("A dog in winter", StoryKind.Interactive);
+        Assert.Null(_engine.Samplers[^1].Thinking);
+        Assert.Equal(512, _engine.Samplers[^1].ThinkingBudget);
+        Assert.Equal(StoryBuilder.MaxTokens + 512, _engine.Samplers[^1].MaxTokens);
     }
 }

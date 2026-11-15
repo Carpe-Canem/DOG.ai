@@ -143,6 +143,14 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
         // Templates that have neither ignore both, so a model that cannot be told simply thinks as before.
         if (sampler.Thinking is false)
             body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false, ["thinking"] = false };
+        else
+        {
+            // The thinking level: the engine ends the thinking at the budget and the model goes on to its answer. No
+            // words are added at the cut (owner's decision). An engine too old for the fields ignores them.
+            if (sampler.ThinkingBudget is > 0 and var budget) body["thinking_budget_tokens"] = budget;
+            // Lets the thinking of this reply be ended on request (Answer now, EndThinkingAsync).
+            if (sampler.ThinkingControl) body["reasoning_control"] = true;
+        }
         return body;
     }
 
@@ -161,6 +169,7 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
 
         int promptTokens = 0, completionTokens = 0;
         double speed = 0;
+        var named = !sampler.ThinkingControl || sampler.Thinking is false;
         while (await reader.ReadLineAsync(ct).ConfigureAwait(false) is { } line)
         {
             if (!line.StartsWith("data:", StringComparison.Ordinal)) continue;
@@ -171,6 +180,13 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
             var root = doc.RootElement;
             if (root.TryGetProperty("error", out var error))
                 throw new EngineException(ErrorText(error.GetRawText(), 0));
+
+            // The reply's name, once, before its first piece: what Answer now gives back to the engine.
+            if (!named && Text(root, "id") is { } id)
+            {
+                named = true;
+                yield return new ChatDelta(null, null, null, id);
+            }
 
             if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
             {
@@ -194,6 +210,35 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
 
         if (completionTokens > 0 || promptTokens > 0)
             yield return new ChatDelta(null, null, new GenerationStats(promptTokens, completionTokens, speed));
+    }
+
+    /// <summary>
+    /// Ends the thinking of a reply being written (asked for with "reasoning_control"), so the model answers at once.
+    /// An engine without the route, or one that does not know the reply's switch, is too old: NotSupported.
+    /// </summary>
+    public async Task<ThinkingEnd> EndThinkingAsync(string replyId, CancellationToken ct)
+    {
+        var body = new JsonObject { ["id"] = replyId, ["action"] = "reasoning_end" };
+        using var response = await http.SendAsync(Request(HttpMethod.Post, "v1/chat/completions/control", body), ct).ConfigureAwait(false);
+        var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        return ReadThinkingEnd(response.IsSuccessStatusCode, text);
+    }
+
+    /// <summary>What the control route's answer means. "No active completion" is a reply that ended meanwhile, not an old engine.</summary>
+    internal static ThinkingEnd ReadThinkingEnd(bool ok, string body)
+    {
+        if (!ok) return ThinkingEnd.NotSupported;
+        try
+        {
+            var json = JsonNode.Parse(body);
+            if (json?["success"] is JsonValue success && success.TryGetValue<bool>(out var done) && done) return ThinkingEnd.Ended;
+            var message = json?["message"]?.ToString() ?? "";
+            return message.Contains("no active completion", StringComparison.OrdinalIgnoreCase) ? ThinkingEnd.TooLate : ThinkingEnd.NotSupported;
+        }
+        catch (JsonException)
+        {
+            return ThinkingEnd.NotSupported;
+        }
     }
 
     /// <summary>One vector per input, in order, from an engine started with --embedding.</summary>

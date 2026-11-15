@@ -66,16 +66,21 @@ public sealed record AppSettings
     /// <summary>Hold Ctrl+Alt+Space in any program to talk, and what you say is typed there when you let go.</summary>
     public bool DictateAnywhere { get; init; }
 
-    /// <summary>Let a model that "thinks" do so before story passages, choices, rewrites and story bible drafts. Off by
-    /// default: thinking made stories slow and could use up all the room before any story was written.</summary>
-    public bool StoryThinking { get; init; }
+    /// <summary>How long a thinking model may think in General chats. Null until the owner chooses: read it through
+    /// <see cref="DogAI.Core.Chat.ThinkingLevels.General"/>, which then follows <see cref="GeneralThinking"/>.</summary>
+    public DogAI.Core.Chat.ThinkingLevel? GeneralThinkingLevel { get; init; }
 
-    /// <summary>Let a thinking model think before it answers in General chats. On by default (owner's decision, 2026-11-15).</summary>
+    /// <summary>The same for character and group chats (<see cref="DogAI.Core.Chat.ThinkingLevels.Roleplay"/>; Short until chosen).</summary>
+    public DogAI.Core.Chat.ThinkingLevel? RoleplayThinkingLevel { get; init; }
+
+    /// <summary>The same for stories: passages, choices, rewrites and story bible drafts
+    /// (<see cref="DogAI.Core.Chat.ThinkingLevels.Story"/>; Short until chosen).</summary>
+    public DogAI.Core.Chat.ThinkingLevel? StoryThinkingLevel { get; init; }
+
+    /// <summary>The on/off switch General had before thinking levels (M18). Only read, and only while
+    /// <see cref="GeneralThinkingLevel"/> is null: on is No limit, off is Off. The old switches for character chats and
+    /// stories are not read at all (they were off by default, so "off" could not be told from untouched).</summary>
     public bool GeneralThinking { get; init; } = true;
-
-    /// <summary>Let a thinking model think in character and group chats. Off by default: its thinking could use up the whole
-    /// context and leave a reply with no answer (owner's decision, 2026-11-15).</summary>
-    public bool RoleplayThinking { get; init; }
 
     /// <summary>Models lists also show models too large for this PC. Off by default.</summary>
     public bool ModelsShowAll { get; init; }
@@ -99,8 +104,9 @@ public sealed record AppSettings
         Speakers == other.Speakers && Voice == other.Voice && VoiceSpeed.Equals(other.VoiceSpeed) &&
         ReadRepliesAloud == other.ReadRepliesAloud && HandsFreeSensitivity == other.HandsFreeSensitivity &&
         TrayIcon == other.TrayIcon && CloseToTray == other.CloseToTray && DictateAnywhere == other.DictateAnywhere &&
-        ModelsShowAll == other.ModelsShowAll && ModelsFilter == other.ModelsFilter && StoryThinking == other.StoryThinking &&
-        GeneralThinking == other.GeneralThinking && RoleplayThinking == other.RoleplayThinking &&
+        ModelsShowAll == other.ModelsShowAll && ModelsFilter == other.ModelsFilter && StoryThinkingLevel == other.StoryThinkingLevel &&
+        GeneralThinking == other.GeneralThinking && GeneralThinkingLevel == other.GeneralThinkingLevel &&
+        RoleplayThinkingLevel == other.RoleplayThinkingLevel &&
         IdleLockMinutes == other.IdleLockMinutes && PlainExportNoted == other.PlainExportNoted &&
         ExtraModelFolders.SequenceEqual(other.ExtraModelFolders) &&
         DefaultModels.Count == other.DefaultModels.Count &&
@@ -109,8 +115,8 @@ public sealed record AppSettings
     public override int GetHashCode() => HashCode.Combine(
         HashCode.Combine(ModelsDirectory, Theme, Skin, ContextLength, LastModelPath, IdleUnloadMinutes),
         HashCode.Combine(SpeechModel, SpeechLanguage, Microphone, Speakers, Voice, VoiceSpeed, ReadRepliesAloud, HandsFreeSensitivity),
-        HashCode.Combine(TrayIcon, CloseToTray, DictateAnywhere, ModelsShowAll, ModelsFilter, StoryThinking, IdleLockMinutes, PlainExportNoted),
-        HashCode.Combine(GeneralThinking, RoleplayThinking));
+        HashCode.Combine(TrayIcon, CloseToTray, DictateAnywhere, ModelsShowAll, ModelsFilter, StoryThinkingLevel, IdleLockMinutes, PlainExportNoted),
+        HashCode.Combine(GeneralThinking, GeneralThinkingLevel, RoleplayThinkingLevel));
 
     /// <summary>Where voice models are kept: a "voice" folder inside the models folder.</summary>
     public string? VoiceFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, "voice");

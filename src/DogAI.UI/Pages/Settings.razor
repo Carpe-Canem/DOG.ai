@@ -106,28 +106,37 @@
     <section>
         <h3>Thinking</h3>
         <div class="voice-settings">
-            <div id="set-general-thinking">
-                <label class="check">
-                    <input type="checkbox" name="general-thinking" checked="@ChatThinking.GeneralThinking" @onchange="e => ChatThinking.SetGeneralThinkingAsync(e.Value is true)" />
-                    @ChatOptions.GeneralSwitch
-                </label>
-                <p class="small">On, a model that thinks may plan its answer first. Slower, and a long think can leave no room to answer.</p>
-            </div>
-            <div id="set-roleplay-thinking">
-                <label class="check">
-                    <input type="checkbox" name="roleplay-thinking" checked="@ChatThinking.RoleplayThinking" @onchange="e => ChatThinking.SetRoleplayThinkingAsync(e.Value is true)" />
-                    @ChatOptions.RoleplaySwitch
-                </label>
-                <p class="small">Off, models that think answer at once.</p>
-            </div>
-            <div id="set-story-thinking">
-                <label class="check">
-                    <input type="checkbox" name="story-thinking" checked="@StoryOptions.Thinking" @onchange="e => StoryOptions.SetThinkingAsync(e.Value is true)" />
-                    @ChatOptions.StorySwitch
-                </label>
-                <p class="small">Off, models that think start a passage at once.</p>
-            </div>
-            <p class="small">Each switch is for its own kind of chat.<InfoButton About="thinking">Some models think silently before they write. Off, they answer at once and cannot use up the room meant for the answer; on, they may plan more carefully but are slower, and a long think can fill the whole context and leave no answer at all. A reply like that says so. Models that do not think, or cannot be told, are not affected. Memory summaries never think.</InfoButton></p>
+            <label id="set-general-thinking">
+                @ChatOptions.GeneralSwitch
+                <select class="field" id="general-thinking" @onchange="e => ChatThinking.SetGeneralAsync(LevelOf(e))">
+                    @foreach (var level in ThinkingLevels.All)
+                    {
+                        <option value="@level" selected="@(level == ChatThinking.General)">@ThinkingLevels.Title(level)</option>
+                    }
+                </select>
+                <span class="small" id="general-thinking-blurb">@ThinkingLevels.Blurb(ChatThinking.General)</span>
+            </label>
+            <label id="set-roleplay-thinking">
+                @ChatOptions.RoleplaySwitch
+                <select class="field" id="roleplay-thinking" @onchange="e => ChatThinking.SetRoleplayAsync(LevelOf(e))">
+                    @foreach (var level in ThinkingLevels.All)
+                    {
+                        <option value="@level" selected="@(level == ChatThinking.Roleplay)">@ThinkingLevels.Title(level)</option>
+                    }
+                </select>
+                <span class="small" id="roleplay-thinking-blurb">@ThinkingLevels.Blurb(ChatThinking.Roleplay)</span>
+            </label>
+            <label id="set-story-thinking">
+                @ChatOptions.StorySwitch
+                <select class="field" id="story-thinking" @onchange="e => StoryOptions.SetLevelAsync(LevelOf(e))">
+                    @foreach (var level in ThinkingLevels.All)
+                    {
+                        <option value="@level" selected="@(level == StoryOptions.Level)">@ThinkingLevels.Title(level)</option>
+                    }
+                </select>
+                <span class="small" id="story-thinking-blurb">@ThinkingLevels.Blurb(StoryOptions.Level)</span>
+            </label>
+            <p class="small">Each level is for its own kind of chat. While a reply thinks, Answer now (beside Stop) ends the thinking and makes the model answer.<InfoButton About="thinking">Some models think silently before they write. Off, they answer at once. With a limit, the thinking is cut when it reaches the limit and the model goes on to its answer; the reply says so in small type. With no limit they may plan as long as they like, which is slower, and a long think can fill the whole context and leave no answer at all; a reply like that says so. A story's choices, rewrites and the story plan draft never think for longer than their answer may be. Models that do not think, or cannot be told, are not affected. Memory summaries and DOG.ai's own jobs (the character draft, picture planning) never think.</InfoButton></p>
         </div>
     </section>
 </div>
@@ -196,6 +205,10 @@
     private SettingsCategory Current => SettingsCatalog.Find(Category ?? Memory.SettingsCategory);
 
     private bool Hidden(string category) => Current.Id != category;
+
+    /// <summary>The thinking level a list was set to.</summary>
+    private static ThinkingLevel LevelOf(ChangeEventArgs e) =>
+        Enum.TryParse<ThinkingLevel>(e.Value?.ToString(), out var level) && Enum.IsDefined(level) ? level : ThinkingLevel.Off;
 
     private static readonly (string Id, string Label)[] ThemeChoices =
         [(Themes.System, "Match Windows"), (Themes.Dark, "Dark"), (Themes.Light, "Light")];

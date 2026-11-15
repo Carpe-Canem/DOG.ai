@@ -72,35 +72,6 @@ public sealed class ThinkingOnlyTests
     }
 
     [Fact]
-    public async Task The_switches_are_saved_and_General_thinks_while_character_chats_do_not_by_default()
-    {
-        // A settings file from before the switches existed has neither: General thinks, character and group chats do not.
-        var old = System.Text.Json.JsonSerializer.Deserialize<AppSettings>("""{"StoryThinking":false}""")!;
-        Assert.True(old.GeneralThinking);
-        Assert.False(old.RoleplayThinking);
-
-        var settings = new VoiceFlowTests.MemorySettings();
-        var options = new ChatOptions(settings);
-        await options.LoadAsync();
-        Assert.Null(options.Apply(SamplerPresets.Get(null), "general").Thinking);
-        Assert.False(options.Apply(SamplerPresets.Get(null), ChatService.CharacterChatMode).Thinking);
-        Assert.False(options.Apply(SamplerPresets.Get(null), Conversation.GroupMode).Thinking);
-
-        await options.SetGeneralThinkingAsync(false);
-        await options.SetRoleplayThinkingAsync(true);
-        var saved = await settings.LoadAsync();
-        Assert.False(saved.GeneralThinking);
-        Assert.True(saved.RoleplayThinking);
-        Assert.False(options.Apply(SamplerPresets.Get(null), "general").Thinking);
-        Assert.Null(options.Apply(SamplerPresets.Get(null), Conversation.GroupMode).Thinking);
-
-        var again = new ChatOptions(settings);
-        await again.LoadAsync();
-        Assert.False(again.GeneralThinking);
-        Assert.True(again.RoleplayThinking);
-    }
-
-    [Fact]
     public void Each_kind_of_chat_names_its_own_switch()
     {
         Assert.Equal(ChatOptions.GeneralSwitch, ChatOptions.SwitchFor("general"));
@@ -131,30 +102,6 @@ public sealed partial class ChatServiceTests
         yield return new ChatDelta(null, "Hmm, ", null);
         await Task.Delay(Timeout.Infinite, ct);
         yield return new ChatDelta(null, null, new GenerationStats(190, 100, 60));
-    }
-
-    [Fact]
-    public async Task General_may_think_and_character_chats_are_told_not_to_unless_the_owner_allows_it()
-    {
-        await _chat.SendAsync(await NewChatAsync(), "Why is the sky blue?");
-        Assert.Null(_engine.Samplers[^1].Thinking);
-
-        var rex = await SaveCharacterAsync();
-        var chat = await _chat.StartCharacterChatAsync(rex.Id);
-        await _chat.SendAsync(chat.Id, "Sit.");
-        Assert.False(_engine.Samplers[^1].Thinking);
-        await _chat.ImpersonateAsync(chat.Id);
-        Assert.False(_engine.Samplers[^1].Thinking);
-
-        var settings = new VoiceFlowTests.MemorySettings();
-        var options = new ChatOptions(settings);
-        await options.SetGeneralThinkingAsync(false);
-        await options.SetRoleplayThinkingAsync(true);
-        var chatService = new ChatService(_store, _engine, _presets, _characters, _stories, chatOptions: options);
-        await chatService.SendAsync(chat.Id, "Stay.");
-        Assert.Null(_engine.Samplers[^1].Thinking);
-        await chatService.SendAsync(await NewChatAsync(), "Why is grass green?");
-        Assert.False(_engine.Samplers[^1].Thinking);
     }
 
     [Fact]

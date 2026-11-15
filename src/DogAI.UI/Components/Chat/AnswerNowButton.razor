@@ -1,0 +1,18 @@
+@* Answer now, beside Stop: shown only while the reply being written is still thinking. It ends the thinking through the
+   chat engine and the model goes on to its answer (ChatService.AnswerNowAsync). Stop still stops everything. *@
+@implements IDisposable
+@inject ChatService Chat
+
+@if (Chat.Active is { } active && (active.CanAnswerNow || active is { IsThinking: true, AnswerNow: AnswerNowState.Asked }))
+{
+    <button class="btn" id="answer-now" disabled="@(active.AnswerNow == AnswerNowState.Asked)" @onclick="Chat.AnswerNowAsync"
+            title="End the thinking and write the answer now">Answer now</button>
+}
+
+@code {
+    protected override void OnInitialized() => Chat.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Chat.Changed -= OnChanged;
+}

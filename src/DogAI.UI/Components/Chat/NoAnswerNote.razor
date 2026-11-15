@@ -12,13 +12,17 @@
         {
             <p class="small">Press @Again to write it again.</p>
         }
+        else if (note.Reason == ThinkingOnlyReason.Cut)
+        {
+            <p class="small">Press @Again to try again.</p>
+        }
         else if (Allowed && note.MoreRoomHelps)
         {
-            <p class="small">To get an answer, turn off <a href="settings/chats">@ChatOptions.SwitchFor(Mode)</a> in Settings › Chats and stories, or set a larger context size in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName</a>. Then press @Again.</p>
+            <p class="small">To get an answer, choose a shorter level for <a href="settings/chats">@ChatOptions.SwitchFor(Mode)</a> in Settings › Chats and stories (it is @ThinkingLevels.Name(Level) now), or set a larger context size in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName</a>. Then press @Again.</p>
         }
         else if (Allowed)
         {
-            <p class="small">Press @Again to try again, or turn off <a href="settings/chats">@ChatOptions.SwitchFor(Mode)</a> in Settings › Chats and stories.</p>
+            <p class="small">Press @Again to try again, or choose Off for <a href="settings/chats">@ChatOptions.SwitchFor(Mode)</a> in Settings › Chats and stories.</p>
         }
         else if (note.MoreRoomHelps)
         {
@@ -34,7 +38,7 @@
 @code {
     [Parameter, EditorRequired] public ChatMessage Message { get; set; } = new();
 
-    /// <summary>The chat's mode ("general", "characters", "group", "story"): which thinking switch applies.</summary>
+    /// <summary>The chat's mode ("general", "characters", "group", "story"): which thinking level applies.</summary>
     [Parameter, EditorRequired] public string Mode { get; set; } = "general";
 
     /// <summary>The button that writes the reply again, as named on it.</summary>
@@ -45,5 +49,7 @@
 
     private ThinkingOnlyNote? Note => ThinkingOnly.Of(Message, Room);
 
-    private bool Allowed => Mode == DogAI.Core.Stories.Story.Mode ? StoryThinking.Thinking : ChatThinking.ThinksIn(Mode);
+    private ThinkingLevel Level => Mode == DogAI.Core.Stories.Story.Mode ? StoryThinking.Level : ChatThinking.LevelIn(Mode);
+
+    private bool Allowed => Level != ThinkingLevel.Off;
 }

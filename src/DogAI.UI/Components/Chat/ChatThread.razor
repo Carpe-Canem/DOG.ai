@@ -22,7 +22,7 @@
         var who = isUser ? null : SpeakerOf?.Invoke(m.SpeakerId);
         var sources = isUser ? null : ReplySources.Of(m);
         <MessageView IsUser="@isUser" Name="@(isUser ? UserName : who?.Name ?? AssistantName ?? m.ModelName ?? "Model")"
-                     Content="@m.Content" Reasoning="@m.Reasoning" AvatarUrl="@(isUser ? UserAvatar : who is not null ? who.Avatar : AssistantAvatar)"
+                     Content="@m.Content" Reasoning="@m.Reasoning" Cut="@(isUser ? null : ThinkingCut.Of(m))" AvatarUrl="@(isUser ? UserAvatar : who is not null ? who.Avatar : AssistantAvatar)"
                      Letter="@(who is not null ? who.Letter : Letter)" MessageId="@m.Id" Citations="@(sources?.Passages.Count ?? 0)"
                      Speech="@ColourSpeech" Tone="@who?.Tone"
                      Above="@(!isUser && _pics?.Src(m) is { } src ? PictureAbove(m, src) : null)"
@@ -99,6 +99,7 @@
             var writer = SpeakerOf?.Invoke(reply.SpeakerId);
             <MessageView Name="@(writer?.Name ?? AssistantName ?? Engine.ModelName ?? "Model")" AvatarUrl="@(writer is not null ? writer.Avatar : AssistantAvatar)"
                          Letter="@(writer is not null ? writer.Letter : Letter)" Content="@reply.Content" Reasoning="@reply.Reasoning" Streaming="true"
+                         ThinkingLabel="@ThinkingLevels.Counter(reply.ThinkingTokens, reply.ThinkingBudget)" Cut="@LiveCut(reply)"
                          Speech="@ColourSpeech" Tone="@writer?.Tone" />
         }
         @if (reply.Status is { } status)
@@ -187,6 +188,11 @@
     private long _shownConversation = -1;
     private ActiveReply? _shownActive;
     private IJSObjectReference? _module;
+
+    /// <summary>While a reply is written, only what cannot change any more is said under its thinking: that Answer now
+    /// ended it, or that the engine did not keep to the limit. "Cut at its limit" waits for the saved reply.</summary>
+    internal static ThinkingCut? LiveCut(ActiveReply reply) =>
+        ThinkingCut.Of(reply.Thinking) is { Kind: not ThinkingCutKind.Budget } cut ? cut : null;
 
     /// <summary>The reply being written in this chat, if any.</summary>
     private ActiveReply? Streaming => Chat.Active is { } a && a.ConversationId == Conversation.Id && Conversation.Id != 0 ? a : null;

@@ -249,7 +249,7 @@ public sealed partial class ChatService
                 XtcProbability = 0,
                 MaxTokens = StoryPrompt.ReviseTokenLimit(kind, await engine.CountTokensAsync(selected, cts.Token)),
             });
-            await StreamAsync(engine.StreamChatAsync(prompt, preset, cts.Token), active, null, 0, cts.Token);
+            await StreamAsync(AskAsync(active, prompt, preset, cts.Token), active, null, 0, cts.Token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -356,8 +356,11 @@ public sealed partial class ChatService
             var preset = _storyOptions.Apply(SamplerPresets.Get(SamplerPresets.DefaultId) with { MaxTokens = ChoicesMaxTokens, JsonSchema = StoryPrompt.ChoicesSchema(story) });
 
             var text = new StringBuilder();
-            await foreach (var delta in engine.StreamChatAsync(prompt, preset, ct).WithCancellation(ct).ConfigureAwait(false))
+            await foreach (var delta in AskAsync(active, prompt, preset, ct).WithCancellation(ct).ConfigureAwait(false))
+            {
+                active.Track(delta); // so Answer now also ends the thinking before the choices
                 if (delta.Content is not null) text.Append(delta.Content);
+            }
 
             var parsed = StoryPrompt.ParseChoices(text.ToString(), story);
             // Read the passage again: a picture may have been put above it while the choices were worked out.

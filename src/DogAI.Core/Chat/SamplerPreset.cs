@@ -28,11 +28,25 @@ public sealed record SamplerPreset(string Id, string Name, string Description)
     public string? JsonSchema { get; init; }
 
     /// <summary>
-    /// False asks a model that "thinks" before answering to answer straight away (stories, unless the owner turns
-    /// thinking back on). Null leaves it to the model. Set by DOG.ai per request, never saved with a style.
+    /// False asks a model that "thinks" before answering to answer straight away (the thinking level Off, and DOG.ai's
+    /// own jobs). Null leaves it to the model. Set by DOG.ai per request, never saved with a style.
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool? Thinking { get; init; }
+
+    /// <summary>
+    /// The most tokens a model that thinks may spend thinking before it answers (the engine ends the thinking there).
+    /// Null is no limit. Set by DOG.ai per request from the thinking level (<see cref="ThinkingLevels.Apply"/>), never saved with a style.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int? ThinkingBudget { get; init; }
+
+    /// <summary>
+    /// Asks the engine to let this reply's thinking be ended while it is written (Answer now); the stream then names the
+    /// reply (<see cref="ChatDelta.ReplyId"/>). Set by DOG.ai per request, never saved with a style.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ThinkingControl { get; init; }
 
     /// <summary>Text at which to stop writing. Set by DOG.ai for its own jobs, never saved with a style.</summary>
     [System.Text.Json.Serialization.JsonIgnore]

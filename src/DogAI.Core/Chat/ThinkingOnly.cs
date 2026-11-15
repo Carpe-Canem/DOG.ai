@@ -12,6 +12,9 @@ public enum ThinkingOnlyReason
     /// <summary>The model ended after thinking without answering, with room to spare.</summary>
     Ended,
 
+    /// <summary>The thinking was cut by its budget or by Answer now, and the model still wrote nothing after it.</summary>
+    Cut,
+
     /// <summary>It finished, but whether room ran out cannot be told (the prompt's size was not recorded).</summary>
     Unknown,
 }
@@ -25,6 +28,7 @@ public sealed record ThinkingOnlyNote(ThinkingOnlyReason Reason, int? Tokens, in
         ThinkingOnlyReason.Stopped => "Stopped while the model was still thinking, so there is no answer.",
         ThinkingOnlyReason.OutOfRoom =>
             $"No answer: the model's thinking ({Tokens:N0} tokens) filled all the room it had ({ContextLength:N0} tokens, the context size), so it could not write one.",
+        ThinkingOnlyReason.Cut => "No answer: the model wrote nothing after its thinking was cut short.",
         ThinkingOnlyReason.Ended => $"No answer: the model thought for {Tokens:N0} tokens and then stopped without writing one.",
         _ => $"No answer: the model thought for {Tokens:N0} tokens and wrote nothing after it. Usually the thinking filled all the room it had.",
     };
@@ -36,7 +40,8 @@ public sealed record ThinkingOnlyNote(ThinkingOnlyReason Reason, int? Tokens, in
 /// <summary>
 /// A reply that is thinking only: the model "thought" and wrote no answer. The note is worked out from what the reply
 /// already saved, so older replies get it too: speed figures arrive only when the model ends by itself, so a reply with
-/// none was stopped by the owner; one whose prompt and reply together reach the context size ran out of room.
+/// none was stopped by the owner; one whose prompt and reply together reach the context size ran out of room; one whose
+/// thinking was cut by its budget or by Answer now (<see cref="ThinkingCut"/>) and still has no answer ignored the cut.
 /// </summary>
 public static class ThinkingOnly
 {
@@ -61,6 +66,8 @@ public static class ThinkingOnly
         var sizes = contextLength is > 0 and var loaded ? Models.ContextSizes.Offered.Append(loaded) : Models.ContextSizes.Offered;
         return sizes.Where(size => total <= size && total >= size - RoomMargin).Order().FirstOrDefault() is var room and > 0
             ? new ThinkingOnlyNote(ThinkingOnlyReason.OutOfRoom, written, room)
-            : new ThinkingOnlyNote(ThinkingOnlyReason.Ended, written, null);
+            : ThinkingCut.Of(message) is { Kind: ThinkingCutKind.Budget or ThinkingCutKind.AnswerNow }
+                ? new ThinkingOnlyNote(ThinkingOnlyReason.Cut, written, null)
+                : new ThinkingOnlyNote(ThinkingOnlyReason.Ended, written, null);
     }
 }

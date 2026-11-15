@@ -23,6 +23,12 @@ public sealed partial class ChatServiceTests : IDisposable
         public List<SamplerPreset> Samplers { get; } = [];
         public Func<CancellationToken, IAsyncEnumerable<ChatDelta>> Reply { get; set; } = _ => Say("Hello", " there");
 
+        /// <summary>What the engine says when asked to end a reply's thinking (Answer now). Without one it is too old for it.</summary>
+        public Func<string, ThinkingEnd>? EndThinking { get; set; }
+
+        public Task<ThinkingEnd> EndThinkingAsync(string replyId, CancellationToken ct = default) =>
+            Task.FromResult(EndThinking?.Invoke(replyId) ?? ThinkingEnd.NotSupported);
+
         public Task<int> CountTokensAsync(string text, CancellationToken ct = default) =>
             Task.FromResult(text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
 
