@@ -135,7 +135,8 @@ textarea.field { resize: vertical; line-height: 1.45; display: block; }
 .modal.wide { width: min(900px, 100%); }
 .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .modal-head h3 { font-size: 1.1em; }
-.modal-body { min-height: 0; padding: 16px; overflow: auto; display: grid; gap: 12px; }
+.modal-body { min-height: 0; padding: 16px; overflow: auto; display: grid; grid-auto-rows: max-content; gap: 12px; }
+/* Rows keep their full height and the body scrolls: with the dialog capped at the window, a row that scrolls by itself (a code block, the branch map, a passage) would otherwise be squeezed to a sliver. */
 .modal-foot { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
 .inline { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .inline .field { width: auto; }
