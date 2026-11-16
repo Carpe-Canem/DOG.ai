@@ -66,9 +66,7 @@ public sealed partial class ChatService
         var chat = await store.GetAsync(chatId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
         if (chat.Mode != CharacterChatMode) throw new InvalidOperationException("Only a chat with one character can become a story.");
         story.Kind = StoryKind.Interactive;
-        // A story is text: a picture on a chat message comes along as "[picture]", never as the picture.
-        var path = MessagesForStory([.. new MessageTree(await store.GetMessagesAsync(chatId, ct)).PathTo(chat.ActiveLeafId)
-            .Select(m => m.Pictures.Count == 0 ? m : new ChatMessage { Id = m.Id, Role = m.Role, Content = AttachedPictures.TextOf(m) })]);
+        var path = MessagesForStory(new MessageTree(await store.GetMessagesAsync(chatId, ct)).PathTo(chat.ActiveLeafId));
 
         var conversation = await StartStoryAsync(title, story, null, ct);
         var copies = new Dictionary<long, long>();
@@ -103,11 +101,14 @@ public sealed partial class ChatService
     /// <summary>
     /// The messages of a chat's shown branch that <see cref="StoryFromChatAsync"/> copies: the user's and the
     /// character's, not empty ones, and not a last user message the chat never answered (it would leave the story
-    /// waiting on a turn that is not the player's).
+    /// waiting on a turn that is not the player's). A story is text: a picture on a chat message comes along as
+    /// "[picture]", never as the picture, so a message that is pictures alone counts and is copied as that.
     /// </summary>
     public static IReadOnlyList<ChatMessage> MessagesForStory(IReadOnlyList<ChatMessage> path)
     {
-        var kept = path.Where(m => m.Role is ChatRole.User or ChatRole.Assistant && m.Content.Trim().Length > 0).ToList();
+        var kept = path.Where(m => m.Role is ChatRole.User or ChatRole.Assistant)
+            .Select(m => m.Pictures.Count == 0 ? m : new ChatMessage { Id = m.Id, Role = m.Role, Content = AttachedPictures.TextOf(m) })
+            .Where(m => m.Content.Trim().Length > 0).ToList();
         if (kept.Count > 0 && kept[^1].Role == ChatRole.User) kept.RemoveAt(kept.Count - 1);
         return kept;
     }

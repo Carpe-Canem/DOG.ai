@@ -126,6 +126,30 @@ public sealed class ChatPictureInputTests
         Assert.DoesNotContain("localStorage", script);
     }
 
+    /// <summary>
+    /// A file dropped outside the chat box must do nothing on every screen, from the start: the guard is put in place by
+    /// LinkGuard (always on the page), not by the chat box (found by the M17 review: Playhouse opens on a screen
+    /// without one). And a batch of pictures always ends with PicturesDone, or the box would wait for good.
+    /// </summary>
+    [Fact]
+    public void Dropped_files_are_guarded_from_the_start_and_a_batch_always_ends()
+    {
+        var ui = Path.Combine(SolutionRoot(), "src", "DogAI.UI");
+        var chat = File.ReadAllText(Path.Combine(ui, "wwwroot", "js", "chat.js"));
+        var attach = File.ReadAllText(Path.Combine(ui, "wwwroot", "js", "attach.js"));
+        Assert.Contains("export function guardDrops()", chat);
+        Assert.Contains("InvokeVoidAsync(\"guardDrops\")", File.ReadAllText(Path.Combine(ui, "Components", "LinkGuard.razor")));
+        Assert.Contains("<LinkGuard", File.ReadAllText(Path.Combine(ui, "Layout", "MainLayout.razor")));
+        // The chat box's script has no page-wide listener of its own (one place), and its handlers stop the event.
+        Assert.DoesNotContain("document.addEventListener", attach);
+        Assert.Contains("import { guardDrops } from './chat.js';", attach);
+
+        var doneAt = attach.IndexOf("invokeMethodAsync('PicturesDone'", StringComparison.Ordinal);
+        Assert.True(doneAt > 0);
+        var finallyAt = attach.LastIndexOf("} finally {", doneAt, StringComparison.Ordinal);
+        Assert.True(finallyAt >= 0 && doneAt - finallyAt < 300, "PicturesDone is said in a finally");
+    }
+
     private static string SolutionRoot()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);

@@ -263,6 +263,43 @@ public class PictureInputSmokeTests
         }
     }
 
+    /// <summary>
+    /// A page's own load stopped for a picture leaves the model set aside before the engine could say whether it sees.
+    /// It has its projector, so it counts as seeing until it is back (found by the M17 review: the chat box and Write it
+    /// for me said "cannot see pictures" of such a model).
+    /// </summary>
+    [Fact]
+    public async Task A_model_set_aside_while_loading_still_counts_as_seeing()
+    {
+        if (Setup() is not var (model, projector)) return;
+        using var http = new LoopbackHttp();
+        using var engine = Engine(http);
+
+        var pageLoad = engine.LoadAsync(model, new EngineOptions(4096, -1, projector.Path), automatic: true);
+        for (var i = 0; i < 200 && engine.State != EngineState.Loading; i++) await Task.Delay(25);
+        await Task.Delay(1000);
+        Assert.True(await engine.SetAsideLoadAsync());
+        await pageLoad.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(EngineState.Resting, engine.State);
+        Assert.True(engine.SeesPictures);
+        // The next request brings it in with the projector, and the engine's own word stands.
+        Assert.InRange(await engine.CountTokensAsync("Hello there, how are you?"), 3, 12);
+        Assert.True(engine.IsLoaded, engine.Error);
+        Assert.True(engine.SeesPictures);
+        Assert.Equal(projector.Path, engine.Projector);
+        await engine.UnloadAsync();
+
+        // Without a projector the same set-aside model does not.
+        var blind = engine.LoadAsync(model, new EngineOptions(4096), automatic: true);
+        for (var i = 0; i < 200 && engine.State != EngineState.Loading; i++) await Task.Delay(25);
+        await Task.Delay(1000);
+        Assert.True(await engine.SetAsideLoadAsync());
+        await blind.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(engine.SeesPictures);
+        await engine.UnloadAsync();
+    }
+
     [Fact]
     public async Task A_projector_the_engine_stops_with_is_left_out_and_the_model_loads_without_it()
     {

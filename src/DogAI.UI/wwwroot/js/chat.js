@@ -112,6 +112,18 @@ export function scrollToSetting(id) {
   look();
 }
 
+// A file dropped on the page would make the browser control try to open it (file:///…); the window refuses that, and
+// the refused address, with the file's name, would be noted in the log. So a dropped file does nothing anywhere,
+// except where a handler takes it first and stops the event (the chat box: attach.js). Put in place once, when the
+// page starts (LinkGuard), so it holds on every screen, not only after a chat box was shown.
+export function guardDrops() {
+  if (document._dogDrops) return;
+  document._dogDrops = true;
+  const files = e => !!e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0;
+  document.addEventListener('dragover', e => { if (files(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; } });
+  document.addEventListener('drop', e => { if (files(e)) e.preventDefault(); });
+}
+
 // Web links in replies and model cards never open on their own: one listener on the page hands the click to the
 // confirmation prompt (LinkGuard), which asks before opening the user's browser.
 let linkTarget = null;

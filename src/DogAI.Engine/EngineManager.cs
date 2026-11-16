@@ -208,6 +208,10 @@ public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlo
                 // Set aside before it finished: remembered with its settings, and loaded when it is next asked for.
                 ContextLength = planned > 0 ? planned : Math.Max(512, options.ContextLength);
                 GpuLayers = options.GpuLayers;
+                // It never got as far as saying whether it sees. It comes back with its projector when it has one, so
+                // until then it counts as seeing: otherwise the chat box and Write it for me would say "cannot see
+                // pictures" of a model that can (found by the M17 review). The engine's own word replaces this at the load.
+                _sees = options.Projector is { } beside && File.Exists(beside);
                 Set(EngineState.Resting);
             }
             else
@@ -220,6 +224,8 @@ public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlo
         {
             StopProcess();
             Error = e is EngineException ? e.Message : "The model could not be loaded: " + e.Message;
+            // Nothing was loaded, so "loaded without picture input" would be untrue: the error above is the whole story.
+            PictureInputProblem = null;
             Set(EngineState.Failed);
         }
         finally

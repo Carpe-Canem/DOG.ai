@@ -267,6 +267,28 @@ public sealed partial class ChatServiceTests
         Assert.Contains(await _store.GetMessagesAsync(chat.Id), m => m.Pictures.Count == 1);
     }
 
+    /// <summary>
+    /// The story editor says how many messages come along with the same rule the copy uses (found by the M17 review:
+    /// a message that is pictures alone was copied as "[picture]" but not counted).
+    /// </summary>
+    [Fact]
+    public async Task A_message_of_pictures_alone_counts_for_a_story_and_is_copied_as_a_note()
+    {
+        var rex = await SaveCharacterAsync();
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        await _chat.SendAsync(chat.Id, "", [Small]);
+        await _chat.SendAsync(chat.Id, "And this one?");
+        var shown = new MessageTree(await _store.GetMessagesAsync(chat.Id)).PathTo((await _store.GetAsync(chat.Id))!.ActiveLeafId);
+
+        var counted = ChatService.MessagesForStory(shown);
+        var story = await _chat.StoryFromChatAsync(chat.Id, "The picture", new Story());
+
+        var copied = await _store.GetMessagesAsync(story.Id);
+        Assert.Equal(counted.Count, copied.Count);
+        Assert.Contains(counted, m => m.Content == "[picture]");
+        Assert.Contains(copied, m => m.Role == ChatRole.User && m.Content == "[picture]");
+    }
+
     [Fact]
     public void Text_put_in_front_of_a_turn_moves_its_pictures_with_it()
     {

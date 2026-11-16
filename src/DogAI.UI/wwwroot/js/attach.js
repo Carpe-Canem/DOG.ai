@@ -3,6 +3,8 @@
 // anything see-through, so what DOG.ai keeps is the picture alone (no camera, place or date). Nothing is written to a
 // file. What C# receives is that JPEG, which Core checks (AttachedPictures.Problem) before keeping it.
 
+import { guardDrops } from './chat.js';
+
 // The kinds the page opens, told by the file's first bytes (never by its name or type): PNG, JPEG, GIF, BMP, WebP.
 // Anything else is refused, SVG included.
 function kindOf(b) {
@@ -53,19 +55,12 @@ function hasFiles(e) {
   return !!types && Array.prototype.indexOf.call(types, 'Files') >= 0;
 }
 
-// A file dropped anywhere else on the page would make the browser control try to open it (and the address, with the
-// file's name, would be refused and noted in the log). Dropped outside the chat box, it does nothing.
-let pageGuarded = false;
-function guardPage() {
-  if (pageGuarded) return;
-  pageGuarded = true;
-  document.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'none'; } });
-  document.addEventListener('drop', e => { if (hasFiles(e)) e.preventDefault(); });
-}
+// A file dropped anywhere else on the page does nothing: chat.js guardDrops, put in place when DOG.ai's page starts
+// (LinkGuard), so it holds on every screen. The chat box's own handlers below stop the event before it gets there.
 
 // root: the chat box with its pictures row (drop target); textarea: where pasting happens; input: the hidden file input.
 export function watchPictures(root, textarea, input, dotnet, maxSide, quality, maxBytes) {
-  guardPage();
+  guardDrops();
   if (!root || root._dogPictures) return;
   const state = { dotnet, busy: false, queue: [] };
   root._dogPictures = state;
@@ -83,15 +78,21 @@ export function watchPictures(root, textarea, input, dotnet, maxSide, quality, m
         const room = await state.dotnet.invokeMethodAsync('PicturesOffered', batch.length);
         if (room <= 0) continue;
         let refused = 0, added = 0, left = 0;
-        for (const file of batch) {
-          if (added >= room) { left++; continue; }
-          let jpeg = null;
-          try { jpeg = await toJpeg(file, maxSide, quality, maxBytes); } catch { jpeg = null; }
-          if (!jpeg) { refused++; continue; }
-          const ok = await state.dotnet.invokeMethodAsync('PictureArrived', jpeg);
-          if (ok) added++; else refused++;
+        try {
+          for (const file of batch) {
+            if (added >= room) { left++; continue; }
+            let jpeg = null;
+            try { jpeg = await toJpeg(file, maxSide, quality, maxBytes); } catch { jpeg = null; }
+            if (!jpeg) { refused++; continue; }
+            // A picture C# could not take counts as refused; the rest of the batch still goes.
+            let ok = false;
+            try { ok = await state.dotnet.invokeMethodAsync('PictureArrived', jpeg); } catch { ok = false; }
+            if (ok) added++; else refused++;
+          }
+        } finally {
+          // Always said, or the box would wait for this batch for good (Send stays off while pictures are made ready).
+          await state.dotnet.invokeMethodAsync('PicturesDone', refused, left);
         }
-        await state.dotnet.invokeMethodAsync('PicturesDone', refused, left);
       }
     } catch {
       // The chat box went away while a picture was being made.
@@ -150,7 +151,7 @@ export function bytesToJpeg(bytes, maxSide, quality, maxBytes) {
 // A file chosen in Windows' Open dialog (the hidden input), as that JPEG. Resolves with the bytes, no bytes (an empty
 // array) for a file that is not a picture the page takes, and null when nothing was chosen.
 export function pickPicture(input, maxSide, quality, maxBytes) {
-  guardPage();
+  guardDrops();
   return new Promise(resolve => {
     if (!input) { resolve(null); return; }
     const done = async () => {

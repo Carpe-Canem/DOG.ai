@@ -29,7 +29,9 @@ public static class ModelProjector
     public static IReadOnlyList<ProjectorFile> Belonging(string modelPath, GgufInfo? model = null)
     {
         if (Path.GetDirectoryName(modelPath) is not { Length: > 0 } folder || !Directory.Exists(folder)) return [];
-        model ??= GgufReader.TryRead(modelPath);
+        // Asked for every model of a folder at a time (the Models page, Delete, Remove picture input): the model's
+        // header is kept like a projector's, so only the first look reads the file.
+        model ??= HeaderOf(new FileInfo(modelPath));
         // A document search model is given no pictures, and a model without the number cannot be matched.
         if (model?.EmbeddingLength is not > 0 || model.IsEmbedding(modelPath)) return [];
 
@@ -40,7 +42,7 @@ public static class ModelProjector
             {
                 if (!Projectors.IsProjectorName(Path.GetFileName(path))) continue;
                 var file = new FileInfo(path);
-                var header = Headers.GetOrAdd((path.ToLowerInvariant(), file.Length, file.LastWriteTimeUtc.Ticks), _ => GgufReader.TryRead(path));
+                var header = HeaderOf(file);
                 if (header is { IsVisionProjector: true } && header.ProjectionDim == model.EmbeddingLength)
                     belonging.Add(new ProjectorFile(path, file.Length));
             }
@@ -51,6 +53,10 @@ public static class ModelProjector
         }
         return belonging;
     }
+
+    /// <summary>A file's header, read once for the file as it is now (its size and date); null when it cannot be read.</summary>
+    private static GgufInfo? HeaderOf(FileInfo file) =>
+        file.Exists ? Headers.GetOrAdd((file.FullName.ToLowerInvariant(), file.Length, file.LastWriteTimeUtc.Ticks), _ => GgufReader.TryRead(file.FullName)) : null;
 
     /// <summary>True when a projector's header says it belongs to a model with this embedding length (checked before Get picture input downloads it).</summary>
     public static bool Fits(GgufInfo? projector, int? embeddingLength) =>

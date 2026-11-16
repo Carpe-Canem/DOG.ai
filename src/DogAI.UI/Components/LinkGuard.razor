@@ -33,6 +33,8 @@
             _module = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/chat.js");
             _self = DotNetObjectReference.Create(this);
             await _module.InvokeVoidAsync("watchLinks", _self);
+            // Files dropped on the page do nothing, on every screen from the start (M17: the chat box alone takes them).
+            await _module.InvokeVoidAsync("guardDrops");
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException)
         {
