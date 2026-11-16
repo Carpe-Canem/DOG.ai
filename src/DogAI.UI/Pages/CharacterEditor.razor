@@ -159,7 +159,7 @@
         </div>
 
         <div class="editor-tab" data-tab="@EditorTabs.LooksAndVoice" hidden="@(_tab != EditorTabs.LooksAndVoice)">
-            <LooksBox @bind-Value="_looks" Name="@_c.Name" About="@PictureWriter.About(_c)" />
+            <LooksBox @key="CharacterId" @bind-Value="_looks" Name="@_c.Name" About="@PictureWriter.About(_c)" Portrait="@(_c.Image ?? _c.Avatar)" />
             <div class="label-like">
                 Voice for reading replies aloud
                 <VoicePicker @bind-Value="_c.Voice" Sample="@VoiceSample" />

@@ -402,3 +402,38 @@ public static class FromPicture
             ModelsPlaces.LibraryName, ModelsPlaces.Address(ModelsPlaces.Library));
 
 }
+
+/// <summary>The words of the Looks box's "Draft from the portrait" (M19 step 2).</summary>
+public static class PortraitLooks
+{
+    public const string Button = "Draft from the portrait";
+
+    public const string Title = "The chat model looks at the picture and writes the lasting features (no clothes, pose or place) for you to change";
+
+    /// <summary>Said beside the button when there is no picture to look at.</summary>
+    public static string NoPortrait(bool persona) => persona
+        ? "Add a picture of you to draft the looks from it."
+        : "Add a picture to draft the looks from it.";
+
+    /// <summary>Said beside the buttons when neither draft can start.</summary>
+    public static string NeitherYet(bool persona) => persona
+        ? "Write a description or add a picture of you first; the looks are drafted from either."
+        : "Write a description or add a picture first; the looks are drafted from either.";
+
+    /// <summary>
+    /// Said before the button is pressed when the model that would look cannot see: the one in memory, or the default for
+    /// Characters when none is (<paramref name="defaultName"/>). Ends before the place, which the page makes a link.
+    /// </summary>
+    public static PlaceLine CannotSee(string? defaultName) => defaultName is null
+        ? ComposerPictures.CannotSee(loaded: true)
+        : new($"The default model for Characters ({defaultName}) cannot see pictures, and it is the one used when none is loaded. Models that can are marked “{Projectors.Label}” in",
+            ModelsPlaces.LibraryName, ModelsPlaces.Address(ModelsPlaces.Library));
+
+    /// <summary>What the box says while the model looks (a model set aside for pictures comes back first).</summary>
+    public static string Looking(bool inMemory) => inMemory
+        ? "Looking at the picture…"
+        : "The chat model was set aside for pictures. It is loading again, then looks at the picture…";
+
+    /// <summary>The note after a draft from the portrait (the tag notes follow it).</summary>
+    public const string Drafted = "Drafted from the picture: lasting features only. Change what you like; it is saved with the rest.";
+}

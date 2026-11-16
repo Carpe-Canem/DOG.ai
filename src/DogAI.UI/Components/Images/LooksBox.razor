@@ -1,8 +1,11 @@
 @* The Looks box of a character or persona: the appearance words that go into every picture of them, and optionally a
-   character LoRA. The loaded chat model can draft the words from the description. Works on a copy (Value); the page saves it. *@
+   character LoRA. The chat model can draft the words from the description, or (M19 step 2) look at the portrait in the
+   editor and draft them from what it sees: the page makes the portrait into the 1,024-pixel JPEG every picture for the
+   model is (attach.js), Core makes it plain and checks it, and it is held only for that one request. Works on a copy
+   (Value); the page saves it. *@
 @using DogAI.Core.Images
 @using DogAI.Engine.Images
-@implements IDisposable
+@implements IAsyncDisposable
 @inject PictureWriter Writer
 @inject EngineManager Engine
 @inject ChatService Chat
@@ -10,6 +13,7 @@
 @inject ImageModelCatalog Catalog
 @inject ISettingsStore SettingsStore
 @inject DogAI.Engine.Images.ExtraTags ExtraTagList
+@inject IJSRuntime JS
 
 <div class="field-block looks-box">
     <div class="field-label">
@@ -23,29 +27,39 @@
         @if (_draftCts is not null)
         {
             <button class="btn" id="looks-draft-stop" @onclick="() => _draftCts?.Cancel()">Stop</button>
-            <span class="small">@_working</span>
+            <span class="small" id="looks-working" role="status">@_working</span>
         }
         else
         {
             <button class="btn" id="looks-draft" disabled="@(Chat.IsBusy || string.IsNullOrWhiteSpace(About))"
-                    title="The loaded chat model reads the description and writes the looks for you to change" @onclick="DraftAsync">Draft from the description</button>
-            @if (string.IsNullOrWhiteSpace(About))
-            {
-                <span class="small">Write a description first; the looks are drafted from it.</span>
-            }
-            else if (Chat.IsBusy)
+                    title="The loaded chat model reads the description and writes the looks for you to change" @onclick="() => DraftAsync(fromPortrait: false)">Draft from the description</button>
+            <button class="btn" id="looks-from-portrait" disabled="@(Chat.IsBusy || Portrait is null || CannotSee() is not null)"
+                    title="@PortraitLooks.Title" @onclick="() => DraftAsync(fromPortrait: true)">@PortraitLooks.Button</button>
+            @if (Chat.IsBusy)
             {
                 <span class="small">Waiting for a chat reply to finish.</span>
             }
+            else if (Portrait is null)
+            {
+                <span class="small" id="looks-portrait-none">@(string.IsNullOrWhiteSpace(About) ? PortraitLooks.NeitherYet(Persona) : PortraitLooks.NoPortrait(Persona))</span>
+            }
+            else if (string.IsNullOrWhiteSpace(About))
+            {
+                <span class="small">Write a description to draft from it too.</span>
+            }
         }
     </div>
+    @if (Portrait is not null && _draftCts is null && CannotSee() is { } blind)
+    {
+        <div class="notice" id="looks-sees"><span>@blind.Text <a class="link-text" href="@blind.Address">@blind.PlaceName</a>.</span></div>
+    }
     @if (_note is not null)
     {
         <p class="small" id="looks-note">@_note</p>
     }
     @if (_error is not null)
     {
-        <div class="notice bad"><span>@_error</span></div>
+        <div class="notice bad" id="looks-error"><span>@_error</span></div>
     }
     @if (_loras.Count > 0 || Value.Lora is not null)
     {
@@ -83,6 +97,12 @@
     /// <summary>What the looks are drafted from: the description as it is in the form now.</summary>
     [Parameter] public string About { get; set; } = "";
 
+    /// <summary>
+    /// The picture "Draft from the portrait" looks at, as it is in the editor now (saved or not): a character's full
+    /// picture, else its small square; a persona's square. Null when there is none.
+    /// </summary>
+    [Parameter] public byte[]? Portrait { get; set; }
+
     [Parameter] public string Name { get; set; } = "";
 
     /// <summary>True on the personas page, where the looks are the owner's own.</summary>
@@ -90,12 +110,25 @@
 
     private string Who => Persona ? "you" : "the character";
     private string Them => Persona ? "you" : "them";
-    private string They => Persona ? "you" : "they";
 
     private PromptStyle _style = PromptStyle.Tags;
     private IReadOnlyList<string> _loras = [];
     private CancellationTokenSource? _draftCts;
     private string? _note, _error, _working;
+    private IJSObjectReference? _module;
+
+    /// <summary>The Characters default's name when it cannot see (no picture input beside it; read once on open), else null.</summary>
+    private string? _blindDefault;
+
+    /// <summary>
+    /// The model that would look cannot see: the one in memory (the engine's own word), else the Characters default (by
+    /// its file). Null when it can, or when that is not known yet (a model loading).
+    /// </summary>
+    private PlaceLine? CannotSee() =>
+        Engine.IsReady ? (Engine.SeesPictures ? null : PortraitLooks.CannotSee(null))
+        : Engine.State == EngineState.Loading ? null
+        : _blindDefault is { } name ? PortraitLooks.CannotSee(name)
+        : null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -103,7 +136,8 @@
         Chat.Changed += Refresh;
         // Which LoRAs there are, and whether the checkpoint pictures are drawn with wants tags or sentences. Reads file
         // headers only (remembered between visits); starts nothing.
-        var root = (await SettingsStore.LoadAsync()).ImageFolder();
+        var settings = await SettingsStore.LoadAsync();
+        var root = settings.ImageFolder();
         // The tag check follows the image folder in use now (it may have been changed since DOG.ai started).
         await ExtraTagList.FollowAsync(root);
         var files = await Task.Run(() => ImageLibrary.Scan(root));
@@ -111,6 +145,8 @@
         var checkpoints = files.Where(f => f.Usable && f.Kind == ImageFileKind.Checkpoint).ToList();
         if (Catalog.ChosenAmong(checkpoints.Select(c => c.RelativePath).ToList()) is { } chosen)
             _style = Catalog.CheckpointFor(chosen, checkpoints.First(c => c.RelativePath == chosen).Verdict).Style;
+        if (ModelDefaults.For(settings, "characters") is { } model && File.Exists(model))
+            _blindDefault = await Task.Run(() => ModelProjector.Find(model) is null ? Path.GetFileNameWithoutExtension(model) : null);
     }
 
     private void Refresh() => _ = InvokeAsync(StateHasChanged);
@@ -129,14 +165,34 @@
                 : null,
         });
 
-    /// <summary>Asks the chat model for the looks and puts them in the box, unsaved. A LoRA already chosen is kept.</summary>
-    private async Task DraftAsync()
+    /// <summary>
+    /// Asks the chat model for the looks, from the description or from the portrait, and puts them in the box, unsaved.
+    /// A LoRA already chosen is kept.
+    /// </summary>
+    private async Task DraftAsync(bool fromPortrait)
     {
         _error = _note = null;
         using var cts = new CancellationTokenSource();
         _draftCts = cts;
         try
         {
+            // The portrait as the JPEG the model is given, made by the page and made plain here. Held only for this request.
+            byte[]? jpeg = null;
+            if (fromPortrait)
+            {
+                if (Portrait is not { } portrait) return;
+                _working = "Reading the picture…";
+                StateHasChanged();
+                _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/attach.js");
+                var made = await _module.InvokeAsync<byte[]?>("bytesToJpeg", cts.Token,
+                    [portrait, AttachedPictures.MaxSide, AttachedPictures.Quality, ComposerPictures.MaxFileBytes]);
+                if (made is not { Length: > 0 })
+                {
+                    _error = "The picture could not be read. Choose it again, then try again.";
+                    return;
+                }
+                jpeg = AttachedPictures.Plain(made);
+            }
             if (!Engine.IsReady)
             {
                 _working = "Loading the model…";
@@ -158,16 +214,40 @@
                     return;
                 }
             }
-            _working = "Reading the description…";
-            StateHasChanged();
-            var draft = await Writer.DraftLooksAsync(Name, About, _style, ct: cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
+            LooksDraft draft;
+            if (jpeg is not null)
+            {
+                // The engine's own word, once the model is in: picture input that failed to load leaves it blind.
+                if (!Engine.SeesPictures)
+                {
+                    var blind = PortraitLooks.CannotSee(null);
+                    _error = blind.Text + " " + blind.PlaceName + ".";
+                    return;
+                }
+                _working = PortraitLooks.Looking(Engine.IsLoaded);
+                StateHasChanged();
+                draft = await Writer.DraftLooksFromPictureAsync(jpeg, Name, _style, TagList.Current, cts.Token);
+            }
+            else
+            {
+                _working = "Reading the description…";
+                StateHasChanged();
+                draft = await Writer.DraftLooksAsync(Name, About, _style, ct: cts.Token);
+            }
+            // Stopped, or the box was left (another character or persona opened): the draft is not theirs.
+            cts.Token.ThrowIfCancellationRequested();
             await Set(Value with { Tags = draft.Tags });
-            _note = "Drafted. Change what you like; it is saved with the rest." +
+            _note = (jpeg is not null ? PortraitLooks.Drafted : "Drafted. Change what you like; it is saved with the rest.") +
                     (draft.Notes.Corrected.Count > 0 ? " Corrected to real tags: " + string.Join("; ", draft.Notes.Corrected.Select(c => $"{c.Written} → {c.Used}")) + "." : "") +
                     (draft.Notes.Dropped.Count > 0 ? " Left out because they are not tags these checkpoints know: " + string.Join(", ", draft.Notes.Dropped) + ". Add them by hand if you know they work." : "");
         }
         catch (OperationCanceledException)
         {
+        }
+        catch (JSException)
+        {
+            _error = "The picture could not be read. Choose it again, then try again.";
         }
         catch (Exception e) when (e is InvalidOperationException or EngineException)
         {
@@ -180,10 +260,20 @@
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         _draftCts?.Cancel();
         Engine.Changed -= Refresh;
         Chat.Changed -= Refresh;
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)
+            {
+            }
+        }
     }
 }
