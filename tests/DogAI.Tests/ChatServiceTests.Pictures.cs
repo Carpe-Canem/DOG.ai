@@ -210,6 +210,39 @@ public sealed partial class ChatServiceTests
         Assert.Equal($"<user> {AttachedPictures.UnseenNote}\nDescribe itHello there and more", Assert.Single(_engine.Completions));
     }
 
+    /// <summary>
+    /// Write mine leaves the pictures out of its one request: with a picture at the start of the owner's turns the model
+    /// began its draft with a stand-in in brackets every time (M17 step 6), and a note in its place did the same. The
+    /// replies before and after still get the pictures.
+    /// </summary>
+    [Fact]
+    public async Task Write_mine_drafts_from_text_alone_and_puts_no_note_where_a_picture_was()
+    {
+        _engine.Sees = true;
+        var rex = await SaveCharacterAsync();
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        await _chat.SendAsync(chat.Id, "What does the sign say?", [Small]);
+        await _chat.SendAsync(chat.Id, "", [Small]); // a message that is a picture alone
+        var replies = _engine.Prompts.Count;
+
+        _engine.Reply = _ => FakeEngine.Say("And the next one?");
+        Assert.Equal("And the next one?", await _chat.ImpersonateAsync(chat.Id));
+
+        // Raw text, no picture beside it, and nothing in brackets where the pictures were.
+        Assert.Empty(_engine.PictureCompletions);
+        var draftPrompt = _engine.Completions[^1];
+        Assert.Contains("<user> What does the sign say?", draftPrompt);
+        Assert.Contains($"<user> {AttachedPictures.PictureOnly}", draftPrompt);
+        Assert.DoesNotContain("picture", draftPrompt.Replace(AttachedPictures.PictureOnly, ""), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DOGAI", draftPrompt);
+        Assert.Equal(replies, _engine.Prompts.Count);
+
+        // The next reply has both pictures again, and no reply was told the model could not see.
+        await _chat.SendAsync(chat.Id, "Thanks");
+        Assert.Equal(2, _engine.Prompts[^1].Sum(m => m.Pictures?.Count ?? 0));
+        Assert.All((await _store.GetMessagesAsync(chat.Id)).Where(m => m.Role == ChatRole.Assistant), m => Assert.Null(StoryTurn.Of(m).Unseen));
+    }
+
     [Fact]
     public async Task In_a_group_each_picture_stays_in_front_of_its_own_message()
     {

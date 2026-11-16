@@ -78,10 +78,23 @@ if ($Pics) {
         $b64 = $address.Substring($comma + 1)
         $raw = [Convert]::FromBase64String($b64)
         $pictures += "$($f.BaseName): $($raw.Length) bytes"
-        # Three pieces of 24 bytes: near the start, the middle, near the end. The base64 piece is the same place in
+        # Three pieces of 24 bytes: near the start (see below for a JPEG), the middle, near the end. The base64 piece is the same place in
         # the picture's own base64 text (as a data: address or a JSON value would hold it).
+        # A JPEG begins with its tables, and two pictures written by the same program can share one byte for byte (a
+        # piece of a picture held only in memory then "turns up" inside another that was kept: seen in M17 step 6). So
+        # for a JPEG the first piece is taken from the picture data itself, a little after the last table.
+        $first = 300
+        if ($raw.Length -gt 4 -and $raw[0] -eq 0xFF -and $raw[1] -eq 0xD8) {
+            $p = 2
+            while ($p + 4 -lt $raw.Length -and $raw[$p] -eq 0xFF) {
+                $size = $raw[$p + 2] * 256 + $raw[$p + 3]
+                if ($raw[$p + 1] -eq 0xDA) { $first = $p + 2 + $size + 200; break }
+                $p += 2 + $size
+            }
+            if ($first + 24 -ge $raw.Length / 2) { $first = 300 }
+        }
         $n = 0
-        foreach ($at in 300, [int]($raw.Length / 2), ($raw.Length - 150)) {
+        foreach ($at in $first, [int]($raw.Length / 2), ($raw.Length - 150)) {
             $n++
             Add-Pattern "picture:$($f.BaseName) piece $n (bytes)" ([byte[]]$raw[$at..($at + 23)]) $false
             $text = $b64.Substring([int][math]::Floor($at / 3) * 4, 40)

@@ -416,12 +416,15 @@ public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlo
         }
     }
 
-    public async Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default)
+    public Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default) =>
+        RenderPromptAsync(messages, thinking: true, ct);
+
+    public async Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, bool thinking, CancellationToken ct = default)
     {
         var api = await BeginUseAsync(ct).ConfigureAwait(false);
         try
         {
-            return await api.ApplyTemplateAsync(messages, ct).ConfigureAwait(false);
+            return await api.ApplyTemplateAsync(messages, ct, thinking).ConfigureAwait(false);
         }
         finally
         {

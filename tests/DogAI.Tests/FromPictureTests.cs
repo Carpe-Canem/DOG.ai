@@ -106,7 +106,7 @@ public sealed class FromPictureTests
         Assert.Contains(PictureRatings.ForPlanner(PictureRating.General), tags);
         Assert.DoesNotContain("description", tags);
         // Every tag the rule names is one the bundled list knows, so the tag check keeps it.
-        foreach (var tag in new[] { "anthro", "furry male", "furry female", "wolf", "fox", "cat", "dragon", "grey fur", "white fur", "wolf ears", "fox tail", "feral", "no humans" })
+        foreach (var tag in new[] { "anthro", "furry male", "furry female", "wolf", "fox", "cat", "dragon", "grey fur", "white fur", "wolf ears", "fox tail", "feral", "no humans", "dog", "horse" })
             Assert.Equal([TagList.Normalise(tag)], TagList.Bundled.Resolve(tag).Select(TagList.Normalise));
 
         var plain = PictureWriter.PictureInstruction(PromptStyle.Sentences, PictureRating.Sensitive);

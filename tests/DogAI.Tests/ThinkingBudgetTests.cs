@@ -17,6 +17,23 @@ public sealed class ThinkingLevelTests
     private static readonly PromptMessage[] Messages = [new("user", "Hi")];
     private static SamplerPreset Plain => SamplerPresets.Get(null);
 
+    /// <summary>
+    /// A reply is carried on (Continue) from a prompt whose thinking block the template has closed: the template is asked
+    /// with thinking off, as a chat request with thinking off is. Asked as before, it leaves the block open and the
+    /// model takes the answer so far for its thoughts (seen with Huihui Qwen3.5 9B in M17 step 6, five tries of five).
+    /// </summary>
+    [Fact]
+    public void The_template_is_asked_to_close_the_thinking_for_a_reply_that_is_carried_on()
+    {
+        var open = LlamaApi.TemplateBody(Messages, thinking: true);
+        Assert.False(open.ContainsKey("chat_template_kwargs"));
+
+        var closed = LlamaApi.TemplateBody(Messages, thinking: false);
+        Assert.False(closed["chat_template_kwargs"]!["enable_thinking"]!.GetValue<bool>());
+        Assert.False(closed["chat_template_kwargs"]!["thinking"]!.GetValue<bool>());
+        Assert.Equal("Hi", closed["messages"]![0]!["content"]!.GetValue<string>());
+    }
+
     [Fact]
     public void The_levels_have_the_budgets_the_trial_confirmed()
     {

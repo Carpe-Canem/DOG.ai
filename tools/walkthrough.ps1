@@ -38,6 +38,11 @@
 #                                                or mouse = '<css selector>' to click the middle of that element
 #               @{ osclick = '<css selector>' }  the same, but through Windows: DOG.ai is brought to the front and the
 #                                                real cursor clicks there (or osclick = 'x,y' in page coordinates)
+#               @{ osdrop = '<file path>'; on = '<css selector>' }  a real drag from File Explorer: the file's folder is
+#                                                opened in an Explorer window (top left of the screen), the file is dragged
+#                                                with the real cursor onto that page element and let go, the window closed
+#               @{ ps = { <script block> } }     run PowerShell between steps (make a file, measure something); what it
+#                                                writes is printed
 #   -DataDir  data folder for the run (default: a fresh temp folder, deleted afterwards)
 #   -OutDir   where screenshots are written (default: a temp folder, printed at the end)
 #   -Exe      run this DOG.ai.exe instead of the Debug build (for example publish\win-x64\app\DOG.ai.exe; point at the one
@@ -380,6 +385,80 @@ function Send($method, $params) {
     }
 }
 
+# A real drag from File Explorer: opens the file's folder in an Explorer window at the screen's top left, drags the
+# file with the real cursor onto the page element, lets go, and closes the Explorer window. DOG.ai's window must be
+# on screen and the element must not lie under the Explorer window (the top left 900 x 700 screen pixels).
+function Os-Drop($file, $selector) {
+    $file = (Resolve-Path $file).Path
+    $folder = Split-Path $file -Parent
+    $leaf = Split-Path $file -Leaf
+    $sel = $selector | ConvertTo-Json
+    $r = Send 'Runtime.evaluate' @{ expression = "(() => { const e = document.querySelector($sel); if (!e) return ''; e.scrollIntoView({ block: 'nearest' }); const r = e.getBoundingClientRect(); return (r.x + r.width / 2) + ',' + (r.y + r.height / 2); })()"; returnByValue = $true }
+    if (-not $r.result.value) { "OSDROP TARGET NOT FOUND: $selector"; return }
+    $x, $y = $r.result.value -split ','
+    $h = Front-Window
+    $doc = $null
+    foreach ($try in 1..10) {
+        $win = $A::RootElement.FindAll('Children', (ByPid)) | Select-Object -First 1
+        if ($win) { $doc = $win.FindFirst('Descendants', [Windows.Automation.PropertyCondition]::new($A::ControlTypeProperty, [Windows.Automation.ControlType]::Document)) }
+        if ($doc) { break }
+        Start-Sleep -Milliseconds 300
+    }
+    if (-not $doc) { "OSDROP: page area not found"; return }
+    $b = $doc.Current.BoundingRectangle
+    $width = Send 'Runtime.evaluate' @{ expression = "innerWidth"; returnByValue = $true }
+    $scale = $b.Width / [double]$width.result.value
+    $tx = [int]($b.Left + [double]$x * $scale); $ty = [int]($b.Top + [double]$y * $scale)
+
+    $before = @($A::RootElement.FindAll('Children', [Windows.Automation.PropertyCondition]::new($A::ClassNameProperty, 'CabinetWClass')) | ForEach-Object { $_.Current.NativeWindowHandle })
+    Start-Process explorer.exe "`"$folder`""
+    $explorer = $null
+    foreach ($try in 1..40) {
+        Start-Sleep -Milliseconds 300
+        $explorer = $A::RootElement.FindAll('Children', [Windows.Automation.PropertyCondition]::new($A::ClassNameProperty, 'CabinetWClass')) |
+            Where-Object { $_.Current.NativeWindowHandle -notin $before } | Select-Object -First 1
+        if ($explorer) { break }
+    }
+    if (-not $explorer) { "OSDROP: the Explorer window did not open"; return }
+    $eh = [IntPtr]$explorer.Current.NativeWindowHandle
+    try {
+        [DogWalk.Win]::MoveWindow($eh, 0, 0, 900, 700, $true) | Out-Null
+        [DogWalk.Win]::SetForegroundWindow($eh) | Out-Null
+        $item = $null
+        foreach ($try in 1..20) {
+            Start-Sleep -Milliseconds 400
+            $item = $explorer.FindAll('Descendants', [Windows.Automation.PropertyCondition]::new($A::ControlTypeProperty, [Windows.Automation.ControlType]::ListItem)) |
+                Where-Object { $_.Current.Name -eq $leaf -or $_.Current.Name -eq [IO.Path]::GetFileNameWithoutExtension($leaf) } | Select-Object -First 1
+            if ($item) { break }
+        }
+        if (-not $item) { "OSDROP: $leaf is not listed in the Explorer window"; return }
+        try { ($item.GetCurrentPattern([Windows.Automation.ScrollItemPattern]::Pattern)).ScrollIntoView() } catch { }
+        Start-Sleep -Milliseconds 300
+        $ib = $item.Current.BoundingRectangle
+        $fx = [int]($ib.Left + [Math]::Min(40, $ib.Width / 2)); $fy = [int]($ib.Top + $ib.Height / 2)
+        [DogWalk.Win]::SetCursorPos($fx, $fy) | Out-Null
+        Start-Sleep -Milliseconds 200
+        [DogWalk.Win]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 250
+        # The drag starts once the cursor has moved a little with the button down; then it travels in small steps.
+        foreach ($i in 1..40) {
+            $px = [int]($fx + ($tx - $fx) * $i / 40); $py = [int]($fy + ($ty - $fy) * $i / 40)
+            [DogWalk.Win]::SetCursorPos($px, $py) | Out-Null
+            [DogWalk.Win]::mouse_event(0x0001, 0, 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 30
+        }
+        foreach ($i in 1..6) {
+            [DogWalk.Win]::mouse_event(0x0001, (1 - 2 * ($i % 2)), 0, 0, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 120
+        }
+        [DogWalk.Win]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 800
+        "dragged $leaf from Explorer (screen $fx,$fy) and dropped it at page $([int][double]$x),$([int][double]$y) (screen $tx,$ty)"
+    } finally {
+        [DogWalk.Win]::PostMessage($eh, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+    }
+}
+
 function Press-Key($combo) {
     $parts = $combo.ToLower() -split '\+'
     $key = $parts[-1]
@@ -471,6 +550,8 @@ try {
             Start-Sleep -Milliseconds 500
             "clicked through Windows at page $x,$y (screen $sx,$sy; page area $([int]$b.Left),$([int]$b.Top) $([int]$b.Width)x$([int]$b.Height), scale $([Math]::Round($scale,3)))"
         }
+        if ($step.osdrop) { Os-Drop $step.osdrop $step.on }
+        if ($step.ps) { & $step.ps }
         if ($step.winshot) { Win-Shot $step.winshot }
         if ($step.trayclick) { Tray-Click }
         if ($step.uiclick) { Ui-Click $step.uiclick }

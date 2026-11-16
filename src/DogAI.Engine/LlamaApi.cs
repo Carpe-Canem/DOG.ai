@@ -120,12 +120,23 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
     }
 
     /// <summary>The prompt's text as the model's template writes it. Text only: a picture is never given to this route.</summary>
-    public async Task<string> ApplyTemplateAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct)
+    /// <param name="thinking">
+    /// False closes a thinking model's thinking block at the end of the prompt (the same switches a chat request gets
+    /// with thinking off), for a reply that is carried on: text put after an open block would be read as thinking.
+    /// </param>
+    public async Task<string> ApplyTemplateAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct, bool thinking = true)
     {
-        var body = new JsonObject { ["messages"] = ToJson(messages, pictures: false) };
+        var body = TemplateBody(messages, thinking);
         using var response = await http.SendAsync(Request(HttpMethod.Post, "apply-template", body), ct).ConfigureAwait(false);
         var json = await ReadJsonAsync(response, ct).ConfigureAwait(false);
         return json["prompt"]?.GetValue<string>() ?? "";
+    }
+
+    internal static JsonObject TemplateBody(IReadOnlyList<PromptMessage> messages, bool thinking)
+    {
+        var body = new JsonObject { ["messages"] = ToJson(messages, pictures: false) };
+        if (!thinking) body["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false, ["thinking"] = false };
+        return body;
     }
 
     private static JsonObject SamplerBody(SamplerPreset sampler)

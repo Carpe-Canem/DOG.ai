@@ -59,6 +59,12 @@ public static class AttachedPictures
     /// <summary>What a text-only job gets where a picture was: summaries, recalled messages, exports, a story made from a chat.</summary>
     public const string TextNote = "[picture]";
 
+    /// <summary>
+    /// What stands for a message that is pictures alone where the pictures are left out and nothing may be in brackets
+    /// (Write mine: a bracketed note makes the model write one too).
+    /// </summary>
+    public const string PictureOnly = "Look at this.";
+
     /// <summary>What a model that cannot see pictures is given in a picture's place.</summary>
     public const string UnseenNote = "[The user attached a picture here. You cannot see pictures, so say so if it matters.]";
 

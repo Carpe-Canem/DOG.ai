@@ -335,6 +335,8 @@
                 await SettingsStore.SaveAsync(await SettingsStore.LoadAsync() with { LastModelPath = file.Path });
                 Say($"{file.Name} is loaded with a {Engine.ContextLength:N0}-token context.");
             }
+            // Stopped, not failed: the owner unloaded it while it loaded (Unload everything, or Cancel in a chat's model button).
+            else if (Engine.State != EngineState.Failed) Say($"Loading {file.Name} was stopped.");
             else Say(Engine.Error ?? "The model could not be loaded.", bad: true);
         }
         catch (ModelRefusedException e)

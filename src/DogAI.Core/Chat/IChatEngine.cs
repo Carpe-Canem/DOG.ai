@@ -66,6 +66,14 @@ public interface IChatEngine
     /// <summary>Applies the model's own chat template and returns the exact prompt text.</summary>
     Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default);
 
+    /// <summary>
+    /// The same, saying whether the model may think where the prompt ends. With false the template of a thinking model
+    /// closes its thinking block, so text put after the prompt is the answer itself: what a reply is carried on from
+    /// (Continue). An engine or template without such a switch gives the same text either way.
+    /// </summary>
+    Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, bool thinking, CancellationToken ct = default) =>
+        RenderPromptAsync(messages, ct);
+
     IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, CancellationToken ct = default);
 
     /// <summary>

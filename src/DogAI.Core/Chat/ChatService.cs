@@ -993,8 +993,13 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             _pictureTokenCache.Clear();
             _tokenCacheModel = engine.ModelName;
         }
+        // Write mine drafts the owner's own words, and for that one request the pictures are left out altogether. With a
+        // picture at the start of the owner's turns the model begins its draft with a stand-in in brackets
+        // ("[Start a new chat]", "[User] …": 6 of 6 tries with Huihui Qwen3.5 9B in M17 step 6, against 2 of 6 without),
+        // and a note in the picture's place does the same (6 of 6). A message that is pictures alone keeps one word.
+        var withPictures = end != PromptEnd.UserTurn;
         // A model that cannot see gets a note in each picture's place; one that can gets the stored pictures themselves.
-        var sees = engine.SeesPictures && attached is not null;
+        var sees = withPictures && engine.SeesPictures && attached is not null;
 
         var parts = layout.Parts.ToList();
         var partTokens = new Dictionary<PromptPart, int>();
@@ -1006,7 +1011,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         var items = new List<BudgetItem>(path.Count);
         // A picture goes only with its message, so its cost is the message's.
         foreach (var message in path)
-            items.Add(new BudgetItem(message.Role, await CountAsync(message, ct) + await PictureCostAsync(message, sees, ct)));
+            items.Add(new BudgetItem(message.Role, await CountAsync(message, ct) + (withPictures ? await PictureCostAsync(message, sees, ct) : 0)));
 
         bool DropPart()
         {
@@ -1034,9 +1039,11 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
                 var role = m.Role == ChatRole.User ? "user" : "assistant";
                 // The message's pictures come first in it. Those that cannot be shown to the model become a note each.
                 var pictures = sees && m.Pictures.Count > 0 ? await PromptPicturesAsync(m, ct) : null;
-                var noted = m.Pictures.Count - (pictures?.Count ?? 0);
+                var noted = withPictures ? m.Pictures.Count - (pictures?.Count ?? 0) : 0;
                 unseen += noted;
-                var text = noted > 0 ? AttachedPictures.UnseenTextOf(m, noted) : m.Content;
+                var text = noted > 0 ? AttachedPictures.UnseenTextOf(m, noted)
+                    : !withPictures && m.Pictures.Count > 0 && m.Content.Trim().Length == 0 ? AttachedPictures.PictureOnly
+                    : m.Content;
                 if (!names.Group)
                 {
                     history.Add(new PromptMessage(role, text, pictures));
@@ -1080,7 +1087,10 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             if (!open)
             {
                 prompt = layout.Arrange(system, history, parts: parts);
-                rendered = await RenderAsync(prompt, ct);
+                // A reply is carried on from its answer, never from inside the model's thinking: the template closes
+                // the thinking block first. Left open (as it was until M17 step 6), a thinking model took the answer so
+                // far for its thoughts, went on planning in the reply and wrote the answer a second time.
+                rendered = await RenderAsync(prompt, ct, thinking: !continuation);
                 if (continuation)
                 {
                     var soFar = (names.Group ? names.Label(included[^1]) + ": " : "") + included[^1].Content;
@@ -1118,19 +1128,20 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     /// picture is, and is taken out again (the engine's own marker counts wrongly as text, and a prompt that holds its
     /// words is refused).
     /// </summary>
-    private async Task<RenderedPrompt> RenderAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct)
+    /// <param name="thinking">False for a reply that is carried on: the template then closes the model's thinking block.</param>
+    private async Task<RenderedPrompt> RenderAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct, bool thinking = true)
     {
         var pictures = messages.SelectMany(m => (m.Pictures ?? []).OrderBy(p => p.After)).ToList();
         if (pictures.Count == 0)
         {
-            var plain = await engine.RenderPromptAsync(messages, ct);
+            var plain = await engine.RenderPromptAsync(messages, thinking, ct);
             return new RenderedPrompt(plain, plain, [], 0);
         }
 
         var marked = new List<PromptMessage>(messages.Count);
         var number = 0;
         foreach (var message in messages) marked.Add(message.AsText((index, _) => PictureMark(index), ref number));
-        var text = await engine.RenderPromptAsync(marked, ct);
+        var text = await engine.RenderPromptAsync(marked, thinking, ct);
 
         var raw = new StringBuilder(text.Length);
         var shown = new StringBuilder(text.Length + 64 * pictures.Count);

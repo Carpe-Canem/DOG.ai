@@ -254,14 +254,16 @@ public sealed partial class PictureWriter(IChatEngine engine)
 
     /// <summary>
     /// What an animal-like character is, for the picture form. The trial (M17 step 1) got "1boy, wolf ears, silver hair"
-    /// (twice "1girl") for an anthro wolf knight: a human with ears, never the kind of character.
+    /// (twice "1girl") for an anthro wolf knight: a human with ears, never the kind of character. A pet counts as an
+    /// animal whatever it wears: a photograph of a dog in a sweater came back as "1girl, furry female" and never as
+    /// "dog" while the rule said "an animal on four legs that wears nothing" (M17 step 6).
     /// </summary>
     public const string AnthroRule =
         "An animal-like character is one with an animal's head and muzzle or snout, and fur, feathers or scales, who stands, dresses or acts like a person. " +
         "They count as people. They are not a human with animal ears: tag them \"anthro\", their animal (\"wolf\", \"fox\", \"cat\", \"dragon\") " +
         "and the colour of their fur (\"grey fur\", \"white fur\") in place of hair, and write \"1boy, furry male\" or \"1girl, furry female\" for them, telling which from their build, face and clothes as for anyone (a knight in armour with a man's build is male). " +
         "Only a human face with animal ears or a tail gets \"wolf ears\", \"fox tail\" and the like, and never \"anthro\". " +
-        "An animal on four legs that wears nothing is not a person: count 0 people for it and tag its animal and \"feral\".\n";
+        "An animal that stands on four legs, a pet or a wild animal, is not a person, even in a coat, a harness or a collar: count 0 people for it and tag its animal (\"dog\", \"cat\", \"horse\") and \"feral\".\n";
 
     /// <summary>The form for "From a picture" (M17 step 5): <see cref="PromptInstruction"/>'s fields, worded for a picture the model sees.</summary>
     public static string PictureInstruction(PromptStyle style, PictureRating rating = PictureRating.General) =>

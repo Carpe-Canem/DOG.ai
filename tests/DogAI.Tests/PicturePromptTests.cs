@@ -277,6 +277,14 @@ public sealed class PicturePromptTests : IDisposable
         Assert.Empty(list.Resolve("canopy"));                 // of a tree, not of an aircraft (seen in M16 step 6)
         Assert.Equal(["canopy (aircraft)"], list.Resolve("canopy (aircraft)"));
         Assert.Equal(["canopy bed"], list.Resolve("canopy bed"));
+        Assert.Empty(list.Resolve("grey"));                   // the colour, not the creature "roswell grey" the source data files it under (M17 step 6)
+        Assert.Empty(list.Resolve("gray"));
+        Assert.Equal(["roswell grey"], list.Resolve("roswell grey"));
+        Assert.Equal(["grey fur"], list.Resolve("grey fur"));
+        Assert.Empty(list.Resolve("scattered"));              // another word, not a slip of "shattered" (seen in M17 step 6)
+        Assert.Equal(["shattered"], list.Resolve("shattered"));
+        Assert.DoesNotContain("white towel", list.Resolve("white tower")); // a lighthouse is not a towel (seen in M17 step 6)
+        Assert.Equal(["white towel"], list.Resolve("white towel"));
         Assert.Equal(["jacket"], list.Resolve("jackett"));    // a slip into a common tag is still put right
         // No artists, characters or series: a name the model slips in is dropped.
         foreach (var name in new[] { "hatsune miku", "touhou", "twilight sparkle (mlp)" })

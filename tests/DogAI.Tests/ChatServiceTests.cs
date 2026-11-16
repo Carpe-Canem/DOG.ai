@@ -41,9 +41,16 @@ public sealed partial class ChatServiceTests : IDisposable
         /// <summary>Every message list the chat template was applied to.</summary>
         public List<IReadOnlyList<PromptMessage>> Rendered { get; } = [];
 
-        public Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default)
+        public Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default) =>
+            RenderPromptAsync(messages, thinking: true, ct);
+
+        /// <summary>For each time the template was applied: whether the model was left free to think at the prompt's end.</summary>
+        public List<bool> RenderedThinking { get; } = [];
+
+        public Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, bool thinking, CancellationToken ct = default)
         {
             Rendered.Add(messages);
+            RenderedThinking.Add(thinking);
             return Task.FromResult(string.Join(" ", messages.Select(m => $"<{m.Role}> {m.Content}")));
         }
 
@@ -323,6 +330,10 @@ public sealed partial class ChatServiceTests : IDisposable
         // The template is rendered up to the reply's start, then its text so far is appended verbatim.
         Assert.Equal("<system> Be brief. <user> Count to five" + "Hello there", Assert.Single(_engine.Completions));
         Assert.Equal(_engine.Completions[0], shown[1].PromptText);
+        // It is carried on from the answer: the template was asked to close the model's thinking first (M17 step 6:
+        // left open, a thinking model went on planning inside the reply). The first reply's own prompt left it open.
+        Assert.False(_engine.RenderedThinking[^1]);
+        Assert.True(_engine.RenderedThinking[0]);
         Assert.Equal(2 + 2, shown[1].CompletionTokens);
         Assert.Single(new MessageTree(await _store.GetMessagesAsync(id)).Siblings(shown[1]));
     }

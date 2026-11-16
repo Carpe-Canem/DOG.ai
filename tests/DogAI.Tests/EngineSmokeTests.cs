@@ -94,8 +94,10 @@ public class EngineSmokeTests
         Assert.NotNull(stats);
         Assert.True(stats.PromptTokens > 0 && stats.CompletionTokens > 0 && stats.TokensPerSecond > 0, stats.ToString());
 
-        // Continue: raw text through /completion carries on mid-reply instead of starting a new turn.
-        var start = await engine.RenderPromptAsync([new("user", "Count from one to ten in words, separated by commas.")]);
+        // Continue: raw text through /completion carries on mid-reply instead of starting a new turn. The template is
+        // asked to close the model's thinking first (as ChatService does for Continue): left open, a thinking model
+        // takes the text so far for its thoughts and writes "</think>" and the answer again (M17 step 6).
+        var start = await engine.RenderPromptAsync([new("user", "Count from one to ten in words, separated by commas.")], thinking: false);
         var more = new StringBuilder();
         GenerationStats? moreStats = null;
         await foreach (var delta in engine.StreamCompletionAsync(start + "one, two, three,", SamplerPresets.Get("precise")))
@@ -104,6 +106,8 @@ public class EngineSmokeTests
             moreStats = delta.Stats ?? moreStats;
         }
         Assert.Contains("four", more.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("</think>", more.ToString());
+        Assert.DoesNotContain("one, two", more.ToString(), StringComparison.OrdinalIgnoreCase); // carried on, not begun again
         Assert.NotNull(moreStats);
         Assert.True(moreStats.CompletionTokens > 0 && moreStats.PromptTokens > 0, moreStats.ToString());
 
@@ -116,7 +120,9 @@ public class EngineSmokeTests
         ];
         Assert.Contains("*wags* Hello!", await engine.RenderPromptAsync(character));
         var said = new StringBuilder();
-        await foreach (var delta in engine.StreamChatAsync(character, SamplerPresets.Get("precise")))
+        // Asked without thinking, as every real-engine test is: at 4,096 tokens a model that thinks first can spend all
+        // its room on it and answer nothing (this line failed that way with Huihui Qwen3.5 9B).
+        await foreach (var delta in engine.StreamChatAsync(character, SamplerPresets.Get("precise") with { Thinking = false }))
             said.Append(delta.Content);
         Assert.False(string.IsNullOrWhiteSpace(said.ToString()));
 

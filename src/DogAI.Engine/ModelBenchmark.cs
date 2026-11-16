@@ -41,6 +41,11 @@ public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher,
                 // With its projector when it has one, as it is loaded for use: the plan above counted it.
                 await engine.LoadAsync(file.Path, new EngineOptions(context, layers, projector?.Path)).ConfigureAwait(false);
                 if (engine.IsReady) break;
+                // Stopped, not failed: the owner cancelled the load (the model button on a chat page) while the benchmark
+                // waited for it. Nothing is wrong with the layer count, so it is not tried again with fewer layers
+                // (that loaded the model once more after an unload, and saved a slower setting; found in M17 step 6).
+                if (engine.State != EngineState.Failed)
+                    throw new EngineException("The model's load was stopped before it finished, so nothing was measured.");
                 if (attempt >= MaxAttempts || layerCount <= 0 || layers == 0)
                     throw new EngineException(engine.Error ?? "The model could not be loaded.");
                 // Step down by about a sixth of the model each time.

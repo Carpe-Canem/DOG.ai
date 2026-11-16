@@ -978,6 +978,8 @@ div.math[data-math] { margin: .6em 0; text-align: center; }
 
 /* ---- M13: a ⋯ menu with no room below opens upwards (chat.js placeMenu) ---- */
 .menu-pop.up { top: auto; bottom: calc(100% + 4px); }
+/* No room on the left of its button (chat.js placeMenu): it opens rightwards from the button's left edge. */
+.menu-pop.start { right: auto; left: 0; }
 
 /* ---- M13: the quick-jump box (Ctrl+K). Shared, tokens only. ---- */
 kbd { display: inline-block; padding: 0 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--surface2); color: var(--muted); font: .85em var(--ui); line-height: 1.5; white-space: nowrap; }

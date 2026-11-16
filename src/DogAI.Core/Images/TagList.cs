@@ -75,9 +75,10 @@ public sealed class TagList
     /// Other spellings in the source data that are wrong for pictures, found by reading what a chat model wrote:
     /// "lean" (a build) is listed as another spelling of "leaning" (a pose); "orange" and "oranges" (most often the colour) of
     /// "orange (fruit)" (seen in M16 step 4: autumn leaves became fruit); "canopy" (of a tree or a bed) of
-    /// "canopy (aircraft)" (seen in M16 step 6: a fox under a tree got an aircraft's canopy). They are not used.
+    /// "canopy (aircraft)" (seen in M16 step 6: a fox under a tree got an aircraft's canopy); "greys" and "grays" of
+    /// "roswell grey", a kind of creature (seen in M17 step 6: the colour "grey", tried as a plural, became it). They are not used.
     /// </summary>
-    private static readonly HashSet<string> NotASpelling = new(StringComparer.Ordinal) { "lean", "orange", "oranges", "canopy" };
+    private static readonly HashSet<string> NotASpelling = new(StringComparer.Ordinal) { "lean", "orange", "oranges", "canopy", "greys", "grays" };
 
     public static TagList Empty { get; } = new();
 
@@ -415,8 +416,10 @@ public sealed class TagList
                 if (other.Length != words.Length) continue;
                 if (words.Where(Colours.Contains).Any(w => !other.Contains(w)) || other.Where(Colours.Contains).Any(w => !words.Contains(w))) continue;
                 // A slip is inside a word. Where a whole short word differs it is another word, not a slip
-                // ("glowing aura" is not "glowing fur").
-                if (!words.Zip(other).All(p => p.First == p.Second || (Math.Min(p.First.Length, p.Second.Length) >= 5 && Distance(p.First, p.Second, 2) <= (p.First.Length >= 10 ? 2 : 1)))) continue;
+                // ("glowing aura" is not "glowing fur"). And a slip adds or drops a letter ("jackett"): a word of the
+                // same length with a letter changed is another word too ("scattered" is not "shattered", "white tower"
+                // is not "white towel": both seen in M17 step 6), so the tag is dropped, not bent.
+                if (!words.Zip(other).All(p => p.First == p.Second || (p.First.Length != p.Second.Length && Math.Min(p.First.Length, p.Second.Length) >= 5 && Distance(p.First, p.Second, 2) <= (p.First.Length >= 10 ? 2 : 1)))) continue;
                 (best, bestDistance, bestCount) = (candidate, distance, count);
             }
         }

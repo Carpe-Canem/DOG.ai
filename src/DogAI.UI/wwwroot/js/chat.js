@@ -271,15 +271,20 @@ export function showJumpChoice() {
 // last card of a list), and there is room above the button, it opens upwards instead.
 export function placeMenu(pop) {
   if (!(pop instanceof HTMLElement)) return;
-  pop.classList.remove('up');
+  pop.classList.remove('up', 'start');
   let box = pop.parentElement;
   while (box && box !== document.body && !/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
-  const edge = box && box !== document.body ? box.getBoundingClientRect() : { top: 0, bottom: innerHeight };
+  const edge = box && box !== document.body ? box.getBoundingClientRect() : { top: 0, bottom: innerHeight, left: 0, right: innerWidth };
   const bottom = Math.min(edge.bottom, innerHeight);
   const top = Math.max(edge.top, 0);
   const menu = pop.getBoundingClientRect();
   const button = pop.parentElement.getBoundingClientRect();
   if (menu.bottom > bottom - 4 && button.top - menu.height - 4 >= top) pop.classList.add('up');
+  // It opens leftwards from its button. Where the button sits at the left (a model's row in a narrow window, its
+  // buttons wrapped under its name) the menu would start outside the page and be cut off: there it opens rightwards.
+  const left = Math.max(edge.left, 0);
+  const right = Math.min(edge.right, innerWidth);
+  if (menu.left < left + 4 && button.left + menu.width <= right - 4) pop.classList.add('start');
 }
 
 // Prints one element only (the recovery key): everything else is hidden while the print dialog is open.
