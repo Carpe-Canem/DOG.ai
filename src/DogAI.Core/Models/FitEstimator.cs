@@ -16,6 +16,12 @@ public sealed record ModelShape
 
     public int? TrainedContext { get; init; }
 
+    /// <summary>
+    /// Size of the projector file loaded beside the model so it can see pictures (M17), or 0. It sits on the graphics
+    /// card whole (<see cref="Projectors.Need"/>).
+    /// </summary>
+    public long ProjectorBytes { get; init; }
+
     /// <summary>Mixture-of-experts models only read part of their weights for each token.</summary>
     public int? ExpertCount { get; init; }
     public int? ExpertsUsed { get; init; }
@@ -113,7 +119,8 @@ public static class FitEstimator
         var layers = model.Layers is > 0 ? model.Layers.Value : AssumedLayers;
         var weights = Math.Max(1, model.WeightBytes);
         var kv = model.KvPerTokenOrGuess() * context;
-        var overhead = Overhead(context);
+        // A projector is not spread over layers: it counts with the working memory, on the card either way.
+        var overhead = Overhead(context) + Projectors.Need(model.ProjectorBytes);
         var needed = weights + kv + overhead;
         var perToken = weights * model.ActiveShare;
 
@@ -140,6 +147,9 @@ public static class FitEstimator
 /// <param name="Fit">How the model was judged against the memory free now; null when its header could not be read.</param>
 public sealed record LoadDecision(int GpuLayers, string? Refusal, FitKind? Fit = null)
 {
+    /// <summary>The projector file to load beside the model so it can see pictures, when it has one (M17). It was counted in the fit.</summary>
+    public string? Projector { get; init; }
+
     /// <summary>
     /// True when the model does not fit on the graphics card as things are: worth letting go what else sits there
     /// unused (the document search model, a speech model) and judging again, before layers are sent to system memory.

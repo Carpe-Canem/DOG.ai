@@ -28,6 +28,18 @@ public sealed record GgufInfo
     /// <summary>How the model pools token vectors into one; set only by embedding models.</summary>
     public int? PoolingType { get; init; }
 
+    /// <summary>What kind of file the header says it is; "mmproj" for a projector (the file that lets a chat model see pictures).</summary>
+    public string? Type { get; init; }
+
+    /// <summary>A projector's output width. It belongs to a chat model whose <see cref="EmbeddingLength"/> is the same.</summary>
+    public int? ProjectionDim { get; init; }
+
+    /// <summary>True for a projector that reads pictures (others read sound).</summary>
+    public bool HasVisionEncoder { get; init; }
+
+    /// <summary>A projector for pictures, by its header.</summary>
+    public bool IsVisionProjector => string.Equals(Type, "mmproj", StringComparison.OrdinalIgnoreCase) && HasVisionEncoder && ProjectionDim is > 0;
+
     /// <summary>
     /// A document search (embedding) model rather than one that writes: it says how it pools, or its name or architecture
     /// says so (BERT-family models only make embeddings).
@@ -53,9 +65,11 @@ public sealed record GgufInfo
     }
 
     /// <summary>The facts the fit estimate needs, for a model whose weights take <paramref name="weightBytes"/>.</summary>
-    public ModelShape ToShape(long weightBytes) => new()
+    /// <param name="projectorBytes">Size of the projector loaded beside it (<see cref="ModelProjector.Find"/>), or 0.</param>
+    public ModelShape ToShape(long weightBytes, long projectorBytes = 0) => new()
     {
         WeightBytes = weightBytes,
+        ProjectorBytes = projectorBytes,
         Layers = BlockCount,
         KvBytesPerToken = KvBytesPerToken,
         TrainedContext = ContextLength,
@@ -120,6 +134,9 @@ public static class GgufReader
                 ExpertCount = ToInt(values.GetValueOrDefault($"{arch}.expert_count")),
                 ExpertUsedCount = ToInt(values.GetValueOrDefault($"{arch}.expert_used_count")),
                 PoolingType = ToInt(values.GetValueOrDefault($"{arch}.pooling_type")),
+                Type = values.GetValueOrDefault("general.type") as string,
+                ProjectionDim = ToInt(values.GetValueOrDefault("clip.vision.projection_dim")),
+                HasVisionEncoder = values.GetValueOrDefault("clip.has_vision_encoder") is true,
             };
         }
         catch (EndOfStreamException)
@@ -140,7 +157,8 @@ public static class GgufReader
         key.EndsWith(".attention.value_length", StringComparison.Ordinal) ||
         key.EndsWith(".expert_count", StringComparison.Ordinal) ||
         key.EndsWith(".expert_used_count", StringComparison.Ordinal) ||
-        key.EndsWith(".pooling_type", StringComparison.Ordinal);
+        key.EndsWith(".pooling_type", StringComparison.Ordinal) ||
+        key is "clip.vision.projection_dim" or "clip.has_vision_encoder";
 
     private static int? ToInt(object? value) => value switch
     {

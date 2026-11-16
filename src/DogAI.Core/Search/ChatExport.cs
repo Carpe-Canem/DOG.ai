@@ -16,7 +16,8 @@ public static class ChatExport
         foreach (var message in branch)
         {
             var who = message.Role == ChatRole.User ? userName : speaker?.Invoke(message) ?? assistantName;
-            text.Append("**").Append(who).Append(":**\n\n").Append(message.Content.Trim()).Append("\n\n");
+            // The export is text: "[picture]" where a picture was on a message, never the picture.
+            text.Append("**").Append(who).Append(":**\n\n").Append(AttachedPictures.TextOf(message).Trim()).Append("\n\n");
         }
         return text.ToString().TrimEnd() + "\n";
     }

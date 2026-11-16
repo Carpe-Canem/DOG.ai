@@ -32,13 +32,84 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
         }
     }
 
-    /// <summary>The context size the server actually allocated.</summary>
-    public async Task<int?> ContextLengthAsync(CancellationToken ct)
+    /// <summary>What the server says about the model it loaded.</summary>
+    /// <param name="ContextLength">The context size it actually allocated.</param>
+    /// <param name="Vision">True when the model can be given pictures (it was loaded with a projector).</param>
+    internal sealed record Props(int? ContextLength, bool Vision);
+
+    /// <summary>The text the engine itself puts where a picture is in a prompt; a new one at every start.</summary>
+    private string _mediaMarker = "<__media__>";
+
+    public async Task<Props> PropsAsync(CancellationToken ct)
     {
         using var response = await http.SendAsync(Request(HttpMethod.Get, "props"), ct).ConfigureAwait(false);
         var json = await ReadJsonAsync(response, ct).ConfigureAwait(false);
-        return json["default_generation_settings"]?["n_ctx"]?.GetValue<int>();
+        var props = ReadProps(json);
+        if (json["media_marker"] is JsonValue marker && marker.TryGetValue<string>(out var text) && text.Length > 0) _mediaMarker = text;
+        return props;
     }
+
+    internal static Props ReadProps(JsonNode json) => new(
+        json["default_generation_settings"]?["n_ctx"] is JsonValue size && size.TryGetValue<int>(out var context) ? context : null,
+        json["modalities"]?["vision"] is JsonValue vision && vision.TryGetValue<bool>(out var sees) && sees);
+
+    private int? _countBase;
+    private bool _countMissing;
+
+    /// <summary>
+    /// What one picture costs in tokens, by the engine's own count: a message with the picture, less the same message
+    /// without it. Null from an engine that has no such route.
+    /// </summary>
+    public async Task<int?> CountPictureTokensAsync(byte[] jpeg, CancellationToken ct)
+    {
+        if (_countMissing) return null;
+        _countBase ??= await CountMessageAsync([CountedText()], ct).ConfigureAwait(false);
+        if (_countBase is not { } without)
+        {
+            _countMissing = true;
+            return null;
+        }
+        return await CountMessageAsync([CountedText(), CountedPicture(jpeg)], ct).ConfigureAwait(false) is { } with && with > without ? with - without : null;
+    }
+
+    private static JsonObject CountedText() => new() { ["type"] = "text", ["text"] = "a" };
+
+    /// <summary>A picture as the counting route takes it: the stored JPEG's bytes, never an address.</summary>
+    internal static JsonObject CountedPicture(byte[] jpeg) => new()
+    {
+        ["type"] = "image",
+        ["source"] = new JsonObject { ["type"] = "base64", ["media_type"] = "image/jpeg", ["data"] = Convert.ToBase64String(Checked(jpeg)) },
+    };
+
+    private async Task<int?> CountMessageAsync(JsonArray content, CancellationToken ct)
+    {
+        var body = new JsonObject { ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = content }) };
+        using var response = await http.SendAsync(Request(HttpMethod.Post, "v1/messages/count_tokens", body), ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) return null;
+        try
+        {
+            var json = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
+            return json?["input_tokens"] is JsonValue tokens && tokens.TryGetValue<int>(out var count) ? count : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The bytes of a picture that may be sent: a JPEG that passes Core's check, and nothing else. On bytes it cannot
+    /// read the engine tries to start another program, and given an address it fetches it; so neither is ever sent.
+    /// </summary>
+    internal static byte[] Checked(byte[] jpeg) =>
+        AttachedPictures.Problem(jpeg) is { } problem ? throw new EngineException("A picture could not be sent to the model. " + problem) : jpeg;
+
+    /// <summary>A picture as a chat message carries it: "data:image/jpeg;base64," and the stored bytes.</summary>
+    internal static JsonObject PicturePart(PromptPicture picture) => new()
+    {
+        ["type"] = "image_url",
+        ["image_url"] = new JsonObject { ["url"] = "data:image/jpeg;base64," + Convert.ToBase64String(Checked(picture.Jpeg)) },
+    };
 
     public async Task<int> TokenizeAsync(string text, CancellationToken ct)
     {
@@ -48,9 +119,10 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
         return json["tokens"]?.AsArray().Count ?? 0;
     }
 
+    /// <summary>The prompt's text as the model's template writes it. Text only: a picture is never given to this route.</summary>
     public async Task<string> ApplyTemplateAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct)
     {
-        var body = new JsonObject { ["messages"] = ToJson(messages) };
+        var body = new JsonObject { ["messages"] = ToJson(messages, pictures: false) };
         using var response = await http.SendAsync(Request(HttpMethod.Post, "apply-template", body), ct).ConfigureAwait(false);
         var json = await ReadJsonAsync(response, ct).ConfigureAwait(false);
         return json["prompt"]?.GetValue<string>() ?? "";
@@ -86,10 +158,12 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
     /// Streams a continuation of raw prompt text through the native /completion endpoint, which (unlike chat
     /// completions) does not wrap the text in the chat template, so the model carries on mid-reply.
     /// </summary>
-    public async IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, SamplerPreset sampler, [EnumeratorCancellation] CancellationToken ct)
+    /// <param name="pictures">Pictures in the text, each placed by how many characters of <paramref name="prompt"/> come before it.</param>
+    public async IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, IReadOnlyList<PromptPicture> pictures, SamplerPreset sampler,
+        [EnumeratorCancellation] CancellationToken ct)
     {
         var body = SamplerBody(sampler);
-        body["prompt"] = prompt;
+        body["prompt"] = CompletionPrompt(prompt, pictures, _mediaMarker);
         if (sampler.JsonSchema is { } completionSchema) body["json_schema"] = JsonNode.Parse(completionSchema);
         body["n_predict"] ??= -1;
 
@@ -108,6 +182,29 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
             using var doc = JsonDocument.Parse(data);
             if (ParseCompletionChunk(doc.RootElement) is { } delta) yield return delta;
         }
+    }
+
+    /// <summary>
+    /// A raw prompt: the text alone, or with pictures the text with the engine's marker where each one is and the
+    /// pictures' bytes beside it, in the same order.
+    /// </summary>
+    internal static JsonNode CompletionPrompt(string prompt, IReadOnlyList<PromptPicture> pictures, string marker)
+    {
+        if (pictures.Count == 0) return JsonValue.Create(prompt)!;
+        // A text that already holds the marker would have more markers than pictures, which the engine refuses.
+        if (prompt.Contains(marker, StringComparison.Ordinal)) throw new EngineException("The chat holds text the model engine keeps for pictures, so this reply cannot be carried on.");
+        var text = new StringBuilder(prompt.Length + pictures.Count * marker.Length);
+        var data = new JsonArray();
+        var at = 0;
+        foreach (var picture in pictures.OrderBy(p => p.After))
+        {
+            var place = Math.Clamp(picture.After, at, prompt.Length);
+            text.Append(prompt, at, place - at).Append(marker);
+            data.Add(Convert.ToBase64String(Checked(picture.Jpeg)));
+            at = place;
+        }
+        text.Append(prompt, at, prompt.Length - at);
+        return new JsonObject { ["prompt_string"] = text.ToString(), ["multimodal_data"] = data };
     }
 
     /// <summary>One /completion stream event: text in "content"; the last one has "stop": true and "timings".</summary>
@@ -296,8 +393,32 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
         return request;
     }
 
-    private static JsonArray ToJson(IReadOnlyList<PromptMessage> messages) =>
-        new(messages.Select(m => (JsonNode)new JsonObject { ["role"] = m.Role, ["content"] = m.Content }).ToArray());
+    private static JsonArray ToJson(IReadOnlyList<PromptMessage> messages, bool pictures = true) =>
+        new(messages.Select(m => (JsonNode)new JsonObject { ["role"] = m.Role, ["content"] = pictures ? Content(m) : m.Content }).ToArray());
+
+    /// <summary>
+    /// A turn's content: its text, or with pictures a list of text pieces and pictures in their order. A picture part is
+    /// always "data:image/jpeg;base64," and the stored bytes (<see cref="PicturePart"/>); there is no other kind.
+    /// </summary>
+    internal static JsonNode Content(PromptMessage message)
+    {
+        if (message.Pictures is not { Count: > 0 } pictures) return JsonValue.Create(message.Content)!;
+        var parts = new JsonArray();
+        var text = message.Content;
+        var at = 0;
+        void Text(int to)
+        {
+            if (to > at) parts.Add(new JsonObject { ["type"] = "text", ["text"] = text[at..to] });
+            at = Math.Max(at, to);
+        }
+        foreach (var picture in pictures.OrderBy(p => p.After))
+        {
+            Text(Math.Clamp(picture.After, at, text.Length));
+            parts.Add(PicturePart(picture));
+        }
+        Text(text.Length);
+        return parts;
+    }
 
     private static async Task<JsonNode> ReadJsonAsync(HttpResponseMessage response, CancellationToken ct)
     {
@@ -314,11 +435,17 @@ internal sealed class LlamaApi(HttpClient http, int port, string apiKey)
     }
 
     /// <summary>Pulls the human-readable message out of an engine error body.</summary>
-    private static string ErrorText(string body, int status)
+    internal static string ErrorText(string body, int status)
     {
         try
         {
             var node = JsonNode.Parse(body);
+            // Too much for the context: the engine cuts nothing and says how much there was and how much fits.
+            var error = node?["error"] as JsonObject ?? node as JsonObject;
+            if (error?["type"]?.ToString() == "exceed_context_size_error"
+                && error["n_prompt_tokens"] is JsonValue sent && sent.TryGetValue<int>(out var promptTokens)
+                && error["n_ctx"] is JsonValue room && room.TryGetValue<int>(out var context))
+                return ContextBudgeter.TooLong(promptTokens, context);
             var message = (node?["error"]?["message"] ?? node?["message"] ?? node?["error"])?.ToString();
             if (!string.IsNullOrWhiteSpace(message)) return "The model engine reported: " + message;
         }

@@ -139,6 +139,12 @@ public sealed class ChatMessage
 
     /// <summary>Document passages and recalled earlier messages that were in the prompt, as JSON (see <c>ReplySources</c>). Null when none.</summary>
     public string? SourcesJson { get; set; }
+
+    /// <summary>
+    /// The pictures the owner put on this message for the model to look at, in order, without their images (M17). Not a
+    /// column: <see cref="IChatStore.GetMessagesAsync"/> fills it from the pictures' own table.
+    /// </summary>
+    public IReadOnlyList<AttachedPicture> Pictures { get; set; } = [];
 }
 
 public interface IChatStore
@@ -175,6 +181,7 @@ public interface IChatStore
     Task SetActiveLeafAsync(long conversationId, long? leafId, CancellationToken ct = default);
     Task DeleteAsync(long id, CancellationToken ct = default);
 
+    /// <summary>Every message of a chat, oldest first, each with the pictures on it (<see cref="ChatMessage.Pictures"/>, without images).</summary>
     Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(long conversationId, CancellationToken ct = default);
     Task<ChatMessage> AddMessageAsync(ChatMessage message, CancellationToken ct = default);
     /// <summary>Saves a message's text, thinking, prompt and speed figures (used by edit and continue).</summary>

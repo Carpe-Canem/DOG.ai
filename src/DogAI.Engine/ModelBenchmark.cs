@@ -30,6 +30,7 @@ public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher,
             var plan = await launcher.PlanAsync(file, context, ct).ConfigureAwait(false);
             if (plan is { Kind: FitKind.TooLarge })
                 throw new ModelRefusedException(LoadDecision.Decide(file.Name, context, plan, await launcher.BudgetAsync(ct).ConfigureAwait(false), null).Refusal!);
+            var projector = await ModelLauncher.ProjectorAsync(file.Path, null, ct).ConfigureAwait(false);
             var layerCount = plan?.Layers ?? 0;
             var layers = plan is { Kind: FitKind.Partial } ? plan.GpuLayers : -1;
 
@@ -37,7 +38,8 @@ public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher,
             {
                 ct.ThrowIfCancellationRequested();
                 status(attempt == 1 ? "Loading the model…" : $"Retrying with {layers} layers on the graphics card…");
-                await engine.LoadAsync(file.Path, new EngineOptions(context, layers)).ConfigureAwait(false);
+                // With its projector when it has one, as it is loaded for use: the plan above counted it.
+                await engine.LoadAsync(file.Path, new EngineOptions(context, layers, projector?.Path)).ConfigureAwait(false);
                 if (engine.IsReady) break;
                 if (attempt >= MaxAttempts || layerCount <= 0 || layers == 0)
                     throw new EngineException(engine.Error ?? "The model could not be loaded.");
@@ -62,6 +64,7 @@ public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher,
             {
                 record.MeasuredVramBytes = held;
                 record.MeasuredVramContext = context;
+                record.MeasuredVramProjector = engine.Projector is not null;
             }
             await records.SaveAsync(record, ct).ConfigureAwait(false);
 

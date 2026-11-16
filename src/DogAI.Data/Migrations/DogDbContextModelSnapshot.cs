@@ -138,6 +138,46 @@ namespace DogAI.Data.Migrations
                     b.ToTable("Personas");
                 });
 
+            modelBuilder.Entity("DogAI.Core.Chat.AttachedPicture", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Bytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ConversationId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("Image")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<long>("MessageId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId");
+
+                    b.HasIndex("MessageId", "Position");
+
+                    b.ToTable("AttachedPictures");
+                });
+
             modelBuilder.Entity("DogAI.Core.Chat.ChatFolder", b =>
                 {
                     b.Property<long>("Id")
@@ -635,6 +675,9 @@ namespace DogAI.Data.Migrations
                     b.Property<int?>("MeasuredVramContext")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("MeasuredVramProjector")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Path")
                         .IsRequired()
                         .HasMaxLength(1024)
@@ -723,6 +766,15 @@ namespace DogAI.Data.Migrations
                     b.HasKey("Key");
 
                     b.ToTable("Settings");
+                });
+
+            modelBuilder.Entity("DogAI.Core.Chat.AttachedPicture", b =>
+                {
+                    b.HasOne("DogAI.Core.Chat.ChatMessage", null)
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("DogAI.Core.Chat.ChatMember", b =>

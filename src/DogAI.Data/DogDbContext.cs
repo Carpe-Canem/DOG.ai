@@ -30,6 +30,7 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
     public DbSet<ChatCollection> ChatCollections => Set<ChatCollection>();
     public DbSet<MessageVector> MessageVectors => Set<MessageVector>();
     public DbSet<Picture> Pictures => Set<Picture>();
+    public DbSet<AttachedPicture> AttachedPictures => Set<AttachedPicture>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -129,6 +130,17 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
             e.Property(m => m.PresetId).HasMaxLength(40);
             e.HasIndex(m => m.ConversationId);
             e.HasOne<Conversation>().WithMany().HasForeignKey(m => m.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            // Read from the pictures' own table by the store, not a column.
+            e.Ignore(m => m.Pictures);
+        });
+        // Pictures on messages (M17). A new table, so its link costs no rebuild: a picture goes with its message,
+        // whichever code deleted it. The image is the last column (the migration says why).
+        model.Entity<AttachedPicture>(e =>
+        {
+            e.HasIndex(p => new { p.MessageId, p.Position });
+            e.HasIndex(p => p.ConversationId);
+            e.Property(p => p.Image).IsRequired();
+            e.HasOne<ChatMessage>().WithMany().HasForeignKey(p => p.MessageId).OnDelete(DeleteBehavior.Cascade);
         });
         model.Entity<ModelRecord>(e =>
         {

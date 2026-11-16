@@ -126,7 +126,8 @@ public enum AnswerNowState
 /// a story its bible (the story-only parts are in ChatService.Story.cs).
 /// </summary>
 public sealed partial class ChatService(IChatStore store, IChatEngine engine, PresetCatalog? presets = null, ICharacterStore? characters = null,
-    IStoryStore? stories = null, DocumentLibrary? documents = null, StoryOptions? storyOptions = null, ChatOptions? chatOptions = null)
+    IStoryStore? stories = null, DocumentLibrary? documents = null, StoryOptions? storyOptions = null, ChatOptions? chatOptions = null,
+    IAttachedPictureStore? attached = null)
 {
     /// <summary>Story-wide settings: whether a thinking model may think when it writes for a story.</summary>
     private readonly StoryOptions _storyOptions = storyOptions ?? new StoryOptions();
@@ -145,6 +146,12 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     private readonly Dictionary<long, int> _summaryRetryAt = [];
     private string? _tokenCacheModel;
     private CancellationTokenSource? _cts;
+
+    /// <summary>What the engine said each picture costs, by picture id, for the model in <see cref="_tokenCacheModel"/>. Never a guess.</summary>
+    private readonly Dictionary<long, int> _pictureTokenCache = [];
+
+    /// <summary>The images of the pictures in the prompt being built, read once for the reply being written.</summary>
+    private readonly Dictionary<long, byte[]> _pictureImages = [];
 
     /// <summary>Set while group members answer one after another, so nothing else starts between their replies.</summary>
     private bool _chain;
@@ -207,28 +214,68 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     }
 
     /// <summary>Adds the user's message to the end of the visible branch and answers it.</summary>
-    public async Task SendAsync(long conversationId, string text, CancellationToken ct = default)
+    public Task SendAsync(long conversationId, string text, CancellationToken ct = default) => SendAsync(conversationId, text, null, ct);
+
+    /// <summary>
+    /// The same with pictures on the message for the model to look at (General, character chats and group chats; at most
+    /// <see cref="AttachedPictures.MaxPerMessage"/>, each a JPEG that passes <see cref="AttachedPictures.Problem"/>).
+    /// Nothing is stored when one of them is refused. A message may be pictures alone.
+    /// </summary>
+    public async Task SendAsync(long conversationId, string text, IReadOnlyList<byte[]>? pictures, CancellationToken ct = default)
     {
         EnsureCanStart();
         var conversation = await store.GetAsync(conversationId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
+        var jpegs = CheckPictures(conversation, pictures, 0);
         var messages = await store.GetMessagesAsync(conversationId, ct);
         var leaf = new MessageTree(messages).ResolveLeaf(conversation.ActiveLeafId);
 
         // Name the chat after its first question (a character's greeting does not count).
         if (conversation.Title == UntitledChat && messages.All(m => m.Role != ChatRole.User))
         {
-            conversation.Title = TitleFrom(text);
+            conversation.Title = text.Trim().Length == 0 && jpegs.Count > 0 ? PictureChat : TitleFrom(text);
             await store.UpdateAsync(conversation, ct);
         }
-        await AskAsync(conversationId, leaf, text, ct);
+        await AskAsync(conversationId, leaf, text, ct, jpegs.Count == 0 ? null : question => attached!.AddAsync(question.Id, jpegs, ct));
     }
 
+    /// <summary>The name of a chat whose first message is a picture with no words.</summary>
+    public const string PictureChat = "A picture";
+
     /// <summary>Replaces a question with a new version on its own branch and answers that. The original stays reachable.</summary>
-    public async Task EditAndResendAsync(long conversationId, long userMessageId, string text, CancellationToken ct = default)
+    public Task EditAndResendAsync(long conversationId, long userMessageId, string text, CancellationToken ct = default) =>
+        EditAndResendAsync(conversationId, userMessageId, text, null, null, ct);
+
+    /// <summary>
+    /// The same, saying what becomes of the question's pictures: the new version keeps those in <paramref name="keep"/>
+    /// (all of them when null), byte for byte, then gets <paramref name="added"/>.
+    /// </summary>
+    public async Task EditAndResendAsync(long conversationId, long userMessageId, string text, IReadOnlyCollection<long>? keep,
+        IReadOnlyList<byte[]>? added, CancellationToken ct = default)
     {
         EnsureCanStart();
         var original = await FindAsync(conversationId, userMessageId, ChatRole.User, ct);
-        await AskAsync(conversationId, original.ParentId, text, ct);
+        var conversation = await store.GetAsync(conversationId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
+        var kept = original.Pictures.Where(p => keep is null || keep.Contains(p.Id)).Select(p => p.Id).ToList();
+        var jpegs = CheckPictures(conversation, added, kept.Count);
+        await AskAsync(conversationId, original.ParentId, text, ct, kept.Count + jpegs.Count == 0 || attached is null ? null : async question =>
+        {
+            if (kept.Count > 0) await attached.CopyAsync(original.Id, question.Id, kept, ct);
+            if (jpegs.Count > 0) await attached.AddAsync(question.Id, jpegs, ct);
+        });
+    }
+
+    /// <summary>The pictures to put on a new message, each as it is kept; throws, in words for the owner, when they may not go on it.</summary>
+    /// <param name="already">How many pictures the message has before these.</param>
+    private List<byte[]> CheckPictures(Conversation conversation, IReadOnlyList<byte[]>? pictures, int already)
+    {
+        if (pictures is not { Count: > 0 }) return [];
+        if (attached is null) throw new InvalidOperationException("Pictures cannot be kept here.");
+        if (conversation.Mode == Story.Mode) throw new InvalidOperationException("Stories do not take pictures.");
+        if (already + pictures.Count > AttachedPictures.MaxPerMessage)
+            throw new InvalidOperationException($"A message takes at most {AttachedPictures.MaxPerMessage} pictures.");
+        var jpegs = pictures.Select(AttachedPictures.Plain).ToList();
+        if (jpegs.Select(AttachedPictures.Problem).FirstOrDefault(p => p is not null) is { } problem) throw new InvalidOperationException(problem);
+        return jpegs;
     }
 
     /// <summary>Writes another reply to the same question, kept alongside the earlier ones.</summary>
@@ -443,7 +490,8 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         return message;
     }
 
-    private async Task AskAsync(long conversationId, long? parentId, string text, CancellationToken ct)
+    /// <param name="pictures">Puts the question's pictures on it, before anything reads the chat again. Null when it has none.</param>
+    private async Task AskAsync(long conversationId, long? parentId, string text, CancellationToken ct, Func<ChatMessage, Task>? pictures = null)
     {
         var question = await store.AddMessageAsync(new ChatMessage
         {
@@ -452,6 +500,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             Role = ChatRole.User,
             Content = text.Trim(),
         }, ct);
+        if (pictures is not null) await pictures(question);
         await store.SetActiveLeafAsync(conversationId, question.Id, ct);
         await RespondAsync(conversationId, question.Id, ct);
     }
@@ -486,7 +535,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             // Writing inside an open user turn makes the model speak as the user; asking it to is the fallback.
             // Stop where the template would close the user's turn, so the draft never runs on into the character's reply.
             var stream = built.OpenUserTurn
-                ? engine.StreamCompletionAsync(built.Text, preset with { Stop = built.TurnEnds }, token)
+                ? engine.StreamCompletionAsync(built.Raw, built.RawPictures, preset with { Stop = built.TurnEnds }, token)
                 : AskAsync(active, built.Prompt, preset, token);
             stops = built.TurnEnds;
             await StreamAsync(stream, active, null, 0, token);
@@ -530,6 +579,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     {
         Active = null;
         _cts = null;
+        _pictureImages.Clear(); // pictures are held only while a reply is written
         if (error is not null) LastError = (conversationId, error);
         Changed?.Invoke();
     }
@@ -560,6 +610,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         long? result = null;
         var textBefore = continuing?.Content;
         var tokensBefore = continuing?.CompletionTokens ?? 0;
+        var unseen = 0;
         string? error = null;
         try
         {
@@ -591,9 +642,10 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
 
             // In a group, stop if the model starts writing someone else's line.
             if (names.Group) preset = preset with { Stop = names.StopsFor(names.Character) };
+            unseen = built.Unseen;
             var stream = continuing is null
                 ? AskAsync(active, built.Prompt, preset, ct)
-                : engine.StreamCompletionAsync(built.Text, preset, ct);
+                : engine.StreamCompletionAsync(built.Raw, built.RawPictures, preset, ct);
             await StreamAsync(stream, active, reply, tokensBefore, ct);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -621,7 +673,9 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             else if (reply.Content.Length > 0 || reply.Reasoning is not null)
             {
                 // How long it thought and under which budget, for the note under the thinking (numbers only).
-                if (active.Thinking is { } thinking) reply.ExtraJson = new StoryTurn { Thinking = thinking }.ToJson();
+                // And how many pictures the model could not be shown, for the line on their message.
+                if (active.Thinking is not null || unseen > 0)
+                    reply.ExtraJson = new StoryTurn { Thinking = active.Thinking, Unseen = unseen > 0 ? unseen : null }.ToJson();
                 var saved = await store.AddMessageAsync(reply);
                 await store.SetActiveLeafAsync(conversationId, saved.Id);
                 // A reply that is thinking only is kept (its note says why), but nothing follows it: no next speaker, no choices.
@@ -830,7 +884,8 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
                 var m = path[end + 1];
                 var cost = await CountAsync(m, ct) + 4;
                 if (end > through && used + cost > chunkBudget) break;
-                lines.Append(names.Label(m)).Append(": ").Append(m.Content.Trim()).Append("\n\n");
+                // A summary is a text-only job: a picture is "[picture]" in it, never the picture.
+                lines.Append(names.Label(m)).Append(": ").Append(AttachedPictures.TextOf(m).Trim()).Append("\n\n");
                 used += cost;
                 end++;
             }
@@ -907,6 +962,15 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     {
         public IReadOnlyList<string> TurnEnds { get; } = TurnEnds ?? [];
 
+        /// <summary><see cref="Text"/> without the lines that stand for pictures: what a raw completion carries on from.</summary>
+        public string Raw { get; init; } = Text;
+
+        /// <summary>The pictures in the prompt, placed in <see cref="Raw"/>.</summary>
+        public IReadOnlyList<PromptPicture> RawPictures { get; init; } = [];
+
+        /// <summary>How many pictures the model was given a note for instead, because it cannot see (or their image is gone).</summary>
+        public int Unseen { get; init; }
+
         public bool Has(PromptPartKind kind) => Parts.Any(p => p.Kind == kind);
     }
 
@@ -926,8 +990,11 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         {
             _tokenCache.Clear();
             _textTokenCache.Clear();
+            _pictureTokenCache.Clear();
             _tokenCacheModel = engine.ModelName;
         }
+        // A model that cannot see gets a note in each picture's place; one that can gets the stored pictures themselves.
+        var sees = engine.SeesPictures && attached is not null;
 
         var parts = layout.Parts.ToList();
         var partTokens = new Dictionary<PromptPart, int>();
@@ -937,8 +1004,9 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         int Fixed() => (parts.Count == 0 ? 0 : parts.Sum(p => partTokens[p]) + 2 * (parts.Count - 1) + ContextBudgeter.PerMessageOverhead) + insertedTokens;
 
         var items = new List<BudgetItem>(path.Count);
+        // A picture goes only with its message, so its cost is the message's.
         foreach (var message in path)
-            items.Add(new BudgetItem(message.Role, await CountAsync(message, ct)));
+            items.Add(new BudgetItem(message.Role, await CountAsync(message, ct) + await PictureCostAsync(message, sees, ct)));
 
         bool DropPart()
         {
@@ -957,57 +1025,181 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         {
             var included = path.Skip(fit.FirstIncluded).ToList();
             var history = new List<PromptMessage>();
+            var unseen = 0;
             // A character chat or story opens with a reply; give the template the user turn it expects first.
             if (included.Count > 0 && included[0].Role == ChatRole.Assistant)
                 history.Add(new PromptMessage("user", layout.OpeningTurn ?? CharacterPrompt.ChatStart));
             foreach (var m in continuation ? included[..^1] : included)
             {
                 var role = m.Role == ChatRole.User ? "user" : "assistant";
+                // The message's pictures come first in it. Those that cannot be shown to the model become a note each.
+                var pictures = sees && m.Pictures.Count > 0 ? await PromptPicturesAsync(m, ct) : null;
+                var noted = m.Pictures.Count - (pictures?.Count ?? 0);
+                unseen += noted;
+                var text = noted > 0 ? AttachedPictures.UnseenTextOf(m, noted) : m.Content;
                 if (!names.Group)
                 {
-                    history.Add(new PromptMessage(role, m.Content));
+                    history.Add(new PromptMessage(role, text, pictures));
                     continue;
                 }
                 // In a group every reply is the "assistant", so say whose it is. Turns in a row from the same side are
                 // joined into one, because strict chat templates refuse two assistant (or two user) turns in a row.
-                var content = role == "assistant" ? names.Label(m) + ": " + m.Content : m.Content;
+                var content = role == "assistant" ? names.Label(m) + ": " + text : text;
                 if (history.Count > 0 && history[^1].Role == role)
-                    history[^1] = history[^1] with { Content = history[^1].Content + "\n\n" + content };
+                {
+                    // A joined turn keeps each picture in front of its own message's text.
+                    var before = history[^1].Content.Length + 2;
+                    List<PromptPicture>? all = history[^1].Pictures is null && pictures is null ? null
+                        : [.. history[^1].Pictures ?? [], .. (pictures ?? []).Select(p => p with { After = p.After + before })];
+                    history[^1] = history[^1] with { Content = history[^1].Content + "\n\n" + content, Pictures = all };
+                }
                 else
-                    history.Add(new PromptMessage(role, content));
+                    history.Add(new PromptMessage(role, content, pictures));
             }
 
             var system = layout.SystemText(parts);
-            string text;
+            RenderedPrompt rendered;
             List<PromptMessage> prompt;
             var open = false;
             IReadOnlyList<string> turnEnds = [];
             if (end == PromptEnd.UserTurn && (history.Count == 0 || history[^1].Role == "assistant"))
             {
                 prompt = layout.Arrange(system, history, directive: false, parts: parts);
-                var rendered = await engine.RenderPromptAsync([.. prompt, new PromptMessage("user", UserTurnMark)], ct);
-                var cut = rendered.IndexOf(UserTurnMark, StringComparison.Ordinal);
-                open = cut >= 0;
-                text = open ? rendered[..cut] : "";
-                turnEnds = open ? PromptLayout.TurnEnds(rendered[(cut + UserTurnMark.Length)..]) : [];
+                rendered = await RenderAsync([.. prompt, new PromptMessage("user", UserTurnMark)], ct);
+                var cut = rendered.Raw.IndexOf(UserTurnMark, StringComparison.Ordinal);
+                var shownCut = rendered.Shown.IndexOf(UserTurnMark, StringComparison.Ordinal);
+                open = cut >= 0 && shownCut >= 0;
+                turnEnds = open ? PromptLayout.TurnEnds(rendered.Raw[(cut + UserTurnMark.Length)..]) : [];
+                if (open) rendered = rendered with { Raw = rendered.Raw[..cut], Shown = rendered.Shown[..shownCut] };
             }
             else
             {
                 prompt = [];
-                text = "";
+                rendered = new RenderedPrompt("", "", [], 0);
             }
             if (!open)
             {
                 prompt = layout.Arrange(system, history, parts: parts);
-                text = await engine.RenderPromptAsync(prompt, ct);
-                if (continuation) text += (names.Group ? names.Label(included[^1]) + ": " : "") + included[^1].Content;
+                rendered = await RenderAsync(prompt, ct);
+                if (continuation)
+                {
+                    var soFar = (names.Group ? names.Label(included[^1]) + ": " : "") + included[^1].Content;
+                    rendered = rendered with { Raw = rendered.Raw + soFar, Shown = rendered.Shown + soFar };
+                }
             }
-            var tokens = await engine.CountTokensAsync(text, ct);
-            if (tokens <= budget) return new BuiltPrompt(prompt, text, tokens, fit.Trimmed, parts, open, turnEnds);
+            // Text is counted without the pictures; each picture costs what the engine says it does.
+            var tokens = await engine.CountTokensAsync(rendered.Raw, ct) + rendered.PictureTokens;
+            BuiltPrompt Built() => new(prompt, rendered.Shown, tokens, fit.Trimmed, parts, open, turnEnds)
+            {
+                Raw = rendered.Raw,
+                RawPictures = rendered.Pictures,
+                Unseen = unseen,
+            };
+            if (tokens <= budget) return Built();
             var next = ContextBudgeter.DropOldest(fit, items);
             if (next != fit) fit = next;
-            else if (!DropPart()) return new BuiltPrompt(prompt, text, tokens, fit.Trimmed, parts, open, turnEnds);
+            else if (!DropPart()) return Built();
         }
+    }
+
+    /// <param name="Shown">The prompt as the inspector shows it: a line with its size and cost where each picture is.</param>
+    /// <param name="Raw">The prompt's text alone, as it is counted and as a raw completion is given it.</param>
+    /// <param name="Pictures">The pictures, each placed by how many characters of <paramref name="Raw"/> come before it.</param>
+    /// <param name="PictureTokens">What the pictures cost together.</param>
+    private sealed record RenderedPrompt(string Shown, string Raw, IReadOnlyList<PromptPicture> Pictures, int PictureTokens);
+
+    /// <summary>Stands in for a picture while the chat template is applied; a new one every run, so no message can hold it.</summary>
+    private static readonly string PictureMarkRun = Guid.NewGuid().ToString("N")[..12];
+
+    private static string PictureMark(int index) => $"@@DOGAI-PICTURE-{PictureMarkRun}-{index}@@";
+
+    /// <summary>
+    /// Applies the model's chat template. The template is given text only: a mark of DOG.ai's own stands where each
+    /// picture is, and is taken out again (the engine's own marker counts wrongly as text, and a prompt that holds its
+    /// words is refused).
+    /// </summary>
+    private async Task<RenderedPrompt> RenderAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct)
+    {
+        var pictures = messages.SelectMany(m => (m.Pictures ?? []).OrderBy(p => p.After)).ToList();
+        if (pictures.Count == 0)
+        {
+            var plain = await engine.RenderPromptAsync(messages, ct);
+            return new RenderedPrompt(plain, plain, [], 0);
+        }
+
+        var marked = new List<PromptMessage>(messages.Count);
+        var number = 0;
+        foreach (var message in messages) marked.Add(message.AsText((index, _) => PictureMark(index), ref number));
+        var text = await engine.RenderPromptAsync(marked, ct);
+
+        var raw = new StringBuilder(text.Length);
+        var shown = new StringBuilder(text.Length + 64 * pictures.Count);
+        var placed = new List<PromptPicture>(pictures.Count);
+        var cost = 0;
+        var at = 0;
+        for (var i = 0; i < pictures.Count; i++)
+        {
+            var mark = PictureMark(i);
+            var found = text.IndexOf(mark, at, StringComparison.Ordinal);
+            if (found >= 0)
+            {
+                raw.Append(text, at, found - at);
+                shown.Append(text, at, found - at);
+                at = found + mark.Length;
+            }
+            var tokens = await PictureTokensAsync(pictures[i], ct);
+            cost += tokens;
+            placed.Add(pictures[i] with { After = raw.Length });
+            shown.Append(AttachedPictures.Marker(pictures[i].Width, pictures[i].Height, tokens));
+        }
+        raw.Append(text, at, text.Length - at);
+        shown.Append(text, at, text.Length - at);
+        return new RenderedPrompt(shown.ToString(), raw.ToString(), placed, cost);
+    }
+
+    /// <summary>A message's pictures as they go into a prompt, in order, in front of its text. One whose image is gone or damaged is left out.</summary>
+    private async Task<List<PromptPicture>?> PromptPicturesAsync(ChatMessage message, CancellationToken ct)
+    {
+        var missing = message.Pictures.Select(p => p.Id).Where(id => !_pictureImages.ContainsKey(id)).ToList();
+        if (missing.Count > 0)
+            foreach (var (id, image) in await attached!.ImagesAsync(missing, ct)) _pictureImages[id] = image;
+        var pictures = new List<PromptPicture>();
+        foreach (var picture in message.Pictures.OrderBy(p => p.Position).ThenBy(p => p.Id))
+            if (_pictureImages.TryGetValue(picture.Id, out var jpeg) && AttachedPictures.Problem(jpeg) is null)
+                pictures.Add(new PromptPicture(picture.Id, jpeg, picture.Width, picture.Height));
+        return pictures.Count == 0 ? null : pictures;
+    }
+
+    /// <summary>What a message's pictures add to its cost when the oldest messages are weighed: no image is read for it.</summary>
+    private async Task<int> PictureCostAsync(ChatMessage message, bool sees, CancellationToken ct)
+    {
+        if (message.Pictures.Count == 0) return 0;
+        if (!sees) return message.Pictures.Count * (await CountTextAsync(AttachedPictures.UnseenNote, ct) + 1);
+        return message.Pictures.Sum(PictureTokens);
+    }
+
+    /// <summary>What a picture on a message costs: what the engine counted for the loaded model when it was last sent, else the rule.</summary>
+    public int PictureTokens(AttachedPicture picture) =>
+        _pictureTokenCache.TryGetValue(picture.Id, out var counted) ? counted : AttachedPictures.TokensByRule(picture.Width, picture.Height);
+
+    /// <summary>
+    /// What a picture that is not on a message yet would cost (for the context meter): the engine's own count when a
+    /// model that sees is in memory, else the rule. Never brings a model back.
+    /// </summary>
+    public async Task<int> CountPictureAsync(byte[] jpeg, CancellationToken ct = default)
+    {
+        if (AttachedPictures.Problem(jpeg) is not null) return 0;
+        var (width, height) = AttachedPictures.SizeOf(jpeg);
+        return await engine.CountPictureTokensAsync(new PromptPicture(0, jpeg, width, height), ct) is > 0 and var counted
+            ? counted
+            : AttachedPictures.TokensByRule(width, height);
+    }
+
+    private async Task<int> PictureTokensAsync(PromptPicture picture, CancellationToken ct)
+    {
+        if (_pictureTokenCache.TryGetValue(picture.Id, out var known)) return known;
+        if (await engine.CountPictureTokensAsync(picture, ct) is > 0 and var counted) return _pictureTokenCache[picture.Id] = counted;
+        return AttachedPictures.TokensByRule(picture.Width, picture.Height);
     }
 
     private async Task<int> CountAsync(ChatMessage message, CancellationToken ct)

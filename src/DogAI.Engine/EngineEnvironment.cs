@@ -11,7 +11,8 @@ namespace DogAI.Engine;
 /// </summary>
 public static class EngineEnvironment
 {
-    private static readonly string[] DroppedPrefixes = ["LLAMA_ARG_", "LLAMA_LOG_"];
+    // MTMD_* are the picture-input library's own settings (M17); none of them is DOG.ai's, so none is inherited.
+    private static readonly string[] DroppedPrefixes = ["LLAMA_ARG_", "LLAMA_LOG_", "MTMD_"];
 
     /// <summary>Removes inherited llama.cpp settings from <paramref name="start"/>'s environment. Returns the names removed.</summary>
     public static IReadOnlyList<string> Clean(ProcessStartInfo start)

@@ -29,11 +29,44 @@ public sealed partial class ChatServiceTests : IDisposable
         public Task<ThinkingEnd> EndThinkingAsync(string replyId, CancellationToken ct = default) =>
             Task.FromResult(EndThinking?.Invoke(replyId) ?? ThinkingEnd.NotSupported);
 
-        public Task<int> CountTokensAsync(string text, CancellationToken ct = default) =>
-            Task.FromResult(text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
+        /// <summary>Every text the engine was asked to count.</summary>
+        public List<string> Counted { get; } = [];
 
-        public Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default) =>
-            Task.FromResult(string.Join(" ", messages.Select(m => $"<{m.Role}> {m.Content}")));
+        public Task<int> CountTokensAsync(string text, CancellationToken ct = default)
+        {
+            Counted.Add(text);
+            return Task.FromResult(text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
+        }
+
+        /// <summary>Every message list the chat template was applied to.</summary>
+        public List<IReadOnlyList<PromptMessage>> Rendered { get; } = [];
+
+        public Task<string> RenderPromptAsync(IReadOnlyList<PromptMessage> messages, CancellationToken ct = default)
+        {
+            Rendered.Add(messages);
+            return Task.FromResult(string.Join(" ", messages.Select(m => $"<{m.Role}> {m.Content}")));
+        }
+
+        /// <summary>Whether the loaded model sees pictures (it has its projector).</summary>
+        public bool Sees { get; set; }
+        public bool SeesPictures => Sees;
+
+        /// <summary>The engine's own count of a picture's tokens; without one it cannot count and the rule is used.</summary>
+        public Func<PromptPicture, int?>? CountPicture { get; set; }
+
+        public Task<int?> CountPictureTokensAsync(PromptPicture picture, CancellationToken ct = default) =>
+            Task.FromResult(Sees ? CountPicture?.Invoke(picture) : null);
+
+        /// <summary>Raw completions that carried pictures: the text and where each picture goes in it.</summary>
+        public List<(string Prompt, IReadOnlyList<PromptPicture> Pictures)> PictureCompletions { get; } = [];
+
+        public IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, IReadOnlyList<PromptPicture> pictures, SamplerPreset sampler, CancellationToken ct = default)
+        {
+            if (pictures.Count == 0) return StreamCompletionAsync(prompt, sampler, ct);
+            PictureCompletions.Add((prompt, pictures));
+            Samplers.Add(sampler);
+            return Reply(ct);
+        }
 
         public IAsyncEnumerable<ChatDelta> StreamChatAsync(IReadOnlyList<PromptMessage> messages, SamplerPreset sampler, CancellationToken ct = default)
         {
@@ -79,7 +112,7 @@ public sealed partial class ChatServiceTests : IDisposable
         _characters = _services.GetRequiredService<ICharacterStore>();
         _presets = new PresetCatalog(_services.GetRequiredService<IDocumentStore>());
         _stories = _services.GetRequiredService<DogAI.Core.Stories.IStoryStore>();
-        _chat = new ChatService(_store, _engine, _presets, _characters, _stories);
+        _chat = new ChatService(_store, _engine, _presets, _characters, _stories, attached: _services.GetRequiredService<IAttachedPictureStore>());
     }
 
     private async Task<long> NewChatAsync(string instructions = "") =>

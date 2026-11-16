@@ -154,6 +154,15 @@ public sealed class ImageModelCatalog(IDocumentStore? documents = null)
     public LoraSettings LoraFor(string lora, LoraFacts? facts) =>
         _doc.Loras.TryGetValue(Normalise(lora), out var saved) ? saved : new LoraSettings(string.Join(", ", facts?.Triggers ?? []));
 
+    /// <summary>
+    /// The card a LoRA is drawn with (the picture maker and the test picture). A saved card as it is: its words are the
+    /// owner's. For a LoRA without one, the trigger words found in the file are cleaned first, the way they are shown
+    /// (<see cref="LoraChips.FromFile"/>: no paths, addresses, overlong words or left-out tags): they come from the
+    /// file's maker, and nothing the owner cannot see goes into a prompt (owner's decision, 2026-11-15).
+    /// </summary>
+    public LoraSettings LoraToDraw(string lora, LoraFacts? facts, TagList? tags = null) =>
+        _doc.Loras.TryGetValue(Normalise(lora), out var saved) ? saved : new LoraSettings(string.Join(", ", LoraChips.FromFile(facts?.Triggers, tags).Words));
+
     public bool IsLoraChanged(string lora) => _doc.Loras.ContainsKey(Normalise(lora));
 
     public async Task SaveLoraAsync(string lora, LoraSettings settings, CancellationToken ct = default)

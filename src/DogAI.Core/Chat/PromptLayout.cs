@@ -129,9 +129,15 @@ public sealed class PromptLayout
             turns[last] = Join(turns[last], final);
 
         // Found passages and recalled messages come first in the newest user turn, so the message itself is read last.
+        // The turn's own pictures stay with its own text: they move back by what is put in front of them.
         var reference = string.Join("\n\n", (parts ?? Parts).Where(p => p.InUserTurn).OrderBy(p => p.Kind).Select(p => p.Text));
+        (int Turn, int By) moved = (-1, 0);
         if (reference.Length > 0 && UserTurnAt(history, history.Count - 1) is { } newest)
-            turns[newest] = turns[newest].Trim().Length == 0 ? reference : reference + "\n\n" + turns[newest];
+        {
+            var bare = turns[newest].Trim().Length == 0;
+            moved = (newest, bare ? reference.Length : reference.Length + 2);
+            turns[newest] = bare ? reference : reference + "\n\n" + turns[newest];
+        }
 
         var request = directive ? Directive.Trim() : "";
         if (request.Length > 0 && history.Count > 0 && history[^1].Role == "user")
@@ -140,7 +146,12 @@ public sealed class PromptLayout
             request = "";
         }
 
-        for (var i = 0; i < history.Count; i++) result.Add(history[i] with { Content = turns[i] });
+        for (var i = 0; i < history.Count; i++)
+        {
+            var pictures = history[i].Pictures;
+            if (pictures is not null && i == moved.Turn) pictures = [.. pictures.Select(p => p with { After = p.After + moved.By })];
+            result.Add(history[i] with { Content = turns[i], Pictures = pictures });
+        }
         if (request.Length > 0) result.Add(new PromptMessage("user", request));
         return result;
     }

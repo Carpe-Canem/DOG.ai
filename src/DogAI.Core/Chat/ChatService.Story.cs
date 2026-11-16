@@ -66,7 +66,9 @@ public sealed partial class ChatService
         var chat = await store.GetAsync(chatId, ct) ?? throw new InvalidOperationException("That chat no longer exists.");
         if (chat.Mode != CharacterChatMode) throw new InvalidOperationException("Only a chat with one character can become a story.");
         story.Kind = StoryKind.Interactive;
-        var path = MessagesForStory(new MessageTree(await store.GetMessagesAsync(chatId, ct)).PathTo(chat.ActiveLeafId));
+        // A story is text: a picture on a chat message comes along as "[picture]", never as the picture.
+        var path = MessagesForStory([.. new MessageTree(await store.GetMessagesAsync(chatId, ct)).PathTo(chat.ActiveLeafId)
+            .Select(m => m.Pictures.Count == 0 ? m : new ChatMessage { Id = m.Id, Role = m.Role, Content = AttachedPictures.TextOf(m) })]);
 
         var conversation = await StartStoryAsync(title, story, null, ct);
         var copies = new Dictionary<long, long>();

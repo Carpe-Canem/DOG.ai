@@ -21,7 +21,11 @@ public enum EngineState
 
 /// <param name="ContextLength">Context window to allocate, in tokens. Capped at what the model was trained for.</param>
 /// <param name="GpuLayers">How many layers go on the graphics card; -1 lets the engine put on as many as fit.</param>
-public sealed record EngineOptions(int ContextLength = 8192, int GpuLayers = -1);
+/// <param name="Projector">
+/// The model's projector file, loaded beside it so it can see pictures (M17; <see cref="ModelProjector.Find"/>). Null
+/// loads the model exactly as before: the engine never takes a projector by itself.
+/// </param>
+public sealed record EngineOptions(int ContextLength = 8192, int GpuLayers = -1, string? Projector = null);
 
 /// <summary>
 /// Owns the llama-server process: starts it for one model on a random port bound to 127.0.0.1,
@@ -50,6 +54,22 @@ public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlo
 
     /// <summary>Layers placed on the graphics card for the loaded model; -1 means "as many as fit".</summary>
     public int GpuLayers { get; private set; }
+
+    /// <summary>
+    /// True when the model can be given pictures: it was loaded with its projector and the engine says it sees. Stays
+    /// true while the model is set aside for a picture (it comes back the same).
+    /// </summary>
+    public bool SeesPictures => _sees && State is EngineState.Ready or EngineState.Resting;
+    private bool _sees;
+
+    /// <summary>The projector file the model was loaded with, or null.</summary>
+    public string? Projector { get; private set; }
+
+    /// <summary>
+    /// Set when the model has a projector but was loaded without it, because the engine stopped when given it (an
+    /// engine too old for the switches, or a projector it cannot use): what to tell the owner. Null otherwise.
+    /// </summary>
+    public string? PictureInputProblem { get; private set; }
 
     /// <summary>Process id of the running engine, for measuring its graphics memory.</summary>
     public int? ProcessId => _process is { } p && !p.HasExited ? p.Id : null;
@@ -140,6 +160,8 @@ public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlo
             ModelPath = modelPath;
             ModelName = info?.DisplayName(modelPath) ?? Path.GetFileNameWithoutExtension(modelPath);
             Error = null;
+            Projector = PictureInputProblem = null;
+            _sees = false;
             Set(EngineState.Loading);
 
             if (!File.Exists(modelPath)) throw new EngineException("That model file no longer exists.");
@@ -150,41 +172,26 @@ public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlo
             if (info.ContextLength is > 0 and var trained) context = Math.Min(context, trained);
             planned = context;
 
-            var port = FreePort();
-            var key = Guid.NewGuid().ToString("N");
-            var start = new ProcessStartInfo(exe)
+            var projector = options.Projector is { } file && File.Exists(file) ? file : null;
+            LlamaApi api;
+            try
             {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                WorkingDirectory = Path.GetDirectoryName(exe)!,
-            };
-            foreach (var arg in new[]
+                api = await StartAsync(exe, modelPath, context, options.GpuLayers, projector, cts.Token).ConfigureAwait(false);
+            }
+            catch (EngineException) when (projector is not null && !cts.IsCancellationRequested && _process is null or { HasExited: true })
             {
-                "--model", modelPath, "--host", "127.0.0.1", "--port", port.ToString(),
-                "--ctx-size", context.ToString(), "--gpu-layers", options.GpuLayers < 0 ? "999" : options.GpuLayers.ToString(),
-                "--parallel", "1", "--no-webui", "--jinja",
-            })
-                start.ArgumentList.Add(arg);
-            // The key keeps other programs on this PC from using the engine; it goes in the environment, not the command line.
-            EngineEnvironment.Clean(start);
-            start.Environment["LLAMA_API_KEY"] = key;
-
-            var process = new Process { StartInfo = start, EnableRaisingEvents = true };
-            process.OutputDataReceived += (_, e) => Remember(e.Data);
-            process.ErrorDataReceived += (_, e) => Remember(e.Data);
-            process.Exited += (_, _) => OnExited(process);
-            lock (_recentOutput) _recentOutput.Clear();
-            process.Start();
-            _job.Add(process);
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-            _process = process;
-
-            var api = new LlamaApi(_http.Client, port, key);
-            await WaitUntilReadyAsync(process, api, cts.Token).ConfigureAwait(false);
-            ContextLength = await api.ContextLengthAsync(cts.Token).ConfigureAwait(false) ?? context;
+                // The engine stopped with the projector (one too old for the switches stops at once; a projector it
+                // cannot use stops it after the model is in). The model is loaded again as before M17, and says so.
+                StopProcess();
+                PictureInputProblem = PictureInputStopped(ModelName ?? "The model", Path.GetFileName(projector));
+                Output?.Invoke("DOG.ai: " + PictureInputProblem); // for the log: names the two files, nothing else
+                projector = null;
+                api = await StartAsync(exe, modelPath, context, options.GpuLayers, null, cts.Token).ConfigureAwait(false);
+            }
+            var props = await api.PropsAsync(cts.Token).ConfigureAwait(false);
+            ContextLength = props.ContextLength ?? context;
+            Projector = projector;
+            _sees = projector is not null && props.Vision;
             GpuLayers = options.GpuLayers;
             LastTokensPerSecond = 0;
             LastActivity = DateTimeOffset.Now;
@@ -229,6 +236,61 @@ public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlo
             ended.TrySetResult();
             _gate.Release();
         }
+    }
+
+    /// <summary>What <see cref="PictureInputProblem"/> says when the engine stopped with the projector.</summary>
+    internal static string PictureInputStopped(string model, string projector) =>
+        $"{model} was loaded without picture input: the model engine stopped when it was given {projector}. " +
+        $"If the engine is an older one, update it in {DogAI.Core.Models.ModelsPlaces.EnginesName}.";
+
+    /// <summary>The switches a model is started with. With a projector, two more; without, exactly those of before M17.</summary>
+    internal static IReadOnlyList<string> Arguments(string modelPath, int port, int context, int gpuLayers, string? projector)
+    {
+        var arguments = new List<string>
+        {
+            "--model", modelPath, "--host", "127.0.0.1", "--port", port.ToString(),
+            "--ctx-size", context.ToString(), "--gpu-layers", gpuLayers < 0 ? "999" : gpuLayers.ToString(),
+            "--parallel", "1", "--no-webui", "--jinja",
+        };
+        // The cap keeps a picture at 1,026 tokens whatever its size. Never --media-path, --mmproj-url or --mmproj-auto:
+        // pictures arrive only as bytes in a request, and nothing is fetched.
+        if (projector is not null)
+            arguments.AddRange(["--mmproj", projector, "--image-max-tokens", AttachedPictures.EngineMaxTokens.ToString()]);
+        return arguments;
+    }
+
+    /// <summary>Starts the engine for a model and waits until it answers.</summary>
+    private async Task<LlamaApi> StartAsync(string exe, string modelPath, int context, int gpuLayers, string? projector, CancellationToken ct)
+    {
+        var port = FreePort();
+        var key = Guid.NewGuid().ToString("N");
+        var start = new ProcessStartInfo(exe)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            WorkingDirectory = Path.GetDirectoryName(exe)!,
+        };
+        foreach (var arg in Arguments(modelPath, port, context, gpuLayers, projector)) start.ArgumentList.Add(arg);
+        // The key keeps other programs on this PC from using the engine; it goes in the environment, not the command line.
+        EngineEnvironment.Clean(start);
+        start.Environment["LLAMA_API_KEY"] = key;
+
+        var process = new Process { StartInfo = start, EnableRaisingEvents = true };
+        process.OutputDataReceived += (_, e) => Remember(e.Data);
+        process.ErrorDataReceived += (_, e) => Remember(e.Data);
+        process.Exited += (_, _) => OnExited(process);
+        lock (_recentOutput) _recentOutput.Clear();
+        process.Start();
+        _job.Add(process);
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        _process = process;
+
+        var api = new LlamaApi(_http.Client, port, key);
+        await WaitUntilReadyAsync(process, api, ct).ConfigureAwait(false);
+        return api;
     }
 
     /// <summary>
@@ -365,7 +427,37 @@ public sealed class EngineManager : IChatEngine, DogAI.Core.Images.IChatModelSlo
         TrackAsync(api => api.StreamChatAsync(messages, sampler, ct), ct);
 
     public IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, SamplerPreset sampler, CancellationToken ct = default) =>
-        TrackAsync(api => api.StreamCompletionAsync(prompt, sampler, ct), ct);
+        TrackAsync(api => api.StreamCompletionAsync(prompt, [], sampler, ct), ct);
+
+    public IAsyncEnumerable<ChatDelta> StreamCompletionAsync(string prompt, IReadOnlyList<PromptPicture> pictures, SamplerPreset sampler, CancellationToken ct = default) =>
+        TrackAsync(api => api.StreamCompletionAsync(prompt, pictures, sampler, ct), ct);
+
+    /// <summary>
+    /// What a picture costs, by the engine's own count. Asked only of a model that is in memory and sees: counting never
+    /// brings a model back that was set aside. Null when it cannot be asked, or the engine cannot count.
+    /// </summary>
+    public async Task<int?> CountPictureTokensAsync(PromptPicture picture, CancellationToken ct = default)
+    {
+        LlamaApi api;
+        lock (_use)
+        {
+            if (State != EngineState.Ready || !_sees || _api is not { } ready) return null;
+            api = ready;
+            _busy++;
+        }
+        try
+        {
+            return await api.CountPictureTokensAsync(picture.Jpeg, ct).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is HttpRequestException or EngineException)
+        {
+            return null;
+        }
+        finally
+        {
+            EndUse();
+        }
+    }
 
     /// <summary>
     /// Answer now: asks the running engine to end the thinking of the reply named <paramref name="replyId"/>. It takes no

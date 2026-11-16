@@ -129,7 +129,7 @@ public sealed partial class ChatService
         var text = new StringBuilder(conversation.Mode == Stories.Story.Mode ? "[Earlier in the story, possibly relevant now]" : "[Earlier in this chat, possibly relevant now]");
         foreach (var (message, _) in hits)
         {
-            var content = message.Content.Trim();
+            var content = AttachedPictures.TextOf(message).Trim(); // a recalled message is text: "[picture]" where one was
             if (content.Length > RecallMessageChars) content = content[..RecallMessageChars].TrimEnd() + "…";
             var block = "\n\n" + names.Label(message) + ": " + content;
             var tokens = await CountTextAsync(block, ct);

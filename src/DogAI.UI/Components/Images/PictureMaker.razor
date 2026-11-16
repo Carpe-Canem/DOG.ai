@@ -344,7 +344,7 @@
             _settings = Catalog.CheckpointFor(chosen, _checkpoint.Verdict);
             var styles = Catalog.StyleLorasFor(chosen);
             _styleLoras = Loras().Where(l => styles.Contains(ImageModelCatalog.Normalise(l.RelativePath), StringComparer.OrdinalIgnoreCase))
-                .Select(l => (ImageModelCatalog.Normalise(l.RelativePath), Catalog.LoraFor(l.RelativePath, l.Verdict.Lora))).ToList();
+                .Select(l => (ImageModelCatalog.Normalise(l.RelativePath), Catalog.LoraToDraw(l.RelativePath, l.Verdict.Lora))).ToList();
         }
 
         // The picture chosen earlier in this editor, else the one kept for this owner: it can be redrawn from its seed.
@@ -376,7 +376,7 @@
     {
         // A character LoRA counts only when its file is installed; otherwise it is left out with its trigger words.
         var lora = p.Looks.Lora is { } path && Loras().FirstOrDefault(l => ImageModelCatalog.Normalise(l.RelativePath).Equals(path, StringComparison.OrdinalIgnoreCase)) is { } file
-            ? Catalog.LoraFor(file.RelativePath, file.Verdict.Lora)
+            ? Catalog.LoraToDraw(file.RelativePath, file.Verdict.Lora)
             : null;
         return new PersonLooks(p.Name, p.Looks, lora);
     }).ToList();

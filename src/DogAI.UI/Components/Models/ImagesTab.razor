@@ -579,7 +579,7 @@
             // The checkpoint's style LoRAs, as in every picture, then the one picked for this test.
             var styles = Catalog.StyleLorasFor(checkpoint.RelativePath);
             var loras = Loras.Where(l => styles.Contains(ImageModelCatalog.Normalise(l.RelativePath), StringComparer.OrdinalIgnoreCase) || l.RelativePath == _testLora)
-                .Select(l => (l.RelativePath, Catalog.LoraFor(l.RelativePath, l.Verdict.Lora))).ToList();
+                .Select(l => (l.RelativePath, Catalog.LoraToDraw(l.RelativePath, l.Verdict.Lora))).ToList();
             var subject = ImagePrompt.TestSubject(settings.Style) + (_keepWords is null ? "" : ", " + _keepWords);
             var quality = _quality;
             // Drawn the way pictures are kept (WebP), so what is shown is exactly what Keep would save.

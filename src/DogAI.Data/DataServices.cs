@@ -22,6 +22,7 @@ public static class DataServices
                 .AddInterceptors(new DeleteWatcher(sp.GetRequiredService<DatabaseTidy>())));
         services.AddSingleton<ISettingsStore, SqliteSettingsStore>();
         services.AddSingleton<IChatStore, SqliteChatStore>();
+        services.AddSingleton<IAttachedPictureStore, SqliteAttachedPictureStore>();
         services.AddSingleton<DogAI.Core.Search.ISearchStore, SqliteSearchStore>();
         services.AddSingleton<DogAI.Core.Backup.IBackupService, SqliteBackupService>();
         services.AddSingleton<ICharacterStore, SqliteCharacterStore>();

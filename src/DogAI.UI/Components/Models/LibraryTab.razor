@@ -70,7 +70,7 @@
                     }
                     @if (!search)
                     {
-                        <BesidePicturesChip Fit="m.Fit" Measured="@record?.MeasuredAt(Ctx.Context)" />
+                        <BesidePicturesChip Fit="m.Fit" Measured="@record?.MeasuredAt(Ctx.Context, m.Projector is not null)" />
                     }
                 </div>
                 <FitBadge Fit="m.Fit" MeasuredTokensPerSecond="record?.BenchTokensPerSecond" />
@@ -112,7 +112,7 @@
     /// <summary>Raised after the library changes, so the page can refresh its counts.</summary>
     [Parameter] public EventCallback Changed { get; set; }
 
-    private sealed record Item(ModelFile File, GgufInfo? Info, FitResult? Fit);
+    private sealed record Item(ModelFile File, GgufInfo? Info, FitResult? Fit, ProjectorFile? Projector = null);
 
     private AppSettings _settings = new();
     private List<Item>? _models;
@@ -150,7 +150,9 @@
         _models = await Task.Run(() => ModelLibrary.ScanAll(folders).Select(f =>
         {
             var info = GgufReader.TryRead(f.Path);
-            return new Item(f, info, info is null ? null : budget.Fit(info.ToShape(f.SizeBytes)));
+            // A model with a projector beside it is loaded with it (picture input, M17), so it is judged with it.
+            var projector = info is null ? null : ModelProjector.Find(f.Path, info);
+            return new Item(f, info, info is null ? null : budget.Fit(info.ToShape(f.SizeBytes, projector?.SizeBytes ?? 0)), projector);
         }).ToList());
         StateHasChanged();
     }

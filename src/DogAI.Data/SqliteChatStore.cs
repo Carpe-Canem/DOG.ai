@@ -125,6 +125,7 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
         await db.ChatCollections.Where(l => l.ConversationId == id || own.Contains(l.CollectionId)).ExecuteDeleteAsync(ct);
         await db.Collections.Where(c => c.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.MessageVectors.Where(v => v.ConversationId == id).ExecuteDeleteAsync(ct);
+        await db.AttachedPictures.Where(p => p.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.Messages.Where(m => m.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.ChatMembers.Where(m => m.ConversationId == id).ExecuteDeleteAsync(ct);
         await db.Stories.Where(s => s.ConversationId == id).ExecuteDeleteAsync(ct);
@@ -134,10 +135,19 @@ public sealed class SqliteChatStore(IDbContextFactory<DogDbContext> factory) : I
     public async Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(long conversationId, CancellationToken ct = default)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
-        return await db.Messages.AsNoTracking()
+        var messages = await db.Messages.AsNoTracking()
             .Where(m => m.ConversationId == conversationId)
             .OrderBy(m => m.Id)
             .ToListAsync(ct);
+        // The pictures on them, without their images: who has which, how large, in which order.
+        var pictures = await SqliteAttachedPictureStore.Listed(db.AttachedPictures.Where(p => p.ConversationId == conversationId)).ToListAsync(ct);
+        if (pictures.Count > 0)
+        {
+            var byMessage = pictures.GroupBy(p => p.MessageId).ToDictionary(g => g.Key, g => (IReadOnlyList<AttachedPicture>)g.OrderBy(p => p.Position).ThenBy(p => p.Id).ToList());
+            foreach (var message in messages)
+                if (byMessage.TryGetValue(message.Id, out var own)) message.Pictures = own;
+        }
+        return messages;
     }
 
     public async Task<ChatMessage> AddMessageAsync(ChatMessage message, CancellationToken ct = default)

@@ -19,6 +19,14 @@ public static class ContextBudgeter
     /// <summary>Rough cost of the role markers a chat template wraps around each message.</summary>
     public const int PerMessageOverhead = 8;
 
+    /// <summary>
+    /// The engine's "this does not fit" in words for the owner. It cuts nothing by itself: a newest message that alone is
+    /// larger than the context (four pictures can be) is refused whole.
+    /// </summary>
+    public static string TooLong(int promptTokens, int contextLength) =>
+        $"What was sent needs {promptTokens:N0} tokens, and the model was loaded with room for {contextLength:N0}. " +
+        $"Send less at once (fewer pictures, or a shorter message), or choose a larger context size in {Models.ModelsPlaces.LibraryName}.";
+
     /// <summary>Room kept free for the reply: a quarter of the window, at most 2048 tokens.</summary>
     public static int ReplyReserve(int contextLength) => Math.Min(2048, Math.Max(0, contextLength) / 4);
 

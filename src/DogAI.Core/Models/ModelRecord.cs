@@ -36,8 +36,15 @@ public sealed class ModelRecord
     public long? MeasuredVramBytes { get; set; }
     public int? MeasuredVramContext { get; set; }
 
-    /// <summary>What the model really took at this context size, or null when it was never loaded whole at it.</summary>
-    public long? MeasuredAt(int context) => MeasuredVramBytes is > 0 and var bytes && MeasuredVramContext == context ? bytes : null;
+    /// <summary>
+    /// Whether <see cref="MeasuredVramBytes"/> was taken with the model's projector loaded (picture input, M17; about
+    /// 1.1 GB more). A measurement with it is never used for a load without it, nor the other way round.
+    /// </summary>
+    public bool MeasuredVramProjector { get; set; }
+
+    /// <summary>What the model really took at this context size, with or without its projector, or null when it was never loaded whole that way.</summary>
+    public long? MeasuredAt(int context, bool withProjector = false) =>
+        MeasuredVramBytes is > 0 and var bytes && MeasuredVramContext == context && MeasuredVramProjector == withProjector ? bytes : null;
 }
 
 public interface IModelRecordStore

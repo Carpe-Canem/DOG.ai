@@ -88,10 +88,22 @@ public partial class App : Application
 
             var engine = _services.GetRequiredService<EngineManager>();
             engine.Output += line => log.LogDebug("engine: {Line}", line);
+            string? pictureInputLogged = null;
             engine.Changed += () =>
             {
                 if (engine.State == EngineState.Failed) log.LogWarning("Engine failed for {Model}: {Error}", engine.ModelPath, engine.Error);
                 else log.LogInformation("Engine {State} {Model}", engine.State, engine.ModelPath);
+                // Picture input (M17): which projector the model was loaded with, or why it was left out. Once per load.
+                if (engine.State != EngineState.Ready)
+                {
+                    pictureInputLogged = null;
+                    return;
+                }
+                var pictureInput = engine.PictureInputProblem ?? engine.Projector;
+                if (pictureInput is null || pictureInput == pictureInputLogged) return;
+                pictureInputLogged = pictureInput;
+                if (engine.PictureInputProblem is { } problem) log.LogWarning("{Problem}", problem);
+                else log.LogInformation("Picture input: loaded with {Projector}", Path.GetFileName(pictureInput));
             };
 
             var search = _services.GetRequiredService<EmbeddingServer>();

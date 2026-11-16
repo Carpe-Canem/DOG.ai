@@ -23,8 +23,17 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
         var info = await Task.Run(() => GgufReader.TryRead(file.Path), ct).ConfigureAwait(false);
         if (info is null) return null;
         var budget = await BudgetAsync(ct).ConfigureAwait(false);
-        return FitEstimator.Estimate(info.ToShape(file.SizeBytes), context, budget);
+        var projector = await ProjectorAsync(file.Path, info, ct).ConfigureAwait(false);
+        return FitEstimator.Estimate(info.ToShape(file.SizeBytes, projector?.SizeBytes ?? 0), context, budget);
     }
+
+    /// <summary>
+    /// The projector a model is loaded with so it can see pictures, or null when it has none that belongs
+    /// (<see cref="ModelProjector.Find"/>). It is loaded whenever the model has one (owner's decision, 2026-11-16), so
+    /// everything that judges or loads the model asks here.
+    /// </summary>
+    public static Task<ProjectorFile?> ProjectorAsync(string path, GgufInfo? info = null, CancellationToken ct = default) =>
+        Task.Run(() => ModelProjector.Find(path, info), ct);
 
     /// <summary>The memory a new model may use. Counts what the loaded model holds, since loading another frees it.</summary>
     public async Task<FitBudget> BudgetAsync(CancellationToken ct = default)
@@ -42,8 +51,9 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
         var info = file is null ? null : await Task.Run(() => GgufReader.TryRead(file.Path), ct).ConfigureAwait(false);
         if (file is null || info is null) return LoadDecision.Decide(Path.GetFileNameWithoutExtension(path), context, null, null, record);
         var budget = await BudgetAsync(ct).ConfigureAwait(false);
-        var plan = FitEstimator.Estimate(info.ToShape(file.SizeBytes), context, budget);
-        return LoadDecision.Decide(info.DisplayName(path), context, plan, budget, record);
+        var projector = await ProjectorAsync(path, info, ct).ConfigureAwait(false);
+        var plan = FitEstimator.Estimate(info.ToShape(file.SizeBytes, projector?.SizeBytes ?? 0), context, budget);
+        return LoadDecision.Decide(info.DisplayName(path), context, plan, budget, record) with { Projector = projector?.Path };
     }
 
     /// <summary>
@@ -162,7 +172,7 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
             decision = await DecideAsync(path, context).ConfigureAwait(false);
         if (decision.Refusal is { } why) throw new ModelRefusedException(why);
         _heldUnloaded = false;
-        await engine.LoadAsync(path, new EngineOptions(context, decision.GpuLayers), automatic).ConfigureAwait(false);
+        await engine.LoadAsync(path, new EngineOptions(context, decision.GpuLayers, decision.Projector), automatic).ConfigureAwait(false);
         // Every layer on the card: what it really holds there is worth remembering (the "Fits beside pictures" mark).
         if (decision.GpuLayers < 0 && engine.State == EngineState.Ready) _ = RememberMemoryAsync(path, context);
     }
@@ -189,6 +199,8 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
             var record = await records.FindAsync(path).ConfigureAwait(false) ?? new ModelRecord { Path = path, Quant = ModelLibrary.Describe(path)?.Quant };
             record.MeasuredVramBytes = held;
             record.MeasuredVramContext = context;
+            // With or without its projector: the two differ by about 1.1 GB and are never used for each other.
+            record.MeasuredVramProjector = engine.Projector is not null;
             await records.SaveAsync(record).ConfigureAwait(false);
             MemoryMeasured?.Invoke();
         }
