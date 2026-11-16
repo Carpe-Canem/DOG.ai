@@ -126,7 +126,7 @@
 }
 else
 {
-    <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" @bind-Notice="_notice" />
+    <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" @bind-Notice="_notice" PicturePeople="@ChatPictures.Nobody" PictureChatMode="general" />
 }
 
 <SectionContent SectionName="composer"><ChatComposer Path="@_path" OnSendWithPictures="SendAsync" /></SectionContent>

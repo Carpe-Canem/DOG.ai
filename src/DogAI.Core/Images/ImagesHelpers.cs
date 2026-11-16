@@ -1,3 +1,5 @@
+using DogAI.Core.Chat;
+using DogAI.Core.Models;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -340,3 +342,63 @@ public static class LoraChips
 /// <summary>What "Write it for me…" wrote: the prompt for the owner to put in the box and change, and what the tag check did to it.</summary>
 /// <param name="Moment">One sentence on what the picture shows, as the model understood it. Shown, never sent to the picture engine.</param>
 public sealed record PromptDraft(string Moment, string Prompt, TagNotes Notes);
+
+/// <summary>
+/// The picture "Write it for me… › From a picture" looks at (M17 step 5): the JPEG the page made from the picture shown on
+/// the Make tab, a kept picture or a file (<see cref="AttachedPictures.MaxSide"/> pixels, quality
+/// <see cref="AttachedPictures.Quality"/>: the chat engine does not read WebP). Held in <see cref="ImagesSession"/> only:
+/// never a file, a cache or a row. It is only looked at; nothing is drawn from it.
+/// </summary>
+/// <param name="From">Where it came from, in words ("Try 3", "A kept picture", "A file").</param>
+public sealed record HelperPicture(byte[] Jpeg, int Width, int Height, string From)
+{
+    // Kept beside the bytes, not in the record (a record's fields count when two are compared).
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], string> Addresses = new();
+
+    /// <summary>The picture as a data: address (from memory; never a file), made once.</summary>
+    public string Src => Addresses.GetValue(Jpeg, static jpeg => "data:image/jpeg;base64," + Convert.ToBase64String(jpeg));
+
+    /// <summary>
+    /// The page's JPEG, made ready the way a chat picture is (<see cref="AttachedPictures.Plain"/> takes out the colour
+    /// profile the browser's encoder adds) and checked (<see cref="AttachedPictures.Problem"/>). Returns the picture, or
+    /// why it cannot be used.
+    /// </summary>
+    public static (HelperPicture? Picture, string? Problem) Of(byte[]? jpeg, string from)
+    {
+        if (jpeg is not { Length: > 0 }) return (null, FromPicture.NotAPicture);
+        var plain = AttachedPictures.Plain(jpeg);
+        if (AttachedPictures.Problem(plain) is { } problem) return (null, problem);
+        var (width, height) = AttachedPictures.SizeOf(plain);
+        return (new HelperPicture(plain, width, height, from), null);
+    }
+}
+
+/// <summary>The words of "Write it for me… › From a picture" (M17 step 5).</summary>
+public static class FromPicture
+{
+    public const string Shown = "The picture shown";
+    public const string Kept = "A kept picture";
+    public const string File = "A file";
+
+    /// <summary>The source of a try: "Try 3".</summary>
+    public static string Try(int number) => "Try " + number.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>The one line under the choice of picture.</summary>
+    public const string About =
+        "The chat model looks at the picture at 1,024 pixels and writes a prompt for a picture like it. Nothing is drawn from it, and it is kept nowhere: it stays in memory until DOG.ai closes.";
+
+    public const string NotAPicture = "That file could not be used: only " + ComposerPictures.Kinds + " pictures can be.";
+
+    /// <summary>Why Write cannot be pressed in picture mode with no picture chosen.</summary>
+    public const string Choose = "Choose a picture first.";
+
+    /// <summary>
+    /// Said before Write is pressed when the model that would be used cannot see: the one in memory, or the default for
+    /// General when none is (<paramref name="defaultName"/>). Ends before the place, which the page makes a link.
+    /// </summary>
+    public static PlaceLine CannotSee(string? defaultName) => defaultName is null
+        ? ComposerPictures.CannotSee(loaded: true)
+        : new($"The default model for General ({defaultName}) cannot see pictures, and it is the one used when none is loaded. Models that can are marked “{Projectors.Label}” in",
+            ModelsPlaces.LibraryName, ModelsPlaces.Address(ModelsPlaces.Library));
+
+}

@@ -157,8 +157,9 @@
     private bool ColourSpeech => Speech && Appearance.SpeechColours;
 
     /// <summary>
-    /// Character and group chats: who may be in a picture of a reply (<see cref="ChatPictures.People"/>). Replies then
-    /// get an Illustrate button and can show one kept picture. Null (General) means no pictures.
+    /// Who may be in a picture of a reply: the characters and the persona (<see cref="ChatPictures.People"/>) in character
+    /// and group chats, <see cref="ChatPictures.Nobody"/> in General (M17 step 5: the planner with nobody's Looks). Replies
+    /// then get an Illustrate button and can show one kept picture. Null means no pictures.
     /// </summary>
     [Parameter] public IReadOnlyList<IllustrationPerson>? PicturePeople { get; set; }
 
@@ -209,9 +210,9 @@
         };
     }
 
-    /// <summary>The name a message was written under, for the picture planner.</summary>
+    /// <summary>The name a message was written under, for the picture planner (General: "You" and the model's name).</summary>
     private string NameOf(ChatMessage m) =>
-        m.Role == ChatRole.User ? UserName : SpeakerOf?.Invoke(m.SpeakerId).Name ?? AssistantName ?? "";
+        m.Role == ChatRole.User ? UserName : SpeakerOf?.Invoke(m.SpeakerId).Name ?? AssistantName ?? m.ModelName ?? "Assistant";
 
     private RenderFragment PictureAbove(ChatMessage m, string src) => __builder =>
     {

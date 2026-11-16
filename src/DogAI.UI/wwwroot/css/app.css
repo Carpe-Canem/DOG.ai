@@ -685,6 +685,14 @@ button.cite:hover { border-color: var(--accent); }
 .writer-row .small { flex: 1; min-width: 160px; }
 .writer-result { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: min(var(--r), 10px); background: var(--surface2); }
 .writer-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .95em; }
+/* From a picture (M17 step 5): the choice, then the picture the model looks at, small, with where it came from. */
+.writer-from { justify-self: start; max-width: 100%; flex-wrap: wrap; }
+.writer-picture { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; min-height: 40px; }
+.writer-picture img { display: block; max-width: min(100%, 220px); max-height: 160px; width: auto; height: auto; object-fit: contain;
+  border: 1px solid var(--line); border-radius: min(var(--r), 8px); background: var(--surface2); }
+.writer-picture-facts { display: grid; gap: 6px; justify-items: start; min-width: 0; }
+.writer-picture-facts span { overflow-wrap: anywhere; }
+.writer-picture-none { align-self: center; }
 .tagcheck-head { margin: 4px 0 0; font-size: .9em; color: var(--muted); }
 .tagcheck-list { display: grid; gap: 6px; }
 .tagcheck-item { display: flex; gap: 10px; align-items: center; padding: 6px 10px; border: 1px solid var(--line); border-radius: min(var(--r), 10px); background: var(--surface); }

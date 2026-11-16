@@ -112,6 +112,8 @@
         <div class="row kept-acts">
             <button class="btn primary" id="kept-like" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? "Its checkpoint, prompts and settings, seed included, go to the Make tab")"
                     @onclick="() => LikeAsync(viewed)">Make one like this</button>
+            <button class="btn" id="kept-write" disabled="@_busy" title="The chat model looks at this picture and writes a prompt for one like it (Write it for me on the Make tab)"
+                    @onclick="() => WriteAsync(viewed)">Write a prompt from it…</button>
             <button class="btn" id="kept-upscale" disabled="@(UpscaleBlocked is not null || _busy)" title="@(UpscaleBlocked ?? "Make a larger picture from this one; it is kept as a new picture beside this one")"
                     @onclick="() => UpscaleAsync(viewed)">Upscale…</button>
             <button class="btn" id="kept-save" disabled="@_busy" title="Save this picture as a WebP file" @onclick="() => SaveAsync(viewed)">Save as a file…</button>
@@ -145,6 +147,9 @@
 
     /// <summary>What a Draw going on in the Make tab says, or null.</summary>
     [Parameter] public string? Drawing { get; set; }
+
+    /// <summary>"Write a prompt from it…" (M17 step 5): the page holds the picture and opens Write it for me on the Make tab; returns what stopped it, or null.</summary>
+    [Parameter] public Func<Picture, Task<string?>>? WriteFrom { get; set; }
 
     /// <summary>"Upscale…": hands the picture (with its image) to the page's Upscale dialog.</summary>
     [Parameter] public EventCallback<Picture> Upscale { get; set; }
@@ -362,6 +367,21 @@
         try
         {
             _viewError = await Like(picture);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task WriteAsync(Picture picture)
+    {
+        if (WriteFrom is null) return;
+        _busy = true;
+        _viewError = null;
+        try
+        {
+            _viewError = await WriteFrom(picture);
         }
         finally
         {

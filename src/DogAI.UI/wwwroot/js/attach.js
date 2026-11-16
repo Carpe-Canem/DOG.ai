@@ -140,3 +140,36 @@ export function watchPictures(root, textarea, input, dotnet, maxSide, quality, m
 export function choosePictures(input) {
   if (input) input.click();
 }
+
+// "Write it for me… › From a picture" (M17 step 5). A picture DOG.ai already holds (a try or a kept picture, WebP)
+// arrives as its bytes from C#, never through an address, and becomes the same JPEG a chat picture is.
+export function bytesToJpeg(bytes, maxSide, quality, maxBytes) {
+  return toJpeg(new Blob([bytes]), maxSide, quality, maxBytes);
+}
+
+// A file chosen in Windows' Open dialog (the hidden input), as that JPEG. Resolves with the bytes, no bytes (an empty
+// array) for a file that is not a picture the page takes, and null when nothing was chosen.
+export function pickPicture(input, maxSide, quality, maxBytes) {
+  guardPage();
+  return new Promise(resolve => {
+    if (!input) { resolve(null); return; }
+    const done = async () => {
+      input.removeEventListener('change', done);
+      input.removeEventListener('cancel', cancelled);
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file) { resolve(null); return; }
+      let jpeg = null;
+      try { jpeg = await toJpeg(file, maxSide, quality, maxBytes); } catch { jpeg = null; }
+      resolve(jpeg || new Uint8Array(0));
+    };
+    const cancelled = () => {
+      input.removeEventListener('change', done);
+      input.removeEventListener('cancel', cancelled);
+      resolve(null);
+    };
+    input.addEventListener('change', done);
+    input.addEventListener('cancel', cancelled);
+    input.click();
+  });
+}

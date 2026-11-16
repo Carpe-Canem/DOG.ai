@@ -75,6 +75,28 @@ public sealed class ImagesSession
     /// <summary>The helper's sentence as typed (the dialog tells it on every key, so closing and opening it again keeps it).</summary>
     public void Describe(string sentence) => Sentence = sentence ?? "";
 
+    /// <summary>True when "Write it for me…" starts from a picture (M17 step 5), else from the sentence. Never saved.</summary>
+    public bool FromPicture { get; private set; }
+
+    /// <summary>The picture "Write it for me… › From a picture" looks at, or null. Memory only: never saved, never a file.</summary>
+    public HelperPicture? Looked { get; private set; }
+
+    /// <summary>Sentence or picture: the helper's choice, kept while DOG.ai is open.</summary>
+    public void HelperFrom(bool picture)
+    {
+        if (FromPicture == picture) return;
+        FromPicture = picture;
+        Changed?.Invoke();
+    }
+
+    /// <summary>Holds the picture the helper looks at (null lets it go), and switches the helper to it.</summary>
+    public void Look(HelperPicture? picture)
+    {
+        Looked = picture;
+        if (picture is not null) FromPicture = true;
+        Changed?.Invoke();
+    }
+
     /// <summary>True once the boxes were filled for this run of DOG.ai (they are filled only once).</summary>
     public bool Started { get; private set; }
 

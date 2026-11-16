@@ -6,7 +6,7 @@ using DogAI.Core.Stories;
 namespace DogAI.Core.Chat;
 
 /// <summary>
-/// Pictures in character chats and group chats: a reply can show one kept picture above it, exactly as a story passage
+/// Pictures in character chats, group chats and General (M17 step 5): a reply can show one kept picture above it, exactly as a story passage
 /// does. The row, the pointer on the message and their removal are <see cref="Illustrations"/>' (<c>KeepAsync</c>,
 /// <c>RemoveAsync</c>, <c>Shown</c>); this class says who may be in a chat's picture and what the planner is given.
 /// A regenerated reply is a new message, so it starts with no picture; the earlier version keeps its own.
@@ -22,6 +22,17 @@ public static class ChatPictures
     /// <summary>The longest one earlier message may be in the background, and the background as a whole
     /// (under the planner's own limit for "what was said just before", <see cref="PictureWriter.MaxBeforeLength"/>).</summary>
     public const int BackgroundMessageLength = 500, BackgroundLength = 1400;
+
+    /// <summary>
+    /// Who may be in a picture of a General reply (M17 step 5): nobody with a card, so nobody's Looks; the planner names
+    /// anyone it draws "someone else" and describes them itself.
+    /// </summary>
+    public static readonly IReadOnlyList<IllustrationPerson> Nobody = [];
+
+    /// <summary>The picture maker's first line for a reply or a passage; the Looks sentence only where someone has a card.</summary>
+    public static string MakerIntro(string what, bool withCards) =>
+        $"Draw asks the chat model to pick one moment of this {what} and plan a picture of it, with at most {Illustrations.MaxPeople} people, then draws it." +
+        (withCards ? " People whose card has Looks keep them exactly as written." : "");
 
     /// <summary>
     /// Who may be in a picture of this chat: the characters in the order given (one for a character chat, the members

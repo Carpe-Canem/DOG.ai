@@ -75,9 +75,7 @@
     private ChatMessage? Viewing => _viewingId is { } id ? Path.FirstOrDefault(m => m.Id == id) : null;
     private ChatMessage? Illustrating => _illustratingId is { } id ? Path.FirstOrDefault(m => m.Id == id) : null;
 
-    private string Intro =>
-        $"Draw asks the chat model to pick one moment of this {What} and plan a picture of it, with at most {Illustrations.MaxPeople} people, " +
-        "then draws it. People whose card has Looks keep them exactly as written.";
+    private string Intro => ChatPictures.MakerIntro(What, People.Count > 0);
 
     private IReadOnlyList<(string Name, Looks Looks)> PeopleWithLooks => People.Select(p => (p.Name, p.Looks)).ToList();
 

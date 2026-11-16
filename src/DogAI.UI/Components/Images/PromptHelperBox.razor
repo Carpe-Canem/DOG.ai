@@ -1,25 +1,72 @@
 @* "Write it for me…" on the Images section's Make tab (M16 step 4): the chat model turns the owner's sentence into a
    prompt (PictureWriter.PromptAsync: schema, no thinking, a token limit, the answer checked; for tag checkpoints every tag
-   through the tag list). The result is shown here and goes into the prompt box only when the owner presses Replace or
-   Add, for them to change there. The sentence lives in ImagesSession (memory only); nothing here is written anywhere
-   or logged. Closing the dialog stops the job. *@
+   through the tag list). From a picture (M17 step 5): the model looks at the picture shown on the Make tab, a kept
+   picture (its large view hands it here through the page) or a file, made into the same 1,024-pixel JPEG a chat picture
+   is (attach.js; the chat engine does not read WebP), and fills the same form (PictureWriter.PromptFromPictureAsync).
+   The result is shown here and goes into the prompt box only when the owner presses Replace or Add, for them to change
+   there. The sentence and the picture live in ImagesSession (memory only); nothing here is written anywhere or logged.
+   Closing the dialog stops the job. *@
 @using DogAI.Engine.Images
-@implements IDisposable
+@implements IAsyncDisposable
 @inject PictureWriter Writer
 @inject ModelLauncher Launcher
 @inject EngineManager Engine
 @inject ISettingsStore SettingsStore
 @inject ExtraTags ExtraTagList
 @inject ImagesSession Session
+@inject IJSRuntime JS
 
 <Modal Title="Write it for me" Class="wide writer-box" OnClose="OnClose">
     <div class="writer" id="writer">
-        <label class="field-block">
-            <span class="field-label">Describe the picture</span>
-            <textarea class="field" id="writer-sentence" rows="3" maxlength="@PictureWriter.MaxSentenceLength" disabled="@Working"
-                      placeholder="e.g. A knight resting by a campfire in a snowy forest at night"
-                      value="@Session.Sentence" @oninput="e => Session.Describe(e.Value?.ToString() ?? string.Empty)" @onkeydown="KeyAsync"></textarea>
-        </label>
+        <div class="seg writer-from" role="group" aria-label="Start from">
+            <button type="button" id="writer-from-words" class="@(Session.FromPicture ? "" : "active")" aria-pressed="@(Session.FromPicture ? "false" : "true")"
+                    disabled="@Working" @onclick="() => Session.HelperFrom(false)">From words</button>
+            <button type="button" id="writer-from-picture" class="@(Session.FromPicture ? "active" : "")" aria-pressed="@(Session.FromPicture ? "true" : "false")"
+                    disabled="@Working" @onclick="() => Session.HelperFrom(true)">From a picture</button>
+        </div>
+        @if (Session.FromPicture)
+        {
+            <div class="writer-picture" id="writer-picture">
+                @if (Session.Looked is { } looked)
+                {
+                    <img id="writer-picture-thumb" src="@looked.Src" alt="The picture the model looks at" width="@looked.Width" height="@looked.Height" />
+                    <div class="writer-picture-facts">
+                        <span id="writer-picture-from">@looked.From · @looked.Width × @looked.Height</span>
+                        <button type="button" class="btn" id="writer-picture-forget" disabled="@Working" title="Let this picture go" @onclick="() => Session.Look(null)">Let it go</button>
+                    </div>
+                }
+                else
+                {
+                    <p class="small writer-picture-none" id="writer-picture-none">No picture chosen yet.</p>
+                }
+            </div>
+            <div class="row">
+                <button type="button" class="btn" id="writer-use-shown" disabled="@(Working || _picking || Shown is null)"
+                        title="@(Shown is null ? "There is no picture on the Make tab yet" : $"Try {Shown.Number}, as it is shown on the Make tab")" @onclick="UseShownAsync">Use the picture shown</button>
+                <button type="button" class="btn" id="writer-use-file" disabled="@(Working || _picking)" title="Open a picture file (@ComposerPictures.Kinds)" @onclick="UseFileAsync">Choose a file…</button>
+                <input type="file" class="writer-file" accept="@ComposerPictures.Accept" hidden @ref="_file" />
+            </div>
+            <p class="small" id="writer-picture-about">
+                @FromPicture.About A kept picture: open it in <a class="link-text" href="@ImagesPanels.KeptAddress">Kept pictures</a> and press Write a prompt from it.
+            </p>
+            @if (_pickNote is { } pickNote)
+            {
+                <p class="small bad-text" id="writer-picture-note" role="alert">@pickNote</p>
+            }
+            @if (CannotSee() is { } blind)
+            {
+                <div class="notice" id="writer-sees"><span>@blind.Text <a class="link-text" href="@blind.Address">@blind.PlaceName</a>.</span></div>
+            }
+        }
+        else
+        {
+            <label class="field-block">
+                <span class="field-label">Describe the picture</span>
+                <textarea class="field" id="writer-sentence" rows="3" maxlength="@PictureWriter.MaxSentenceLength" disabled="@Working"
+                          placeholder="e.g. A knight resting by a campfire in a snowy forest at night"
+                          value="@Session.Sentence" @oninput="e => Session.Describe(e.Value?.ToString() ?? string.Empty)" @onkeydown="KeyAsync"></textarea>
+            </label>
+        }
         <p class="small" id="writer-about">
             The chat model writes @(Style == PromptStyle.Tags ? "tags for this checkpoint, each looked up in the tag list" : "a prompt in plain words for this checkpoint"),
             keeping to the rating in Settings › Pictures (@PictureRatings.Title(Rating)). It adds no quality words. It uses the chat model in memory, else the default for General
@@ -32,8 +79,8 @@
             }
             else
             {
-                <button class="btn primary" id="writer-write" disabled="@(Blocked is not null || string.IsNullOrWhiteSpace(Session.Sentence))"
-                        title="@(Blocked ?? "Ctrl+Enter")" @onclick="WriteAsync">@(_draft is null ? "Write it" : "Write it again")</button>
+                <button class="btn primary" id="writer-write" disabled="@(WriteBlocked is not null)"
+                        title="@(WriteBlocked ?? (Session.FromPicture ? "The model looks at the picture" : "Ctrl+Enter"))" @onclick="WriteAsync">@(_draft is null ? "Write it" : "Write it again")</button>
             }
             <span class="small" id="writer-status" role="status">@(Blocked ?? _status)</span>
         </div>
@@ -75,29 +122,62 @@
     /// <summary>Why the model cannot be asked now (a Draw going on), or null.</summary>
     [Parameter] public string? Blocked { get; set; }
 
+    /// <summary>The try shown on the Make tab (From a picture can use it), or null.</summary>
+    [Parameter] public ImagesTry? Shown { get; set; }
+
     /// <summary>The prompt the owner chose, and whether it replaces the box (else it goes after what is typed).</summary>
     [Parameter] public EventCallback<(string Text, bool Replace)> OnPut { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
     private CancellationTokenSource? _cts;
-    private string? _status, _error;
+    private string? _status, _error, _pickNote;
     private PromptDraft? _draft;
+    private bool _picking;
+    private ElementReference _file;
+    private IJSObjectReference? _module;
+
+    /// <summary>The General default's name when no model is in memory and it cannot see (read once on open), else null.</summary>
+    private string? _blindDefault;
 
     private bool Working => _cts is not null;
 
-    protected override void OnInitialized() => Engine.Changed += Refresh;
+    /// <summary>Why Write cannot be pressed now, or null.</summary>
+    private string? WriteBlocked =>
+        Blocked
+        ?? (Session.FromPicture
+            ? Session.Looked is null ? FromPicture.Choose : CannotSee() is { } blind ? blind.Text + " " + blind.PlaceName + "." : null
+            : string.IsNullOrWhiteSpace(Session.Sentence) ? "Describe the picture first." : null);
+
+    /// <summary>
+    /// The model that would look cannot see: the one in memory (the engine's own word), else the General default (by its
+    /// file: no picture input beside it). Null when it can, or when that is not known yet (a model loading).
+    /// </summary>
+    private PlaceLine? CannotSee() =>
+        Engine.IsReady ? (Engine.SeesPictures ? null : FromPicture.CannotSee(null))
+        : Engine.State == EngineState.Loading ? null
+        : _blindDefault is { } name ? FromPicture.CannotSee(name)
+        : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Engine.Changed += Refresh;
+        var settings = await SettingsStore.LoadAsync();
+        if (ModelDefaults.For(settings, "general") is { } general && File.Exists(general))
+            _blindDefault = await Task.Run(() => ModelProjector.Find(general) is null ? Path.GetFileNameWithoutExtension(general) : null);
+    }
 
     private void Refresh() => _ = InvokeAsync(StateHasChanged);
 
     private async Task KeyAsync(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && e.CtrlKey && !Working && Blocked is null && !string.IsNullOrWhiteSpace(Session.Sentence)) await WriteAsync();
+        if (e.Key == "Enter" && e.CtrlKey && !Working && WriteBlocked is null) await WriteAsync();
     }
 
     private async Task WriteAsync()
     {
-        if (Working || Blocked is not null) return;
-        _error = null;
+        if (Working || WriteBlocked is not null) return;
+        var picture = Session.FromPicture ? Session.Looked : null;
+        _error = _pickNote = null;
         var cts = new CancellationTokenSource();
         _cts = cts;
         try
@@ -125,10 +205,26 @@
                 }
             }
             cts.Token.ThrowIfCancellationRequested();
+            // The engine's own word, once the model is in: picture input that failed to load leaves it blind.
+            if (picture is not null && !Engine.SeesPictures)
+            {
+                var blind = FromPicture.CannotSee(null);
+                _error = blind.Text + " " + blind.PlaceName + ".";
+                _status = null;
+                return;
+            }
             // A model set aside for pictures comes back with this request (it takes a few seconds).
-            _status = Engine.IsLoaded ? "The chat model is writing the prompt…" : "The chat model was set aside for pictures. It is loading again, then writes the prompt…";
+            _status = (Engine.IsLoaded, picture is null) switch
+            {
+                (true, true) => "The chat model is writing the prompt…",
+                (true, false) => "The chat model is looking at the picture…",
+                (false, true) => "The chat model was set aside for pictures. It is loading again, then writes the prompt…",
+                (false, false) => "The chat model was set aside for pictures. It is loading again, then looks at the picture…",
+            };
             StateHasChanged();
-            _draft = await Writer.PromptAsync(Session.Sentence, Style, Rating, TagList.Current, cts.Token);
+            _draft = picture is null
+                ? await Writer.PromptAsync(Session.Sentence, Style, Rating, TagList.Current, cts.Token)
+                : await Writer.PromptFromPictureAsync(picture.Jpeg, Style, Rating, TagList.Current, cts.Token);
             _status = null;
         }
         catch (OperationCanceledException)
@@ -149,6 +245,50 @@
 
     private void Cancel() => _cts?.Cancel();
 
+    private async Task<IJSObjectReference> ModuleAsync() =>
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/attach.js");
+
+    /// <summary>The try shown on the Make tab, made into the JPEG the model is given.</summary>
+    private async Task UseShownAsync()
+    {
+        if (Shown is not { } shown) return;
+        await PickAsync(async module => await module.InvokeAsync<byte[]?>("bytesToJpeg", shown.Image, AttachedPictures.MaxSide, AttachedPictures.Quality, ComposerPictures.MaxFileBytes),
+            FromPicture.Try(shown.Number));
+    }
+
+    /// <summary>A file chosen in Windows' Open dialog, opened and made into that JPEG by the page (never by C#).</summary>
+    private Task UseFileAsync() =>
+        PickAsync(async module => await module.InvokeAsync<byte[]?>("pickPicture", TimeSpan.FromHours(1), [_file, AttachedPictures.MaxSide, AttachedPictures.Quality, ComposerPictures.MaxFileBytes]),
+            FromPicture.File, cancelled: true);
+
+    /// <param name="cancelled">Null bytes mean nothing was chosen (the file dialog), not a refused picture.</param>
+    private async Task PickAsync(Func<IJSObjectReference, Task<byte[]?>> make, string from, bool cancelled = false)
+    {
+        _picking = true;
+        _pickNote = null;
+        try
+        {
+            var bytes = await make(await ModuleAsync());
+            if (bytes is null && cancelled) return;
+            var (picture, problem) = HelperPicture.Of(bytes, from);
+            if (picture is null)
+            {
+                _pickNote = bytes is { Length: > 0 } ? "That picture cannot be shown to the model. " + problem : FromPicture.NotAPicture;
+                return;
+            }
+            Session.Look(picture);
+            _draft = null;
+        }
+        catch (JSException)
+        {
+            _pickNote = FromPicture.NotAPicture;
+        }
+        finally
+        {
+            _picking = false;
+        }
+    }
+
     private Task PutAsync(bool replace) => _draft is { } draft ? OnPut.InvokeAsync((draft.Prompt, replace)) : Task.CompletedTask;
 
     /// <summary>What the tag check did to the model's tags, in one line; null when it changed nothing.</summary>
@@ -161,10 +301,20 @@
         return parts.Count == 0 ? null : string.Join(" ", parts);
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         Engine.Changed -= Refresh;
         // Closing the dialog (or leaving the Make tab) stops the job.
         _cts?.Cancel();
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)
+            {
+            }
+        }
     }
 }
