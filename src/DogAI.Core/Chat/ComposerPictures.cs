@@ -75,6 +75,18 @@ public static class ComposerPictures
         ? "The model could not see this picture: it cannot see pictures, so it was only told one is there."
         : $"The model could not see the {count} pictures in this chat: it cannot see pictures, so it was only told they are there.";
 
+    /// <summary>
+    /// What the chat will take of the next prompt, from the last reply's figures: its prompt and its answer, but not its
+    /// thinking, which is never sent again (at General's No limit Huihui thinks thousands of tokens a reply, and counting
+    /// them made "the oldest messages will be left out" appear after almost every reply).
+    /// </summary>
+    public static int NextPrompt(int promptTokens, int completionTokens, int thinkingTokens) =>
+        Math.Max(0, promptTokens) + Math.Max(0, completionTokens - Math.Max(0, thinkingTokens));
+
+    /// <summary>The thinking of a saved reply in tokens: DOG.ai's count when it kept one, else about four characters a token.</summary>
+    public static int ThinkingOf(ChatMessage reply) =>
+        Stories.StoryTurn.Of(reply).Thinking?.Tokens is { } counted ? counted : (reply.Reasoning?.Length ?? 0) / 4;
+
     /// <summary>The room a message and its pictures may take: the context less what is kept for the reply.</summary>
     public static int MessageRoom(int contextLength) => Math.Max(0, contextLength - ContextBudgeter.ReplyReserve(contextLength));
 

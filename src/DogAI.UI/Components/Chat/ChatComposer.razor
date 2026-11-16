@@ -341,7 +341,11 @@
             var last = Path.LastOrDefault(m => m.Role == ChatRole.Assistant && m.PromptTokens is not null);
             var pending = TakesPictures ? _pending.Sum(p => p.Tokens) : 0;
             if (last is null && pending == 0) return null;
-            var chat = last is null ? 0 : last.PromptTokens!.Value + (last.CompletionTokens ?? 0);
+            // With pictures waiting, the figure is what the next prompt will hold (the last reply's thinking is not sent
+            // again), so the figure and the line under it agree. With none, the meter is as it always was.
+            var chat = last is null ? 0
+                : pending > 0 ? ComposerPictures.NextPrompt(last.PromptTokens!.Value, last.CompletionTokens ?? 0, ComposerPictures.ThinkingOf(last))
+                : last.PromptTokens!.Value + (last.CompletionTokens ?? 0);
             var used = chat + pending;
             var room = ComposerPictures.Judge(Engine.ContextLength, chat, pending);
             return (used, Engine.ContextLength, Math.Clamp((int)((long)used * 100 / Engine.ContextLength), 1, 100), last?.TrimmedMessages ?? 0, pending, room);

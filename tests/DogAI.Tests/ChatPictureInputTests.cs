@@ -34,6 +34,23 @@ public sealed class ChatPictureInputTests
     public void Judge_says_whether_waiting_pictures_fit(int context, int used, int pending, PictureRoom expected) =>
         Assert.Equal(expected, ComposerPictures.Judge(context, used, pending));
 
+    /// <summary>A reply that thought 7,149 tokens filled the room; its thinking is not sent again, so four pictures still fit.</summary>
+    [Fact]
+    public void The_last_replys_thinking_does_not_count_against_the_pictures()
+    {
+        var reply = new ChatMessage { Role = ChatRole.Assistant, PromptTokens = 1043, CompletionTokens = 7149,
+            ExtraJson = new DogAI.Core.Stories.StoryTurn { Thinking = new ThinkingFacts { Tokens = 7149 } }.ToJson() };
+        var next = ComposerPictures.NextPrompt(reply.PromptTokens!.Value, reply.CompletionTokens!.Value, ComposerPictures.ThinkingOf(reply));
+        Assert.Equal(1043, next);
+        Assert.Equal(PictureRoom.Fits, ComposerPictures.Judge(8192, next, 2729));
+        Assert.Equal(PictureRoom.OlderLeftOut, ComposerPictures.Judge(8192, 1043 + 7149, 2729));
+        // Without DOG.ai's count, the thinking text stands in at about four characters a token.
+        var old = new ChatMessage { Role = ChatRole.Assistant, Reasoning = new string('x', 4000) };
+        Assert.Equal(1000, ComposerPictures.ThinkingOf(old));
+        Assert.Equal(500, ComposerPictures.NextPrompt(500, 50, 900)); // never less than the prompt
+        Assert.Equal(550, ComposerPictures.NextPrompt(500, 50, 0));
+    }
+
     [Fact]
     public void The_room_for_a_message_is_the_context_less_the_reply_reserve()
     {
