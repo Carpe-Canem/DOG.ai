@@ -76,9 +76,16 @@ public sealed class TagList
     /// "lean" (a build) is listed as another spelling of "leaning" (a pose); "orange" and "oranges" (most often the colour) of
     /// "orange (fruit)" (seen in M16 step 4: autumn leaves became fruit); "canopy" (of a tree or a bed) of
     /// "canopy (aircraft)" (seen in M16 step 6: a fox under a tree got an aircraft's canopy); "greys" and "grays" of
-    /// "roswell grey", a kind of creature (seen in M17 step 6: the colour "grey", tried as a plural, became it). They are not used.
+    /// "roswell grey", a kind of creature (seen in M17 step 6: the colour "grey", tried as a plural, became it); "black and white" of "monochrome", a picture with no colour (seen in M19 step 3: a black-and-white
+    /// dog's Looks would have made every picture of it grey). They are not used.
     /// </summary>
-    private static readonly HashSet<string> NotASpelling = new(StringComparer.Ordinal) { "lean", "orange", "oranges", "canopy", "greys", "grays" };
+    /// <summary>
+    /// Tags never kept alone for an unknown describing word in front of them, because with it they mean something else:
+    /// a "wiry coat" or "shaggy coat" is an animal's fur, and "coat" is a garment (seen in M19 step 3, a dog's Looks).
+    /// </summary>
+    private static readonly HashSet<string> NotAThingAlone = new(StringComparer.Ordinal) { "coat" };
+
+    private static readonly HashSet<string> NotASpelling = new(StringComparer.Ordinal) { "lean", "orange", "oranges", "canopy", "greys", "grays", "black and white" };
 
     public static TagList Empty { get; } = new();
 
@@ -300,7 +307,7 @@ public sealed class TagList
             thingOnly = true;
             if (words.Count == 3 && _tags.ContainsKey(words[^2] + " " + words[^1])) return [words[^2] + " " + words[^1]];
             if (words.Count == 3 && _tags.ContainsKey(words[0] + " " + words[^1])) return [words[0] + " " + words[^1]];
-            if (words.Count == 2 && words[^1].Length >= 3 && _tags.ContainsKey(words[^1])) return [words[^1]];
+            if (words.Count == 2 && words[^1].Length >= 3 && _tags.ContainsKey(words[^1]) && !NotAThingAlone.Contains(words[^1])) return [words[^1]];
             thingOnly = false;
         }
         return [];

@@ -290,7 +290,14 @@ public sealed class PicturePromptTests : IDisposable
         // one describing word is kept with it, else it is dropped.
         Assert.Equal(["medium hair"], list.Resolve("medium length hair"));
         Assert.Empty(list.Resolve("side swept hair"));
-        Assert.Equal(["cloak"], list.Resolve("tatterd cloak")); // one unknown word still leaves the thing        // No artists, characters or series: a name the model slips in is dropped.
+        Assert.Equal(["cloak"], list.Resolve("tatterd cloak")); // one unknown word still leaves the thing
+        // A black-and-white dog is not a picture without colour (seen in M19 step 3).
+        Assert.DoesNotContain("monochrome", list.Resolve("black and white"));
+        Assert.Equal(["monochrome"], list.Resolve("monochromatic"));
+        // A dog's "wiry coat" is its fur, not a garment (seen in M19 step 3): dropped, never "coat".
+        Assert.Empty(list.Resolve("wiry coat"));
+        Assert.Equal(["coat"], list.Resolve("coat"));
+        Assert.Equal(["fur coat"], list.Resolve("fur coat"));        // No artists, characters or series: a name the model slips in is dropped.
         foreach (var name in new[] { "hatsune miku", "touhou", "twilight sparkle (mlp)" })
             Assert.False(list.Contains(name), name);
         // Every framing the model may choose is a real tag.
