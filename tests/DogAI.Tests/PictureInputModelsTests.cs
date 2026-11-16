@@ -360,4 +360,24 @@ public sealed class PictureInputModelsTests : IDisposable
         Assert.Contains("Defiant in the same folder uses it too", PictureInput.KeptOnDelete(["Huihui.mmproj-f16.gguf"], ["Defiant"]));
         Assert.Contains(Projectors.Label, PictureInput.GeneralCannotSee("Gemma"));
     }
+
+    [Fact]
+    public void The_memory_a_projector_takes_is_said_from_its_own_size_not_qwens()
+    {
+        // Gemma 4 12B's projector is 0.12 GB (seen on Hugging Face, 2026-11-16); Qwen3.5 9B's 0.92 GB.
+        Assert.Contains("about 0.4 GB more", PictureInput.OfferMore(122_031_616));
+        Assert.Contains("about 1.1 GB more", PictureInput.OfferMore(918_166_016));
+        Assert.Contains("frees about 0.4 GB", PictureInput.RemoveMore(122_031_616));
+        Assert.DoesNotContain("0.9", Projectors.Explanation);
+        Assert.DoesNotContain("1.1", Projectors.Explanation);
+    }
+
+    [Fact]
+    public void A_model_in_memory_when_its_picture_input_arrives_sees_only_from_its_next_load()
+    {
+        Assert.Contains("can see pictures now", PictureInput.Arrived("Huihui"));
+        var loaded = PictureInput.Arrived("Huihui", inMemory: true);
+        Assert.DoesNotContain("can see pictures now", loaded);
+        Assert.Contains("next load", loaded);
+    }
 }

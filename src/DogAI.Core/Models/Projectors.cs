@@ -83,11 +83,14 @@ public static class Projectors
 
     /// <summary>The line behind the mark's ⓘ.</summary>
     public const string Explanation =
-        "It can look at pictures you put in a chat. That needs a second file beside the model, its picture input (a projector, about 0.9 GB), " +
-        "which is loaded with the model whenever it is there and takes about 1.1 GB more graphics memory.";
+        "It can look at pictures you put in a chat. That needs a second file beside the model, its picture input (a projector), " +
+        "which is loaded with the model whenever it is there and takes its own size plus about 0.25 GB more graphics memory.";
 
     /// <summary>What a download with its projector says beside its size.</summary>
     public static string WithInput(long projectorBytes) => $"with picture input, + {Sizes.Gb(projectorBytes)}";
+
+    /// <summary>A download row's line for a version installed here without its projector: it cannot see until it gets one.</summary>
+    public const string InstalledBlind = "Installed without picture input, so it cannot see pictures.";
 
     /// <summary>The download list's line for a model fetched with its projector.</summary>
     public static string WithInputParts(int modelParts) =>

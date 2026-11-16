@@ -37,6 +37,10 @@
                         <div class="model-name">@row.Pick.Title@if (i == bestIndex) {<span class="rec">Best pick</span>}</div>
                         <div class="model-meta">@row.Pick.Blurb</div>
                         <div class="model-meta">@Meta(row)</div>
+                        @if (row.Variant is { } shown && Blind(row.Pick, shown))
+                        {
+                            <div class="model-meta installed-blind">@Projectors.InstalledBlind <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName</a> › ⋯ › Get picture input.</div>
+                        }
                         @if (useCase != "embedding")
                         {
                             <BesidePicturesChip Fit="row.Fit" Sees="@(row.Projector is not null)" />
@@ -60,6 +64,9 @@
 @code {
     /// <summary>File names of models already on disk.</summary>
     [Parameter] public IReadOnlySet<string> Installed { get; set; } = new HashSet<string>();
+
+    /// <summary>File names of installed models without a projector: offered with none, judged without one, and said so.</summary>
+    [Parameter] public IReadOnlySet<string> InstalledBlind { get; set; } = new HashSet<string>();
 
     private static readonly (string, string)[] Filters =
         [("all", "All"), ("general", "General"), ("characters", "Characters"), ("story", "Story"), ("embedding", "Document search")];
@@ -90,7 +97,12 @@
 
     /// <summary>A document search model is given no pictures, so it is offered without a projector.</summary>
     private RemoteFile? Projector(CuratedPick pick, ModelVariant variant) =>
-        pick.UseCase == "embedding" || !_real.ContainsKey(pick.Repo) ? null : Ctx.ProjectorFor(pick.Repo, variant);
+        pick.UseCase == "embedding" || !_real.ContainsKey(pick.Repo) || Blind(pick, variant) ? null : Ctx.ProjectorFor(pick.Repo, variant);
+
+    /// <summary>This version is on this PC without its projector, while its repository has one: it cannot see as it is.</summary>
+    private bool Blind(CuratedPick pick, ModelVariant variant) =>
+        pick.UseCase != "embedding" && _real.ContainsKey(pick.Repo) && InstalledBlind.Contains(variant.Main.Path.Split('/')[^1])
+        && Ctx.ProjectorFor(pick.Repo, variant) is not null;
 
     private static string Meta(Row row)
     {

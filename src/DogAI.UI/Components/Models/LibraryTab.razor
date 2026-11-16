@@ -159,7 +159,7 @@
             else if (_getFile is not null)
             {
                 <p id="picture-input-offer">@PictureInput.Offer(_getFile.Path.Split('/')[^1], _getFile.Size, _getFor.Repo, _getFor.Folder, _getFor.Model)</p>
-                <p class="small">@PictureInput.OfferMore</p>
+                <p class="small">@PictureInput.OfferMore(_getFile.Size)</p>
             }
             @if (_getError is not null)
             {
@@ -191,7 +191,7 @@
         {
             <p id="picture-input-remove-shared">@PictureInput.AlsoLoses(_removeFor.Users)</p>
         }
-        <p class="small">@PictureInput.RemoveMore</p>
+        <p class="small">@PictureInput.RemoveMore(_removeFor.Item.Projector?.SizeBytes ?? _removeFor.Item.Belonging.Max(p => p.SizeBytes))</p>
         <div class="modal-foot">
             <span></span>
             <div class="row">
@@ -243,7 +243,8 @@
     private void OnDownloaded(DownloadJob job) => InvokeAsync(async () =>
     {
         await ScanAsync();
-        if (job.UseCase == Projectors.UseCase && job.ForModel is { } model) Say(PictureInput.Arrived(NameOf(model)));
+        if (job.UseCase == Projectors.UseCase && job.ForModel is { } model)
+            Say(PictureInput.Arrived(NameOf(model), Same(Engine.ModelPath, model) && Engine.State is EngineState.Ready or EngineState.Loading or EngineState.Resting));
     });
 
     /// <summary>Went online while Get picture input waits for it: look now.</summary>

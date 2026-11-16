@@ -88,6 +88,10 @@ else
                     {
                         <BesidePicturesChip Fit="fit" Sees="@(projector is not null)" />
                     }
+                    @if (Blind(v))
+                    {
+                        <div class="model-meta installed-blind">@Projectors.InstalledBlind <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName</a> › ⋯ › Get picture input.</div>
+                    }
                 </div>
                 <FitBadge Fit="fit" />
                 <DownloadButton Repo="@Repo" Variant="v" Primary="best" Installed="@Installed.Contains(v.Main.Path.Split('/')[^1])"
@@ -110,6 +114,9 @@ else
 @code {
     [Parameter, EditorRequired] public string Repo { get; set; } = "";
     [Parameter] public IReadOnlySet<string> Installed { get; set; } = new HashSet<string>();
+
+    /// <summary>File names of installed models without a projector: offered with none, judged without one, and said so.</summary>
+    [Parameter] public IReadOnlySet<string> InstalledBlind { get; set; } = new HashSet<string>();
 
     private IReadOnlyList<ModelVariant>? _variants;
     private ModelVariant? _best;
@@ -135,7 +142,11 @@ else
         : $"Fit is estimated from file sizes at a {Ctx.Context:N0}-token context; the model’s layout could not be read.";
 
     /// <summary>The projector that comes with this version (picture input), unless the model is a document search model.</summary>
-    private RemoteFile? ProjectorOf(ModelVariant v) => _info?.IsEmbedding(v.Main.Path) == true ? null : Ctx.ProjectorFor(Repo, v);
+    private RemoteFile? ProjectorOf(ModelVariant v) => _info?.IsEmbedding(v.Main.Path) == true || Blind(v) ? null : Ctx.ProjectorFor(Repo, v);
+
+    /// <summary>This version is on this PC without its projector, while the repository has one.</summary>
+    private bool Blind(ModelVariant v) =>
+        _info?.IsEmbedding(v.Main.Path) != true && InstalledBlind.Contains(v.Main.Path.Split('/')[^1]) && Ctx.ProjectorFor(Repo, v) is not null;
 
     /// <summary>Judged as it will be loaded: with the projector that comes with it.</summary>
     private ModelShape Shape(ModelVariant v)

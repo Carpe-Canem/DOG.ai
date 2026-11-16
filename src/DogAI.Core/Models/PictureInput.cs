@@ -18,8 +18,8 @@ public static class PictureInput
     public static string Offer(string file, long bytes, string repo, string folder, string model) =>
         $"{file} ({Sizes.Gb(bytes)}) from {repo}. It goes into {folder}, beside the model, and {model} can then see pictures you put in a chat.";
 
-    public const string OfferMore =
-        "It is loaded with the model whenever it is there and takes about 1.1 GB more graphics memory. Remove picture input takes it away again.";
+    public static string OfferMore(long bytes) =>
+        $"It is loaded with the model whenever it is there and takes about {Sizes.Gb(Projectors.Need(bytes))} more graphics memory. Remove picture input takes it away again.";
 
     public static string NoneIn(string repo) => $"{repo} has no picture input file for this model, so it cannot see pictures.";
 
@@ -31,7 +31,10 @@ public static class PictureInput
 
     public static string Started(string file, string model) => $"Downloading {file} for {model}. It can see pictures once the download is done.";
 
-    public static string Arrived(string model) => $"{model} can see pictures now. It is loaded with its picture input from now on.";
+    /// <param name="inMemory">The model is in memory (or set aside) now, started without the file: it sees only from its next load.</param>
+    public static string Arrived(string model, bool inMemory = false) => inMemory
+        ? $"{model} has its picture input now. It is in memory without it, so it can see pictures from its next load (after Unload everything, or when another model has been loaded)."
+        : $"{model} can see pictures now. It is loaded with its picture input from now on.";
 
     /// <summary>The row's line while its projector downloads.</summary>
     public static string Getting(string status) => $"Getting picture input: {status}";
@@ -41,8 +44,8 @@ public static class PictureInput
         $"This permanently deletes {List(files)} from {folder}. It does not go to the Recycle Bin. " +
         $"{model} then loads without picture input and cannot see pictures.";
 
-    public const string RemoveMore =
-        "It frees about 1.1 GB of graphics memory while the model is loaded. Get picture input downloads the file again.";
+    public static string RemoveMore(long bytes) =>
+        $"It frees about {Sizes.Gb(Projectors.Need(bytes))} of graphics memory while the model is loaded. Get picture input downloads the file again.";
 
     /// <summary>Said when the projectors removed were also another model's in the same folder.</summary>
     public static string AlsoLoses(IReadOnlyList<string> models) =>
