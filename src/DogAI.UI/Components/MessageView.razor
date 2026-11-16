@@ -25,7 +25,11 @@
         }
         else if (IsUser)
         {
-            <div class="msg-body plain">@Content</div>
+            @* A message may be pictures alone (M17): no empty bubble under them. *@
+            @if (Content.Length > 0 || Above is null)
+            {
+                <div class="msg-body plain">@Content</div>
+            }
         }
         else if (Instead is not null && !Streaming && string.IsNullOrWhiteSpace(Content))
         {

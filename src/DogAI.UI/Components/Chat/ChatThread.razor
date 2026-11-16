@@ -25,8 +25,8 @@
                      Content="@m.Content" Reasoning="@m.Reasoning" Cut="@(isUser ? null : ThinkingCut.Of(m))" AvatarUrl="@(isUser ? UserAvatar : who is not null ? who.Avatar : AssistantAvatar)"
                      Letter="@(who is not null ? who.Letter : Letter)" MessageId="@m.Id" Citations="@(sources?.Passages.Count ?? 0)"
                      Speech="@ColourSpeech" Tone="@who?.Tone"
-                     Above="@(!isUser && _pics?.Src(m) is { } src ? PictureAbove(m, src) : null)"
-                     Below="@(sources is null || _editingId == m.Id ? null : SourcesRow(sources))"
+                     Above="@(isUser ? (m.Pictures.Count > 0 && _editingId != m.Id ? AttachedRow(m) : null) : _pics?.Src(m) is { } src ? PictureAbove(m, src) : null)"
+                     Below="@(_editingId == m.Id ? null : BelowReply(m, sources))"
                      Instead="@(isUser ? null : NoAnswer(m))"
                      Editor="@(_editingId == m.Id ? EditBox(m) : null)">
             <Actions>
@@ -123,6 +123,8 @@
     <PassageViewer ChunkId="@source.ChunkId" Number="@source.Number" Similarity="@source.Similarity" OnClose="() => _source = null" />
 }
 
+<AttachedPictureView @ref="_attached" ConversationId="@Conversation.Id" Path="@Path" OnLoaded="StateHasChanged" />
+
 @if (PicturePeople is { } people)
 {
     <MessagePictures @ref="_pics" ConversationId="@Conversation.Id" Path="@Path" People="@people" What="reply" ChatMode="@PictureChatMode"
@@ -164,6 +166,48 @@
     [Parameter] public string PictureChatMode { get; set; } = "characters";
 
     private MessagePictures? _pics;
+    private AttachedPictureView? _attached;
+
+    /// <summary>Above a message of the owner's: the pictures put on it, small; a click shows one large (M17 step 4).</summary>
+    private RenderFragment AttachedRow(ChatMessage m) => __builder =>
+    {
+        <div class="msg-pictures" data-pictures="@m.Pictures.Count">
+            @for (var i = 0; i < m.Pictures.Count; i++)
+            {
+                var index = i;
+                var picture = m.Pictures[i];
+                var src = _attached?.Src(picture);
+                <button class="msg-picture" data-attached="@picture.Id" title="Open the picture large" @onclick="() => _attached?.View(m, index)">
+                    @if (src is not null)
+                    {
+                        <img src="@src" alt="@($"Picture {index + 1} on this message")" width="@picture.Width" height="@picture.Height" />
+                    }
+                    else
+                    {
+                        <span class="msg-picture-wait" style="aspect-ratio:@(picture.Width) / @(picture.Height)"></span>
+                    }
+                </button>
+            }
+        </div>
+    };
+
+    /// <summary>Under a reply: that the model could not see the pictures before it (M17), then its sources.</summary>
+    private RenderFragment? BelowReply(ChatMessage m, ReplySources? sources)
+    {
+        var unseen = m.Role == ChatRole.Assistant ? StoryTurn.Of(m).Unseen ?? 0 : 0;
+        if (unseen <= 0 && sources is null) return null;
+        return __builder =>
+        {
+            @if (unseen > 0)
+            {
+                <p class="small unseen-note" data-unseen="@unseen">@ComposerPictures.Unseen(unseen)</p>
+            }
+            @if (sources is not null)
+            {
+                @SourcesRow(sources)
+            }
+        };
+    }
 
     /// <summary>The name a message was written under, for the picture planner.</summary>
     private string NameOf(ChatMessage m) =>
@@ -268,17 +312,33 @@
     {
         _editingId = message.Id;
         _editText = message.Content;
+        _editKeep = message.Pictures.Select(p => p.Id).ToHashSet();
+    }
+
+    /// <summary>While a question of the owner's is edited: which of its pictures the new version keeps (M17 step 4).</summary>
+    private HashSet<long> _editKeep = [];
+
+    /// <summary>Whether Save would change anything, and leave something to send.</summary>
+    private bool EditChanges(ChatMessage message)
+    {
+        var text = _editText.Trim();
+        var kept = message.Pictures.Count(p => _editKeep.Contains(p.Id));
+        if (text.Length == 0 && kept == 0) return false;
+        return text != message.Content.Trim() || kept != message.Pictures.Count;
     }
 
     private async Task SaveEditAsync(ChatMessage message)
     {
         var text = _editText.Trim();
+        var changes = EditChanges(message);
+        var keep = message.Pictures.Where(p => _editKeep.Contains(p.Id)).Select(p => p.Id).ToList();
         _editingId = null;
-        if (text.Length == 0 || text == message.Content) return;
+        if (!changes || (message.Role != ChatRole.User && text.Length == 0)) return;
         if (message.Role == ChatRole.User)
         {
-            // A changed question starts a new branch and gets a fresh answer; the old one stays reachable.
-            await Run(() => Chat.EditAndResendAsync(message.ConversationId, message.Id, text));
+            // A changed question starts a new branch and gets a fresh answer; the old one stays reachable. Its pictures
+            // go with it, byte for byte, except those taken off here.
+            await Run(() => Chat.EditAndResendAsync(message.ConversationId, message.Id, text, keep, null));
         }
         else
         {
@@ -329,9 +389,33 @@
     private RenderFragment EditBox(ChatMessage message) => __builder =>
     {
         <div class="edit">
-            <textarea class="field" rows="@Math.Clamp(_editText.Split('\n').Length + 1, 3, 16)" aria-label="Edit message" @bind="_editText"></textarea>
+            @if (message.Role == ChatRole.User && message.Pictures.Count > 0)
+            {
+                <div class="edit-pictures" id="edit-pictures">
+                    @foreach (var picture in message.Pictures)
+                    {
+                        var p = picture;
+                        var kept = _editKeep.Contains(p.Id);
+                        <span class="edit-picture @(kept ? "" : "removed")" data-attached="@p.Id">
+                            @if (_attached?.Src(p) is { } src)
+                            {
+                                <img src="@src" alt="Picture on this message" />
+                            }
+                            @if (kept)
+                            {
+                                <button class="btn" data-act="remove" title="The new version goes without this picture" @onclick="() => _editKeep.Remove(p.Id)">Remove</button>
+                            }
+                            else
+                            {
+                                <button class="btn" data-act="keep" title="Keep this picture on the new version" @onclick="() => _editKeep.Add(p.Id)">Put back</button>
+                            }
+                        </span>
+                    }
+                </div>
+            }
+            <textarea class="field" rows="@Math.Clamp(_editText.Split('\n').Length + 1, 3, 16)" aria-label="Edit message" @bind="_editText" @bind:event="oninput"></textarea>
             <div class="row">
-                <button class="btn primary" disabled="@(message.Role == ChatRole.User && !Engine.IsReady)" @onclick="() => SaveEditAsync(message)">
+                <button class="btn primary" id="edit-save" disabled="@((message.Role == ChatRole.User && !Engine.IsReady) || (message.Role == ChatRole.User && !EditChanges(message)))" @onclick="() => SaveEditAsync(message)">
                     @(message.Role == ChatRole.User ? "Save and ask again" : "Save")
                 </button>
                 <button class="btn" @onclick="() => _editingId = null">Cancel</button>

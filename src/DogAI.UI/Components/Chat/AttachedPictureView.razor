@@ -1,0 +1,114 @@
+@* The pictures the owner put on messages (M17 step 4): read once per id into memory as data: addresses (never a file),
+   one load at a time, and shown large on a click. The thread draws the small ones through Src and opens this view
+   through View. Only the branch on screen is held; another chat lets them go. *@
+@inject IAttachedPictureStore Store
+@inject ChatService Chat
+
+@if (_viewing is { } message && _viewIndex < message.Pictures.Count && Src(message.Pictures[_viewIndex]) is { } large)
+{
+    var picture = message.Pictures[_viewIndex];
+    <Modal Title="Picture" Class="wide attached-view" OnClose="Close">
+        <img class="picture-large" id="attached-large" src="@large" alt="@($"Picture {_viewIndex + 1} on your message")" />
+        <div class="row">
+            @if (message.Pictures.Count > 1)
+            {
+                <button class="btn" id="attached-prev" disabled="@(_viewIndex == 0)" @onclick="() => _viewIndex--">‹ Previous</button>
+                <button class="btn" id="attached-next" disabled="@(_viewIndex >= message.Pictures.Count - 1)" @onclick="() => _viewIndex++">Next ›</button>
+            }
+            <span class="small" id="attached-meta">@Meta(message, picture)</span>
+        </div>
+    </Modal>
+}
+
+@code {
+    /// <summary>The chat on screen; another chat closes the view and lets go of the pictures held.</summary>
+    [Parameter, EditorRequired] public long ConversationId { get; set; }
+
+    /// <summary>The branch on screen.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<ChatMessage> Path { get; set; } = [];
+
+    /// <summary>Raised when pictures arrive, so the thread draws them.</summary>
+    [Parameter] public EventCallback OnLoaded { get; set; }
+
+    private readonly Dictionary<long, string?> _src = [];
+    private long _heldFor = -1;
+    private bool _loading;
+    private bool _again;
+    private ChatMessage? _viewing;
+    private int _viewIndex;
+
+    /// <summary>A picture's data: address, or null while it is read (or when it is gone).</summary>
+    public string? Src(AttachedPicture picture) => _src.GetValueOrDefault(picture.Id);
+
+    /// <summary>Opens the large view on one of a message's pictures.</summary>
+    public void View(ChatMessage message, int index)
+    {
+        _viewing = message;
+        _viewIndex = Math.Clamp(index, 0, Math.Max(0, message.Pictures.Count - 1));
+        StateHasChanged();
+    }
+
+    private void Close() => _viewing = null;
+
+    private string Meta(ChatMessage message, AttachedPicture picture)
+    {
+        var where = message.Pictures.Count > 1 ? $"Picture {_viewIndex + 1} of {message.Pictures.Count} · " : "";
+        return $"{where}{picture.Width:N0} × {picture.Height:N0} pixels · {Chat.PictureTokens(picture):N0} tokens for the model";
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (ConversationId != _heldFor)
+        {
+            _heldFor = ConversationId;
+            _src.Clear();
+            _viewing = null;
+        }
+        else if (_viewing is { } viewed && Path.FirstOrDefault(m => m.Id == viewed.Id) is null)
+        {
+            _viewing = null;
+        }
+        if (Missing().Count > 0) _ = LoadAsync();
+    }
+
+    private List<long> Missing() =>
+        Path.SelectMany(m => m.Pictures).Select(p => p.Id).Where(id => !_src.ContainsKey(id)).Distinct().ToList();
+
+    /// <summary>
+    /// Reads the pictures not held yet. One load at a time: the thread's parameters are set on every streamed token, and a
+    /// call that arrives meanwhile asks for one more look afterwards.
+    /// </summary>
+    private async Task LoadAsync()
+    {
+        if (_loading)
+        {
+            _again = true;
+            return;
+        }
+        _loading = true;
+        try
+        {
+            do
+            {
+                _again = false;
+                var conversation = ConversationId;
+                var missing = Missing();
+                if (missing.Count == 0) break;
+                var images = await Store.ImagesAsync(missing);
+                if (conversation != ConversationId) continue;
+                foreach (var id in missing)
+                    _src[id] = images.TryGetValue(id, out var jpeg) ? "data:image/jpeg;base64," + Convert.ToBase64String(jpeg) : null;
+                await InvokeAsync(StateHasChanged);
+                await OnLoaded.InvokeAsync();
+            } while (_again);
+        }
+        catch (Exception e) when (e is InvalidOperationException or ObjectDisposedException)
+        {
+            // The chat went away while its pictures were read.
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

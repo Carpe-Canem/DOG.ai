@@ -126,7 +126,7 @@ else
             <button class="speak" disabled="@(Chat.IsBusy || !Engine.IsReady || Members.Count == 0)" @onclick="SpeakNextAsync"
                     title="Turn order picks someone: whoever was just named, else whoever has been quiet longest">Anyone</button>
         </div>
-        <ChatComposer Path="@_path" OnSend="SendAsync" Impersonate="ImpersonateAsync"
+        <ChatComposer Path="@_path" OnSendWithPictures="SendAsync" Impersonate="ImpersonateAsync"
                       Placeholder="@(Members.Count == 0 ? "Add a member in the side panel first." : $"Message {Everyone}. Enter sends, Shift+Enter adds a line.")" />
     </SectionContent>
 
@@ -354,7 +354,7 @@ else
         }
     }
 
-    private Task SendAsync(string text) => Run(() => Chat.SendAsync(_conversation.Id, text));
+    private Task SendAsync(ChatInput input) => Run(() => Chat.SendAsync(_conversation.Id, input.Text, input.Pictures));
     private Task SpeakAsync(long characterId) => Run(() => Chat.SpeakAsync(_conversation.Id, characterId));
     private Task SpeakNextAsync() => Run(() => Chat.SpeakNextAsync(_conversation.Id));
 

@@ -1,5 +1,7 @@
 @* The message box under a chat: Enter sends, Shift+Enter adds a line, Stop while a reply is written,
-   and the context meter. Shared by General, Characters and Story. *@
+   and the context meter. Shared by General, Characters, group chats and Story. Where the page passes
+   OnSendWithPictures (not stories), it also takes pictures: the attach button (only while the model in use sees),
+   paste and drop (attach.js), with small previews above the box and their cost in the meter (M17 step 4). *@
 @implements IAsyncDisposable
 @inject ChatService Chat
 @inject EngineManager Engine
@@ -9,10 +11,40 @@
 @inject ReplyVoice Voice
 @inject DownloadManager Downloads
 
+<div class="composer-box" @ref="_box">
+@if (TakesPictures && (_pending.Count > 0 || _converting))
+{
+    <div class="composer-pictures" id="composer-pictures">
+        @foreach (var picture in _pending)
+        {
+            var p = picture;
+            <span class="composer-picture" data-n="@(_pending.IndexOf(p) + 1)">
+                <img src="@p.Src" alt="Picture @(_pending.IndexOf(p) + 1) to send" title="@($"{p.Width:N0} × {p.Height:N0}{(p.Tokens > 0 ? $" · {p.Tokens:N0} tokens" : "")}")" />
+                <button class="composer-picture-remove" data-act="remove" aria-label="Remove picture @(_pending.IndexOf(p) + 1)" title="Remove this picture"
+                        @onclick="() => Remove(p)"><Icon Name="close" Size="14" /></button>
+            </span>
+        }
+        @if (_converting)
+        {
+            <span class="composer-picture working" id="composer-pictures-working" aria-label="Making the picture ready">…</span>
+        }
+    </div>
+    <p class="ctx composer-pictures-help" id="composer-pictures-help">@ComposerPictures.Help</p>
+}
 <div class="composer">
     <textarea @ref="_input" rows="1" aria-label="Message" @bind="_draft" @bind:event="oninput"
               placeholder="@(Engine.IsReady ? Placeholder : "Load a model to start chatting.")"></textarea>
+    @if (TakesPictures)
+    {
+        <input type="file" class="composer-file" accept="@ComposerPictures.Accept" multiple hidden tabindex="-1" aria-hidden="true" @ref="_file" />
+    }
     <span class="voice-btns">
+        @if (TakesPictures && (Engine.SeesPictures || _pending.Count > 0))
+        {
+            <button class="btn icon" id="composer-attach" disabled="@(!Engine.SeesPictures || _pending.Count >= AttachedPictures.MaxPerMessage || _converting)"
+                    title="@(_pending.Count >= AttachedPictures.MaxPerMessage ? $"A message takes at most {AttachedPictures.MaxPerMessage} pictures" : ComposerPictures.ButtonTitle)"
+                    @onclick="ChooseAsync"><Icon Name="images" Size="18" /></button>
+        }
         <button class="btn icon" @onclick="() => _picking = true" title="Use a saved prompt"><Icon Name="prompt" Size="18" /></button>
         @if (_canListen || Dict.IsOn)
         {
@@ -44,9 +76,23 @@
                     title="The model writes your next message here, for you to change before sending">Write mine</button>
         }
         @Extra
-        <button class="btn primary" disabled="@(!Engine.IsReady || (!AllowEmpty && string.IsNullOrWhiteSpace(_draft)))" @onclick="SendAsync">@SendLabel</button>
+        <button class="btn primary" id="composer-send" disabled="@(!CanSend)" @onclick="SendAsync">@SendLabel</button>
     }
 </div>
+</div>
+@if (TakesPictures && PictureLine is { } pictureLine)
+{
+    <div class="ctx picture-line @(pictureLine.Problem ? "bad-text" : "")" id="composer-pictures-note" role="status">
+        <span>
+            @pictureLine.Text
+            @if (pictureLine.Place is { } place)
+            {
+                @(" ")<a href="@place.Address">@place.PlaceName</a>@(".")
+            }
+        </span>
+        <button class="btn" id="composer-pictures-note-close" @onclick="() => _note = null" hidden="@(_note is null)">Dismiss</button>
+    </div>
+}
 @if (_picking)
 {
     <PromptPicker OnPick="InsertPromptAsync" OnCancel="() => _picking = false" />
@@ -63,10 +109,14 @@
 }
 @if (Usage is { } usage)
 {
-    <div class="ctx" title="How much of the model's context window this chat is using">
+    <div class="ctx @(usage.Room == PictureRoom.TooLarge ? "over" : "")" id="composer-meter" title="How much of the model's context window this chat is using">
         <div class="meter"><i style="width:@usage.Percent%"></i></div>
-        <span>@usage.Used.ToString("N0") of @usage.Total.ToString("N0") tokens@(usage.Trimmed > 0 ? $" · {usage.Trimmed} older message{(usage.Trimmed == 1 ? "" : "s")} left out to fit" : "")</span>
+        <span id="composer-meter-text">@usage.Used.ToString("N0") of @usage.Total.ToString("N0") tokens@(ComposerPictures.MeterPart(usage.Pending, _pending.Count))@(usage.Trimmed > 0 && usage.Pending == 0 ? $" · {usage.Trimmed} older message{(usage.Trimmed == 1 ? "" : "s")} left out to fit" : "")</span>
     </div>
+    @if (ComposerPictures.RoomLine(usage.Room, usage.Total, usage.Pending) is { } roomLine)
+    {
+        <p class="ctx room-line @(usage.Room == PictureRoom.TooLarge ? "bad-text" : "")" id="composer-room" role="status">@roomLine</p>
+    }
 }
 
 @code {
@@ -90,8 +140,174 @@
     /// <summary>Extra controls shown before the send button, such as a story's dice switch.</summary>
     [Parameter] public RenderFragment? Extra { get; set; }
 
+    /// <summary>
+    /// Where the box takes pictures (General, character chats, group chats; M17 step 4): called with the text and the
+    /// pictures waiting. Setting it turns on the attach button, paste and drop. Stories leave it unset and use <see cref="OnSend"/>.
+    /// </summary>
+    [Parameter] public EventCallback<ChatInput> OnSendWithPictures { get; set; }
+
+    private bool TakesPictures => OnSendWithPictures.HasDelegate;
+
     private bool _drafting;
     private bool _picking;
+
+    // ---- Pictures waiting to be sent (memory only) ----
+
+    /// <summary>A picture waiting in the box: the JPEG made in the page, its data: address (made once), its size and cost.</summary>
+    private sealed class Pending(byte[] jpeg, int width, int height)
+    {
+        public byte[] Jpeg { get; } = jpeg;
+        public string Src { get; } = "data:image/jpeg;base64," + Convert.ToBase64String(jpeg);
+        public int Width { get; } = width;
+        public int Height { get; } = height;
+
+        /// <summary>What the picture costs, as the engine counts it (or by the rule while no model that sees is in memory).</summary>
+        public int Tokens { get; set; }
+    }
+
+    private readonly List<Pending> _pending = [];
+    private bool _converting;
+    private ElementReference _box;
+    private ElementReference _file;
+    private IJSObjectReference? _attach;
+
+    /// <summary>A line said once after a paste, drop or choice (cannot see, too many, refused); Dismiss or the next send clears it.</summary>
+    private (string Text, bool Problem, PlaceLine? Place)? _note;
+
+    private (string Text, bool Problem, PlaceLine? Place)? PictureLine
+    {
+        get
+        {
+            if (_note is { } note) return note;
+            if (_pending.Count > 0 && !Engine.SeesPictures) return (ComposerPictures.WaitingUnseen.Text, false, ComposerPictures.WaitingUnseen);
+            return null;
+        }
+    }
+
+    private bool CanSend => Engine.IsReady && !_converting &&
+        (AllowEmpty || !string.IsNullOrWhiteSpace(_draft) || (TakesPictures && _pending.Count > 0));
+
+    private async Task ChooseAsync()
+    {
+        if (_attach is null || !Engine.SeesPictures) return;
+        try
+        {
+            await _attach.InvokeVoidAsync("choosePictures", _file);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>The page has files to make pictures of. Returns how many more this message takes; 0 when the model cannot see.</summary>
+    [JSInvokable]
+    public Task<int> PicturesOffered(int count) => OnUi(() =>
+    {
+        if (!Engine.SeesPictures)
+        {
+            var line = ComposerPictures.CannotSee(Engine.IsReady);
+            _note = (line.Text, true, line);
+            StateHasChanged();
+            return 0;
+        }
+        var room = Math.Max(0, AttachedPictures.MaxPerMessage - _pending.Count);
+        if (room == 0)
+        {
+            _note = (ComposerPictures.TooMany(count), true, null);
+            StateHasChanged();
+            return 0;
+        }
+        _note = null;
+        _converting = true;
+        StateHasChanged();
+        return room;
+    });
+
+    /// <summary>One picture made in the page. False when Core refuses it (it is then left out and counted as refused).</summary>
+    [JSInvokable]
+    public Task<bool> PictureArrived(byte[] bytes) => OnUi(() =>
+    {
+        var jpeg = AttachedPictures.Plain(bytes);
+        if (AttachedPictures.Problem(jpeg) is not null || _pending.Count >= AttachedPictures.MaxPerMessage) return false;
+        var (width, height) = AttachedPictures.SizeOf(jpeg);
+        var picture = new Pending(jpeg, width, height) { Tokens = AttachedPictures.TokensByRule(width, height) };
+        _pending.Add(picture);
+        StateHasChanged();
+        _ = CountAsync(picture);
+        return true;
+    });
+
+    /// <summary>Runs on the renderer's thread and hands back the answer (ComponentBase.InvokeAsync returns none).</summary>
+    private async Task<T> OnUi<T>(Func<T> work)
+    {
+        T answer = default!;
+        await InvokeAsync(() => { answer = work(); });
+        return answer;
+    }
+
+    /// <summary>The page has finished a batch: how many files were not pictures, and how many did not fit in the message.</summary>
+    [JSInvokable]
+    public Task PicturesDone(int refused, int leftOut) => InvokeAsync(() =>
+    {
+        _converting = false;
+        if (refused > 0) _note = (ComposerPictures.Refused(refused), true, null);
+        else if (leftOut > 0) _note = (ComposerPictures.TooMany(leftOut), true, null);
+        StateHasChanged();
+    });
+
+    /// <summary>Asks the engine what a picture costs (the rule stands in until it answers, and when no model that sees is in memory).</summary>
+    private async Task CountAsync(Pending picture)
+    {
+        try
+        {
+            var tokens = await Chat.CountPictureAsync(picture.Jpeg);
+            if (tokens <= 0 || tokens == picture.Tokens) return;
+            picture.Tokens = tokens;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception e) when (e is EngineException or HttpRequestException or OperationCanceledException or InvalidOperationException or ObjectDisposedException)
+        {
+        }
+    }
+
+    /// <summary>Pictures waiting are counted again when the model changes (another model counts them its own way).</summary>
+    private string? _countedFor;
+
+    private void OnEngineChanged()
+    {
+        var model = Engine.SeesPictures && Engine.IsLoaded ? Engine.ModelName : null;
+        if (model is not null && model != _countedFor && _pending.Count > 0)
+        {
+            _countedFor = model;
+            foreach (var picture in _pending.ToList()) _ = CountAsync(picture);
+        }
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>The chat the pictures waiting belong to (0 for a chat not saved yet).</summary>
+    private long _pendingChat;
+
+    /// <summary>
+    /// Another chat opened in the same page (General keeps the box between chats): pictures waiting for the old one are
+    /// let go, so none is sent to the wrong chat. A new chat being saved by its first message has sent them already.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        var chat = Path.Count > 0 ? Path[0].ConversationId : 0;
+        if (chat == _pendingChat) return;
+        _pendingChat = chat;
+        if (_pending.Count > 0 || _note is not null)
+        {
+            _pending.Clear();
+            _note = null;
+        }
+    }
+
+    private void Remove(Pending picture)
+    {
+        _pending.Remove(picture);
+        _note = null;
+    }
 
     private async Task InsertPromptAsync(string text)
     {
@@ -113,15 +329,22 @@
     private IJSObjectReference? _module;
     private DotNetObjectReference<ChatComposer>? _self;
 
-    private (int Used, int Total, int Percent, int Trimmed)? Usage
+    /// <summary>
+    /// The meter: the last prompt and its reply as the engine counted them, plus what the pictures waiting will cost (M17).
+    /// Shown once the chat has a counted reply, or while pictures wait.
+    /// </summary>
+    private (int Used, int Total, int Percent, int Trimmed, int Pending, PictureRoom Room)? Usage
     {
         get
         {
             if (!Engine.IsReady || Engine.ContextLength <= 0) return null;
             var last = Path.LastOrDefault(m => m.Role == ChatRole.Assistant && m.PromptTokens is not null);
-            if (last is null) return null;
-            var used = last.PromptTokens!.Value + (last.CompletionTokens ?? 0);
-            return (used, Engine.ContextLength, Math.Clamp(used * 100 / Engine.ContextLength, 1, 100), last.TrimmedMessages ?? 0);
+            var pending = TakesPictures ? _pending.Sum(p => p.Tokens) : 0;
+            if (last is null && pending == 0) return null;
+            var chat = last is null ? 0 : last.PromptTokens!.Value + (last.CompletionTokens ?? 0);
+            var used = chat + pending;
+            var room = ComposerPictures.Judge(Engine.ContextLength, chat, pending);
+            return (used, Engine.ContextLength, Math.Clamp((int)((long)used * 100 / Engine.ContextLength), 1, 100), last?.TrimmedMessages ?? 0, pending, room);
         }
     }
 
@@ -135,6 +358,12 @@
             {
                 await _module.InvokeVoidAsync("initComposer", _input, _self);
                 await _module.InvokeVoidAsync("resizeComposer", _input);
+            }
+            if (TakesPictures && _attach is null && _input.Context is not null)
+            {
+                _attach = await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/attach.js");
+                await _attach.InvokeVoidAsync("watchPictures", _box, _input, _file, _self,
+                    AttachedPictures.MaxSide, AttachedPictures.Quality, ComposerPictures.MaxFileBytes);
             }
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or OperationCanceledException or ObjectDisposedException)
@@ -151,6 +380,7 @@
         Reader.Changed += OnVoiceChanged;
         Voice.Changed += OnVoiceChanged;
         Downloads.Completed += OnDownloaded;
+        Engine.Changed += OnEngineChanged;
         _ = CheckListeningAsync();
         // Hands-free does not listen while a reply is written or read aloud, so DOG.ai never hears itself.
         Dict.Paused = () => Chat.IsBusy || Reader.IsSpeaking;
@@ -287,9 +517,20 @@
     private async Task SendAsync()
     {
         var text = _draft.Trim();
-        if ((text.Length == 0 && !AllowEmpty) || Chat.IsBusy || _drafting || !Engine.IsReady) return;
+        var pictures = TakesPictures ? _pending.Select(p => p.Jpeg).ToList() : [];
+        if ((text.Length == 0 && pictures.Count == 0 && !AllowEmpty) || Chat.IsBusy || _drafting || _converting || !Engine.IsReady) return;
         _draft = "";
-        await OnSend.InvokeAsync(text);
+        if (TakesPictures)
+        {
+            // The pictures leave the box with the text; they are kept with the message (the database only), never here.
+            _pending.Clear();
+            _note = null;
+            await OnSendWithPictures.InvokeAsync(new ChatInput(text, pictures));
+        }
+        else
+        {
+            await OnSend.InvokeAsync(text);
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -300,11 +541,14 @@
         Reader.Changed -= OnVoiceChanged;
         Voice.Changed -= OnVoiceChanged;
         Downloads.Completed -= OnDownloaded;
+        Engine.Changed -= OnEngineChanged;
         // Leaving the screen turns the microphone off; reading aloud carries on.
         if (Dict.IsOn) Dict.Stop();
+        _pending.Clear();
         _self?.Dispose();
         try
         {
+            if (_attach is not null) await _attach.DisposeAsync();
             if (_module is not null) await _module.DisposeAsync();
         }
         catch (Exception e) when (e is JSDisconnectedException or ObjectDisposedException)

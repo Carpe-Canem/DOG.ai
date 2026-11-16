@@ -129,7 +129,7 @@ else
     <ChatThread Conversation="@_conversation" Tree="@_tree" Path="@_path" @bind-Notice="_notice" />
 }
 
-<SectionContent SectionName="composer"><ChatComposer Path="@_path" OnSend="SendAsync" /></SectionContent>
+<SectionContent SectionName="composer"><ChatComposer Path="@_path" OnSendWithPictures="SendAsync" /></SectionContent>
 
 <AsideRegion Place="@ChatPanels.General" Title="Chat settings">
     <AssistantPanel Conversation="@_conversation" OnApplied="SaveConversationAsync" />
@@ -300,14 +300,14 @@ else
         return _conversation.Id;
     }
 
-    private async Task SendAsync(string text)
+    private async Task SendAsync(ChatInput input)
     {
         if (Chat.IsBusy || !Engine.IsReady) return;
         _notice = null;
         var id = await EnsureSavedAsync();
         try
         {
-            await Chat.SendAsync(id, text);
+            await Chat.SendAsync(id, input.Text, input.Pictures);
         }
         catch (Exception e) when (e is InvalidOperationException or EngineException)
         {

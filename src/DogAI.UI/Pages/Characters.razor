@@ -148,7 +148,7 @@ else
 @if (_conversation.Id != 0 && _character is not null)
 {
     <SectionContent SectionName="composer">
-        <ChatComposer Path="@_path" OnSend="SendAsync" Impersonate="ImpersonateAsync" Placeholder="@($"Message {_character.Name}. Enter sends, Shift+Enter adds a line.")" />
+        <ChatComposer Path="@_path" OnSendWithPictures="SendAsync" Impersonate="ImpersonateAsync" Placeholder="@($"Message {_character.Name}. Enter sends, Shift+Enter adds a line.")" />
     </SectionContent>
 
     <AsideRegion Place="@ChatPanels.Character" Title="Chat settings">
@@ -304,13 +304,13 @@ else
         }
     }
 
-    private async Task SendAsync(string text)
+    private async Task SendAsync(ChatInput input)
     {
         if (Chat.IsBusy || !Engine.IsReady || _conversation.Id == 0) return;
         _notice = null;
         try
         {
-            await Chat.SendAsync(_conversation.Id, text);
+            await Chat.SendAsync(_conversation.Id, input.Text, input.Pictures);
         }
         catch (Exception e) when (e is InvalidOperationException or EngineException)
         {
