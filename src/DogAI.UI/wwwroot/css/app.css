@@ -489,7 +489,7 @@ button.cite:hover { border-color: var(--accent); }
 .settings h3 { margin-bottom: 10px; }
 .voice-settings { display: grid; gap: 14px; }
 .voice-settings label:not(.check) { display: grid; gap: 4px; font-weight: 600; font-size: .92em; align-content: start; }
-.voice-settings label .field { font-weight: 400; }
+.voice-settings label .field, .voice-settings label .small { font-weight: 400; }
 .privacy .field.narrow { max-width: 220px; }
 .privacy .hint { align-self: center; }
 .privacy p { margin: 0; }

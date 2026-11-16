@@ -356,10 +356,18 @@ public sealed partial class ChatService
             var preset = _storyOptions.Apply(SamplerPresets.Get(SamplerPresets.DefaultId) with { MaxTokens = ChoicesMaxTokens, JsonSchema = StoryPrompt.ChoicesSchema(story) });
 
             var text = new StringBuilder();
+            var shown = (Answerable: false, Thinking: false);
             await foreach (var delta in AskAsync(active, prompt, preset, ct).WithCancellation(ct).ConfigureAwait(false))
             {
                 active.Track(delta); // so Answer now also ends the thinking before the choices
                 if (delta.Content is not null) text.Append(delta.Content);
+                // Nothing else redraws the screen while the choices are worked out (no text is shown): say when Answer now
+                // can be pressed, and when the thinking is over.
+                if ((active.CanAnswerNow, active.IsThinking) != shown)
+                {
+                    shown = (active.CanAnswerNow, active.IsThinking);
+                    Changed?.Invoke();
+                }
             }
 
             var parsed = StoryPrompt.ParseChoices(text.ToString(), story);

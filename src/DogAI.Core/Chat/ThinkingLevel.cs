@@ -174,9 +174,16 @@ public sealed record ThinkingCut(ThinkingCutKind Kind, int Tokens, int? Budget)
         return budget is { } limit && facts.Tokens >= limit - ThinkingLevels.CutMargin ? new(ThinkingCutKind.Budget, facts.Tokens, limit) : null;
     }
 
-    /// <summary>The note for a saved reply; null without thinking (nothing is read then).</summary>
-    public static ThinkingCut? Of(ChatMessage message) =>
-        message.Role != ChatRole.Assistant || string.IsNullOrEmpty(message.Reasoning) || string.IsNullOrEmpty(message.ExtraJson)
-            ? null
-            : Of(Stories.StoryTurn.Of(message).Thinking);
+    /// <summary>
+    /// The note for a saved reply; null without thinking (nothing is read then). A reply stopped while it still thought
+    /// (no answer and no speed figures, as <see cref="ThinkingOnly"/> tells it) was not cut by its limit, however close
+    /// to it the count had come.
+    /// </summary>
+    public static ThinkingCut? Of(ChatMessage message)
+    {
+        if (message.Role != ChatRole.Assistant || string.IsNullOrEmpty(message.Reasoning) || string.IsNullOrEmpty(message.ExtraJson)) return null;
+        var cut = Of(Stories.StoryTurn.Of(message).Thinking);
+        var stoppedThinking = string.IsNullOrWhiteSpace(message.Content) && message.CompletionTokens is not > 0;
+        return cut is { Kind: ThinkingCutKind.Budget } && stoppedThinking ? null : cut;
+    }
 }

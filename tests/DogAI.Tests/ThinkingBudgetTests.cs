@@ -294,6 +294,14 @@ public sealed class ThinkingCutTests
         Assert.Equal(ThinkingOnlyReason.Stopped, ThinkingOnly.Of(Reply(new ThinkingFacts { Tokens = 492, Budget = 512 }, written: null), 8192)!.Reason);
         Assert.Equal(ThinkingOnlyReason.OutOfRoom, ThinkingOnly.Of(Reply(new ThinkingFacts { Tokens = 7990, AnswerNow = true }, written: 7998), 8192)!.Reason);
         Assert.Equal(ThinkingOnlyReason.Ended, ThinkingOnly.Of(Reply(new ThinkingFacts { Tokens = 300, Budget = 512 }), 8192)!.Reason);
+
+        // Stopped while thinking close to the limit: the line under the thinking does not say it was cut there (step 5's
+        // review). Answer now before the stop still says so, and a cut followed by an answer that was then stopped too.
+        Assert.Null(ThinkingCut.Of(Reply(new ThinkingFacts { Tokens = 450, Budget = 512 }, written: null)));
+        Assert.Equal(ThinkingCutKind.AnswerNow, ThinkingCut.Of(Reply(new ThinkingFacts { Tokens = 450, Budget = 512, AnswerNow = true }, written: null))!.Kind);
+        var answered = Reply(new ThinkingFacts { Tokens = 492, Budget = 512 }, written: null);
+        answered.Content = "Half an answer";
+        Assert.Equal(ThinkingCutKind.Budget, ThinkingCut.Of(answered)!.Kind);
     }
 }
 
@@ -482,6 +490,48 @@ public sealed partial class ChatServiceTests
         var turn = StoryTurn.Of(passage);
         Assert.True(turn.Thinking!.AnswerNow); // kept when the choices were saved beside it
         Assert.Equal(2, turn.Choices!.Count);
+    }
+
+    [Fact]
+    public async Task While_the_choices_think_the_screen_is_told_so_Answer_now_can_show()
+    {
+        // The passage answers at once; the choices think until Answer now. Nothing streams text to the screen during the
+        // choices, so the service itself must say when Answer now can be pressed (found in the app in step 5).
+        var options = new StoryOptions(new VoiceFlowTests.MemorySettings());
+        await options.SetLevelAsync(ThinkingLevel.NoLimit);
+        var service = new ChatService(_store, _engine, _presets, _characters, _stories, storyOptions: options);
+        var story = await NewStoryWithAsync(StoryKind.Interactive, null);
+        var end = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _engine.EndThinking = _ => { end.TrySetResult(); return ThinkingEnd.Ended; };
+        _engine.Reply = Stream;
+        var seen = new List<(ReplyKind Kind, bool CanAnswerNow)>();
+        service.Changed += () => { if (service.Active is { } a) seen.Add((a.Kind, a.CanAnswerNow)); };
+
+        var beginning = service.BeginStoryAsync(story);
+        while (service.Active is not { Kind: ReplyKind.Choices, CanAnswerNow: true }) await Task.Delay(5);
+        await service.AnswerNowAsync();
+        await beginning;
+
+        Assert.Contains((ReplyKind.Choices, true), seen);
+        Assert.Equal(2, StoryTurn.Of((await ShownAsync(story))[^1]).Choices!.Count);
+
+        async IAsyncEnumerable<ChatDelta> Stream([EnumeratorCancellation] CancellationToken ct)
+        {
+            var sampler = _engine.Samplers[^1];
+            if (sampler.ThinkingControl) yield return new ChatDelta(null, null, null, "chatcmpl-" + _engine.Samplers.Count);
+            if (sampler.JsonSchema is null)
+            {
+                yield return new ChatDelta("You wake in a yard.", null, null);
+                yield break;
+            }
+            while (!end.Task.IsCompleted)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return new ChatDelta(null, "hm ", null);
+                await Task.Delay(1, ct);
+            }
+            yield return new ChatDelta(ChoicesJson, null, null);
+        }
     }
 
     [Fact]

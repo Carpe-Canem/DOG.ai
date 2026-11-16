@@ -35,6 +35,9 @@
 
     private async Task SaveAsync(AppSettings next)
     {
+        // Load again first and change only this block's three settings: the copy read when the page opened would undo
+        // anything changed since on another part of Settings (a thinking level, say).
+        next = await SettingsStore.LoadAsync() with { TrayIcon = next.TrayIcon, CloseToTray = next.CloseToTray, DictateAnywhere = next.DictateAnywhere };
         _s = next;
         await SettingsStore.SaveAsync(next);
         await Windows.ApplyAsync();
