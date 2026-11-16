@@ -434,6 +434,11 @@ public static class PortraitLooks
         ? "Looking at the picture…"
         : "The chat model was set aside for pictures. It is loading again, then looks at the picture…";
 
+    /// <summary>Said when the page could not turn the editor's picture into the JPEG the model is given.</summary>
+    public static string Unreadable(bool persona) => persona
+        ? "The picture could not be read. Change it beside your name, then try again."
+        : "The picture could not be read. Change it in Basics, then try again.";
+
     /// <summary>The note after a draft from the portrait (the tag notes follow it).</summary>
     public const string Drafted = "Drafted from the picture: lasting features only. Change what you like; it is saved with the rest.";
 }

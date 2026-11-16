@@ -538,9 +538,10 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             var built = await BuildPromptAsync(layout, path, PromptEnd.OwnerDraft, names, token);
             // A draft never thinks (it never did: an open turn cannot): thinking added six seconds and nothing else.
             // It stops where somebody else's line would start, so it never runs on into a character's reply.
-            stops = names.Group ? names.StopsFor(names.User) : ["\n" + names.Character + ":"];
+            // A model that never stops ends at DraftMaxTokens, not when the reply's room is gone.
+            stops = names.DraftStops();
             _draftBy = names.User;
-            var preset = _presets.Get(conversation.PresetId) with { Thinking = false, Stop = stops };
+            var preset = _presets.Get(conversation.PresetId) with { Thinking = false, Stop = stops, MaxTokens = DraftMaxTokens };
             await StreamAsync(AskAsync(active, built.Prompt, preset, token), active, null, 0, token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -557,6 +558,12 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         }
         return Draft(active.Content, stops, _draftBy);
     }
+
+    /// <summary>
+    /// The most Write mine's draft may be. Drafts are 250 to 420 characters on Huihui Qwen3.5 9B (about 100 tokens), so a
+    /// draft that reaches it is a model running on.
+    /// </summary>
+    public const int DraftMaxTokens = 512;
 
     /// <summary>The owner's name in the draft being written, for <see cref="DraftSoFar"/>.</summary>
     private string _draftBy = "";
@@ -753,6 +760,18 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
                 .Where(n => n.Trim().Length > 0 && !n.Equals(speaker, StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Select(n => "\n" + n.Trim() + ":")
+                .ToList();
+
+        /// <summary>
+        /// Stop strings for Write mine's draft: a line that starts with a character's name, written "Name:", "[Name]" or
+        /// "**Name:**" (models label a speaker in all three ways), so the draft never runs on into a character's reply.
+        /// </summary>
+        public IReadOnlyList<string> DraftStops() =>
+            (Speakers?.Values ?? [Character])
+                .Select(n => n.Trim())
+                .Where(n => n.Length > 0 && !n.Equals(User.Trim(), StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .SelectMany(n => new[] { "\n" + n + ":", "\n[" + n + "]", "\n**" + n + ":", "\n**" + n + "**:" })
                 .ToList();
     }
 

@@ -286,7 +286,11 @@ public sealed class PicturePromptTests : IDisposable
         Assert.DoesNotContain("white towel", list.Resolve("white tower")); // a lighthouse is not a towel (seen in M17 step 6)
         Assert.Equal(["white towel"], list.Resolve("white towel"));
         Assert.Equal(["jacket"], list.Resolve("jackett"));    // a slip into a common tag is still put right
-        // No artists, characters or series: a name the model slips in is dropped.
+        // Two unknown describing words never leave the bare thing ("hair" says nothing; seen in Looks drafts, M19 step 2):
+        // one describing word is kept with it, else it is dropped.
+        Assert.Equal(["medium hair"], list.Resolve("medium length hair"));
+        Assert.Empty(list.Resolve("side swept hair"));
+        Assert.Equal(["cloak"], list.Resolve("tatterd cloak")); // one unknown word still leaves the thing        // No artists, characters or series: a name the model slips in is dropped.
         foreach (var name in new[] { "hatsune miku", "touhou", "twilight sparkle (mlp)" })
             Assert.False(list.Contains(name), name);
         // Every framing the model may choose is a real tag.

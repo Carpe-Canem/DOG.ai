@@ -293,11 +293,14 @@ public sealed class TagList
 
         // Only the describing words are unknown: keep the thing itself. Not when they turn its meaning round, not for
         // a sentence, and only when the thing is a tag in its own right: another spelling is too weak a link here.
+        // Of three words, one describing word is kept with the thing ("medium length hair" → "medium hair"), never the
+        // thing alone: two lost words leave a tag that says nothing ("side swept hair" became a bare "hair", M19).
         if (words.Count is 2 or 3 && !words.Any(Sentence.Contains) && !words.Take(words.Count - 1).Any(Negations.Contains))
         {
             thingOnly = true;
             if (words.Count == 3 && _tags.ContainsKey(words[^2] + " " + words[^1])) return [words[^2] + " " + words[^1]];
-            if (words[^1].Length >= 3 && _tags.ContainsKey(words[^1])) return [words[^1]];
+            if (words.Count == 3 && _tags.ContainsKey(words[0] + " " + words[^1])) return [words[0] + " " + words[^1]];
+            if (words.Count == 2 && words[^1].Length >= 3 && _tags.ContainsKey(words[^1])) return [words[^1]];
             thingOnly = false;
         }
         return [];

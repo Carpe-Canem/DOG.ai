@@ -188,7 +188,7 @@
                     [portrait, AttachedPictures.MaxSide, AttachedPictures.Quality, ComposerPictures.MaxFileBytes]);
                 if (made is not { Length: > 0 })
                 {
-                    _error = "The picture could not be read. Choose it again, then try again.";
+                    _error = PortraitLooks.Unreadable(Persona);
                     return;
                 }
                 jpeg = AttachedPictures.Plain(made);
@@ -247,7 +247,7 @@
         }
         catch (JSException)
         {
-            _error = "The picture could not be read. Choose it again, then try again.";
+            _error = PortraitLooks.Unreadable(Persona);
         }
         catch (Exception e) when (e is InvalidOperationException or EngineException)
         {

@@ -443,10 +443,12 @@ public sealed partial class ChatServiceTests : IDisposable
         Assert.Equal("*wags* Hello, Sam!", prompt[2].Content);
         Assert.StartsWith("[Write Sam's next message", prompt[3].Content);
         Assert.DoesNotContain("{{", prompt[3].Content);
-        // A draft does not think, and stops where a line of Rex's would start.
+        // A draft does not think, stops where a line of Rex's would start (labelled any of the ways models label one),
+        // and has a limit of its own, so a model that runs on stops long before the reply's room is gone.
         Assert.False(_engine.Samplers[^1].Thinking);
         Assert.Null(_engine.Samplers[^1].ThinkingBudget);
-        Assert.Equal(["\nRex:"], _engine.Samplers[^1].Stop!);
+        Assert.Equal(["\nRex:", "\n[Rex]", "\n**Rex:", "\n**Rex**:"], _engine.Samplers[^1].Stop!);
+        Assert.Equal(ChatService.DraftMaxTokens, _engine.Samplers[^1].MaxTokens);
         Assert.Equal("", _chat.DraftSoFar);
         Assert.False(_chat.IsBusy);
     }
@@ -511,7 +513,7 @@ public sealed partial class ChatServiceTests : IDisposable
         Assert.StartsWith("[Write Sam's next message", prompt[^1].Content);
         Assert.Contains("nothing from Ann and Bo", prompt[^1].Content);
         Assert.DoesNotContain("next message", prompt[0].Content);
-        Assert.Equal(["\nAnn:", "\nBo:"], _engine.Samplers[^1].Stop!);
+        Assert.Equal(["\nAnn:", "\n[Ann]", "\n**Ann:", "\n**Ann**:", "\nBo:", "\n[Bo]", "\n**Bo:", "\n**Bo**:"], _engine.Samplers[^1].Stop!);
         Assert.False(_engine.Samplers[^1].Thinking);
     }
 
