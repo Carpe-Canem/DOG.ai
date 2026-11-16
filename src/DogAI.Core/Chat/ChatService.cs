@@ -528,17 +528,20 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             var speaker = conversation.IsGroup ? path.LastOrDefault(m => m.Role == ChatRole.Assistant && m.SpeakerId is not null)?.SpeakerId : null;
             var (layout, names) = await PrepareAsync(conversation, path, active, speaker, token);
             layout.FinalInstruction = ""; // the card's final instruction is about the character's replies
+            // The draft is asked for as an ordinary request: the chat as a reply would get it, then one user turn that
+            // asks for the owner's next message. Nothing goes into the system message, so the engine reads nothing
+            // again for it, and there is no instruction there for the model to copy out as the "message". Until M19
+            // the model wrote straight into an open user turn with an instruction in the system message; right after
+            // a greeting and in group chats that gave the instruction, the card or a line in brackets back (0 to 3
+            // real messages in 20 tries, with any wording of the opening line; this way 20 of 20 on both models tried).
             layout.Directive = CharacterPrompt.Fill(CharacterPrompt.ImpersonateDirective, names.Everyone, names.User);
-            layout.Add(PromptPartKind.Instruction, CharacterPrompt.Fill(CharacterPrompt.ImpersonateHint, names.Everyone, names.User));
-            var built = await BuildPromptAsync(layout, path, PromptEnd.UserTurn, names, token);
-            var preset = ThinkingFor(conversation, _presets.Get(conversation.PresetId));
-            // Writing inside an open user turn makes the model speak as the user; asking it to is the fallback.
-            // Stop where the template would close the user's turn, so the draft never runs on into the character's reply.
-            var stream = built.OpenUserTurn
-                ? engine.StreamCompletionAsync(built.Raw, built.RawPictures, preset with { Stop = built.TurnEnds }, token)
-                : AskAsync(active, built.Prompt, preset, token);
-            stops = built.TurnEnds;
-            await StreamAsync(stream, active, null, 0, token);
+            var built = await BuildPromptAsync(layout, path, PromptEnd.OwnerDraft, names, token);
+            // A draft never thinks (it never did: an open turn cannot): thinking added six seconds and nothing else.
+            // It stops where somebody else's line would start, so it never runs on into a character's reply.
+            stops = names.Group ? names.StopsFor(names.User) : ["\n" + names.Character + ":"];
+            _draftBy = names.User;
+            var preset = _presets.Get(conversation.PresetId) with { Thinking = false, Stop = stops };
+            await StreamAsync(AskAsync(active, built.Prompt, preset, token), active, null, 0, token);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -552,8 +555,18 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             End(conversationId, error);
             cts.Dispose();
         }
-        return PromptLayout.CutAtFirst(active.Content, stops).Trim();
+        return Draft(active.Content, stops, _draftBy);
     }
+
+    /// <summary>The owner's name in the draft being written, for <see cref="DraftSoFar"/>.</summary>
+    private string _draftBy = "";
+
+    /// <summary>Write mine's draft as far as it has been written, as the message box shows it; empty when none is being written.</summary>
+    public string DraftSoFar => Active is { Kind: ReplyKind.Draft } active ? Draft(active.Content, [], _draftBy) : "";
+
+    /// <summary>A draft as the owner gets it: cut where somebody else's line starts, and without the owner's own label in front.</summary>
+    private static string Draft(string text, IEnumerable<string> stops, string user) =>
+        CharacterPrompt.OwnDraft(PromptLayout.CutAtFirst(text, stops), user);
 
     /// <summary>Forgets the chat's summary; it is written again from scratch when next needed.</summary>
     public async Task ForgetSummaryAsync(long conversationId, CancellationToken ct = default)
@@ -944,24 +957,16 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         return picked;
     }
 
-    /// <summary>How the prompt ends: ready for a reply, inside a reply being continued, or inside an open user turn (impersonate).</summary>
+    /// <summary>How the prompt ends: ready for a reply, inside a reply being continued, or asking for the owner's own next message (Write mine).</summary>
     private enum PromptEnd
     {
         Reply,
         Continue,
-        UserTurn,
+        OwnerDraft,
     }
 
-    /// <summary>Stands in for the user's text when finding where a user turn starts in the rendered template.</summary>
-    private const string UserTurnMark = "@@DOGAI-USER-TURN-7f3a@@";
-
-    /// <param name="OpenUserTurn">True when <see cref="Text"/> ends inside an empty user turn, for raw completion.</param>
-    /// <param name="TurnEnds">With an open user turn: the text the template puts after a user's message, to stop at.</param>
-    private sealed record BuiltPrompt(List<PromptMessage> Prompt, string Text, int Tokens, int Trimmed, IReadOnlyList<PromptPart> Parts,
-        bool OpenUserTurn = false, IReadOnlyList<string>? TurnEnds = null)
+    private sealed record BuiltPrompt(List<PromptMessage> Prompt, string Text, int Tokens, int Trimmed, IReadOnlyList<PromptPart> Parts)
     {
-        public IReadOnlyList<string> TurnEnds { get; } = TurnEnds ?? [];
-
         /// <summary><see cref="Text"/> without the lines that stand for pictures: what a raw completion carries on from.</summary>
         public string Raw { get; init; } = Text;
 
@@ -979,9 +984,8 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
     /// dropping further old turns until the prompt leaves room for a reply. If even the newest message does not fit,
     /// the least important parts go next (examples, then memory, then lore); the instruction and card always stay.
     /// With <see cref="PromptEnd.Continue"/>, the last message of <paramref name="path"/> is a reply to carry on: the
-    /// prompt is the template up to where that reply starts, followed by its text so far. With <see cref="PromptEnd.UserTurn"/>,
-    /// the text ends where a new user turn starts, found by rendering a marker in its place; when the chat already ends
-    /// with the user (or the template hides the marker), the layout's directive asks for the user's turn instead.
+    /// prompt is the template up to where that reply starts, followed by its text so far. With <see cref="PromptEnd.OwnerDraft"/>
+    /// the prompt is a reply's own without its pictures, and the layout's directive asks for the owner's message.
     /// </summary>
     private async Task<BuiltPrompt> BuildPromptAsync(PromptLayout layout, IReadOnlyList<ChatMessage> path, PromptEnd end, Names names, CancellationToken ct)
     {
@@ -997,7 +1001,7 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
         // picture at the start of the owner's turns the model begins its draft with a stand-in in brackets
         // ("[Start a new chat]", "[User] …": 6 of 6 tries with Huihui Qwen3.5 9B in M17 step 6, against 2 of 6 without),
         // and a note in the picture's place does the same (6 of 6). A message that is pictures alone keeps one word.
-        var withPictures = end != PromptEnd.UserTurn;
+        var withPictures = end != PromptEnd.OwnerDraft;
         // A model that cannot see gets a note in each picture's place; one that can gets the stored pictures themselves.
         var sees = withPictures && engine.SeesPictures && attached is not null;
 
@@ -1065,41 +1069,20 @@ public sealed partial class ChatService(IChatStore store, IChatEngine engine, Pr
             }
 
             var system = layout.SystemText(parts);
-            RenderedPrompt rendered;
-            List<PromptMessage> prompt;
-            var open = false;
-            IReadOnlyList<string> turnEnds = [];
-            if (end == PromptEnd.UserTurn && (history.Count == 0 || history[^1].Role == "assistant"))
+            var prompt = layout.Arrange(system, history, parts: parts);
+            // A reply is carried on from its answer, never from inside the model's thinking: the template closes
+            // the thinking block first. Left open (as it was until M17 step 6), a thinking model took the answer so
+            // far for its thoughts, went on planning in the reply and wrote the answer a second time. The owner's
+            // draft is asked for without thinking, so it is counted that way too.
+            var rendered = await RenderAsync(prompt, ct, thinking: end == PromptEnd.Reply);
+            if (continuation)
             {
-                prompt = layout.Arrange(system, history, directive: false, parts: parts);
-                rendered = await RenderAsync([.. prompt, new PromptMessage("user", UserTurnMark)], ct);
-                var cut = rendered.Raw.IndexOf(UserTurnMark, StringComparison.Ordinal);
-                var shownCut = rendered.Shown.IndexOf(UserTurnMark, StringComparison.Ordinal);
-                open = cut >= 0 && shownCut >= 0;
-                turnEnds = open ? PromptLayout.TurnEnds(rendered.Raw[(cut + UserTurnMark.Length)..]) : [];
-                if (open) rendered = rendered with { Raw = rendered.Raw[..cut], Shown = rendered.Shown[..shownCut] };
-            }
-            else
-            {
-                prompt = [];
-                rendered = new RenderedPrompt("", "", [], 0);
-            }
-            if (!open)
-            {
-                prompt = layout.Arrange(system, history, parts: parts);
-                // A reply is carried on from its answer, never from inside the model's thinking: the template closes
-                // the thinking block first. Left open (as it was until M17 step 6), a thinking model took the answer so
-                // far for its thoughts, went on planning in the reply and wrote the answer a second time.
-                rendered = await RenderAsync(prompt, ct, thinking: !continuation);
-                if (continuation)
-                {
-                    var soFar = (names.Group ? names.Label(included[^1]) + ": " : "") + included[^1].Content;
-                    rendered = rendered with { Raw = rendered.Raw + soFar, Shown = rendered.Shown + soFar };
-                }
+                var soFar = (names.Group ? names.Label(included[^1]) + ": " : "") + included[^1].Content;
+                rendered = rendered with { Raw = rendered.Raw + soFar, Shown = rendered.Shown + soFar };
             }
             // Text is counted without the pictures; each picture costs what the engine says it does.
             var tokens = await engine.CountTokensAsync(rendered.Raw, ct) + rendered.PictureTokens;
-            BuiltPrompt Built() => new(prompt, rendered.Shown, tokens, fit.Trimmed, parts, open, turnEnds)
+            BuiltPrompt Built() => new(prompt, rendered.Shown, tokens, fit.Trimmed, parts)
             {
                 Raw = rendered.Raw,
                 RawPictures = rendered.Pictures,

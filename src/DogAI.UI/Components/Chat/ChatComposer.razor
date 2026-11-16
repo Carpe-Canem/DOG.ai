@@ -491,8 +491,8 @@
     // While the model drafts the user's message, show it growing in the box.
     private void OnChatChanged()
     {
-        if (!_drafting || Chat.Active is not { Kind: ReplyKind.Draft } draft) return;
-        _draft = draft.Content.TrimStart();
+        if (!_drafting || Chat.Active is not { Kind: ReplyKind.Draft }) return;
+        _draft = Chat.DraftSoFar;
         _ = InvokeAsync(StateHasChanged);
     }
 

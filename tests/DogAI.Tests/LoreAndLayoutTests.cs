@@ -262,16 +262,27 @@ public sealed class PromptLayoutTests
     }
 
     [Fact]
-    public void A_drafted_user_turn_stops_where_the_template_closes_it()
+    public void A_draft_is_cut_where_somebody_elses_line_starts()
     {
-        // Mistral-style templates close a user turn with "[/INST]", which is ordinary text, not a stop token.
-        Assert.Equal(["[/INST]"], PromptLayout.TurnEnds(" [/INST]"));
-        Assert.Equal(["<|im_end|>", "<|im_end|>\n<|im_start|>assistant"], PromptLayout.TurnEnds("<|im_end|>\n<|im_start|>assistant\n"));
-        Assert.Empty(PromptLayout.TurnEnds("  "));
+        var runOn = "*pats Mara* Good work.\nMara: *grunts* Don't get soft on me.";
+        Assert.Equal("*pats Mara* Good work.", PromptLayout.CutAtFirst(runOn, ["\nBo:", "\nMara:"]));
+        Assert.Equal("all of it", PromptLayout.CutAtFirst("all of it", ["\nMara:"]));
+    }
 
-        var runOn = "*pats Mara* Good work. [/INST] *Mara grunts* Don't get soft on me.";
-        Assert.Equal("*pats Mara* Good work. ", PromptLayout.CutAtFirst(runOn, PromptLayout.TurnEnds(" [/INST]")));
-        Assert.Equal("all of it", PromptLayout.CutAtFirst("all of it", ["[/INST]"]));
+    [Fact]
+    public void A_drafts_own_label_at_its_start_is_not_part_of_the_message()
+    {
+        // What models wrote in the M19 trial when every reply in the chat was "Name: …".
+        Assert.Equal("*waves* Morning.", CharacterPrompt.OwnDraft("Alex: *waves* Morning.", "Alex"));
+        Assert.Equal("*waves* Morning.", CharacterPrompt.OwnDraft("[Alex]\n*waves* Morning.  ", "Alex"));
+        Assert.Equal("Alex leaned in. \"Morning.\"", CharacterPrompt.OwnDraft("Alex: [Alex]\nAlex leaned in. \"Morning.\"", "Alex"));
+        Assert.Equal("Morning.", CharacterPrompt.OwnDraft("**alex:** Morning.", "Alex"));
+        // Only the owner's own label, and only at the very start.
+        Assert.Equal("Bram: Morning.", CharacterPrompt.OwnDraft("Bram: Morning.", "Alex"));
+        Assert.Equal("Alexander: Morning.", CharacterPrompt.OwnDraft("Alexander: Morning.", "Alex"));
+        Assert.Equal("Morning.\nAlex: again", CharacterPrompt.OwnDraft("Morning.\nAlex: again", "Alex"));
+        Assert.Equal("[Alex's map]", CharacterPrompt.OwnDraft("[Alex's map]", "Alex"));
+        Assert.Equal("Morning.", CharacterPrompt.OwnDraft("  Morning. ", ""));
     }
 
     [Fact]

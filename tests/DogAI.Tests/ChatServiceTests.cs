@@ -436,11 +436,83 @@ public sealed partial class ChatServiceTests : IDisposable
 
         Assert.Equal("*pats Rex* Good dog.", draft);
         Assert.Equal(before.Count, (await _store.GetMessagesAsync(chat.Id)).Count);
-        // The chat ends with Rex's greeting, so the model writes straight into an open user turn.
-        Assert.Empty(_engine.Prompts);
-        Assert.EndsWith("<assistant> *wags* Hello, Sam! <user> ", _engine.Completions[^1]);
-        Assert.DoesNotContain("DOGAI", _engine.Completions[^1]);
+        // Asked as an ordinary request: the chat, then one turn that asks for Sam's message. Never a raw completion.
+        Assert.Empty(_engine.Completions);
+        var prompt = Assert.Single(_engine.Prompts);
+        Assert.Equal(["system", "user", "assistant", "user"], prompt.Select(m => m.Role));
+        Assert.Equal("*wags* Hello, Sam!", prompt[2].Content);
+        Assert.StartsWith("[Write Sam's next message", prompt[3].Content);
+        Assert.DoesNotContain("{{", prompt[3].Content);
+        // A draft does not think, and stops where a line of Rex's would start.
+        Assert.False(_engine.Samplers[^1].Thinking);
+        Assert.Null(_engine.Samplers[^1].ThinkingBudget);
+        Assert.Equal(["\nRex:"], _engine.Samplers[^1].Stop!);
+        Assert.Equal("", _chat.DraftSoFar);
         Assert.False(_chat.IsBusy);
+    }
+
+    /// <summary>
+    /// Write mine's request is a reply's own prompt with one turn after it (M19 step 1). Until then an instruction for
+    /// the draft was put into the system message: the model copied it out as the "message" (14 to 19 tries of 20 right
+    /// after a greeting), and because the prompt differed from its second paragraph on, the engine read the whole
+    /// chat again for every draft and again for the reply after it.
+    /// </summary>
+    [Fact]
+    public async Task Write_mine_asks_after_the_very_prompt_a_reply_gets()
+    {
+        var rex = await SaveCharacterAsync();
+        await _characters.SavePersonaAsync(new Persona { Name = "Sam", Description = "{{user}} is a farmer." });
+        var chat = await _chat.StartCharacterChatAsync(rex.Id);
+        await _chat.SendAsync(chat.Id, "Good boy");
+        var reply = _engine.Prompts[^1];
+
+        _engine.Reply = _ => FakeEngine.Say("Fetch!");
+        Assert.Equal("Fetch!", await _chat.ImpersonateAsync(chat.Id));
+
+        var draft = _engine.Prompts[^1];
+        // The system message is the reply's, word for word: nothing about the draft is in it.
+        Assert.Equal(reply[0].Content, draft[0].Content);
+        Assert.DoesNotContain("next message", draft[0].Content);
+        // Then the chat as the reply had it (the opening line too), the reply itself, and the one turn that asks.
+        Assert.Equal(reply.Select(m => (m.Role, m.Content)), draft.Take(reply.Count).Select(m => (m.Role, m.Content)));
+        Assert.Equal(CharacterPrompt.ChatStart, draft[1].Content);
+        Assert.Equal(reply.Count + 2, draft.Count);
+        Assert.Equal(("assistant", "Hello there"), (draft[^2].Role, draft[^2].Content));
+        Assert.Equal("user", draft[^1].Role);
+        Assert.Equal(CharacterPrompt.Fill(CharacterPrompt.ImpersonateDirective, "Rex", "Sam"), draft[^1].Content);
+    }
+
+    [Fact]
+    public async Task Write_mine_in_a_group_drops_the_label_the_model_gives_its_own_draft()
+    {
+        var (ann, bo) = await SaveGroupAsync();
+        var chat = await _chat.StartGroupChatAsync([ann.Id, bo.Id], turnOrder: TurnOrder.Manual);
+
+        // Every reply in a group's prompt is "Name: …", so a model labels the owner's message the same way.
+        string? whileWritten = null;
+        async IAsyncEnumerable<ChatDelta> Labelled()
+        {
+            yield return new ChatDelta("Sam: [Sam]\n*waves* Morning,", null, null);
+            await Task.Yield();
+            whileWritten = _chat.DraftSoFar;
+            yield return new ChatDelta(" both.\nAnn: Ahoy again.", null, null);
+            yield return new ChatDelta(null, null, new GenerationStats(12, 2, 50));
+        }
+        _engine.Reply = _ => Labelled();
+
+        Assert.Equal("*waves* Morning, both.", await _chat.ImpersonateAsync(chat.Id));
+
+        // The message box never showed the label either.
+        Assert.Equal("*waves* Morning,", whileWritten);
+        var prompt = _engine.Prompts[^1];
+        AssertAlternates(prompt);
+        Assert.Equal(CharacterPrompt.ChatStart, prompt[1].Content);
+        Assert.StartsWith("Ann: ", prompt[2].Content);
+        Assert.StartsWith("[Write Sam's next message", prompt[^1].Content);
+        Assert.Contains("nothing from Ann and Bo", prompt[^1].Content);
+        Assert.DoesNotContain("next message", prompt[0].Content);
+        Assert.Equal(["\nAnn:", "\nBo:"], _engine.Samplers[^1].Stop!);
+        Assert.False(_engine.Samplers[^1].Thinking);
     }
 
     [Fact]

@@ -228,14 +228,17 @@ public sealed partial class ChatServiceTests
         _engine.Reply = _ => FakeEngine.Say("And the next one?");
         Assert.Equal("And the next one?", await _chat.ImpersonateAsync(chat.Id));
 
-        // Raw text, no picture beside it, and nothing in brackets where the pictures were.
+        // One request more, in words alone: no picture on any turn, and nothing in brackets where the pictures were.
         Assert.Empty(_engine.PictureCompletions);
-        var draftPrompt = _engine.Completions[^1];
-        Assert.Contains("<user> What does the sign say?", draftPrompt);
-        Assert.Contains($"<user> {AttachedPictures.PictureOnly}", draftPrompt);
-        Assert.DoesNotContain("picture", draftPrompt.Replace(AttachedPictures.PictureOnly, ""), StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("DOGAI", draftPrompt);
-        Assert.Equal(replies, _engine.Prompts.Count);
+        Assert.Empty(_engine.Completions);
+        Assert.Equal(replies + 1, _engine.Prompts.Count);
+        var draftPrompt = _engine.Prompts[^1];
+        Assert.All(draftPrompt, m => Assert.Null(m.Pictures));
+        Assert.Contains(draftPrompt, m => m is { Role: "user", Content: "What does the sign say?" });
+        Assert.Contains(draftPrompt, m => m.Role == "user" && m.Content == AttachedPictures.PictureOnly);
+        Assert.All(draftPrompt.Skip(1).SkipLast(1), m =>
+            Assert.DoesNotContain("picture", m.Content.Replace(AttachedPictures.PictureOnly, ""), StringComparison.OrdinalIgnoreCase));
+        Assert.StartsWith("[Write ", draftPrompt[^1].Content);
 
         // The next reply has both pictures again, and no reply was told the model could not see.
         await _chat.SendAsync(chat.Id, "Thanks");

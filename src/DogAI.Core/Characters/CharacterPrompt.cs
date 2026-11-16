@@ -23,20 +23,49 @@ public static partial class CharacterPrompt
 
     /// <summary>
     /// The user turn put before a greeting when the prompt would otherwise open with the character speaking,
-    /// because many chat templates refuse a conversation that starts with a reply.
+    /// because many chat templates refuse a conversation that starts with a reply. It stays as it is: tried against
+    /// five plain wordings in M19 step 1, none made Write mine reliable, and "Hello." changed how characters answer a
+    /// greeting.
     /// </summary>
     public const string ChatStart = "[Start a new chat]";
 
-    /// <summary>Asks the model to write the user's next turn instead of the character's (impersonate).</summary>
+    /// <summary>
+    /// Write mine's whole request: the last user turn of an ordinary chat request, which the model answers with the
+    /// owner's next message. Nothing about it goes into the system message (the model copied an instruction there out
+    /// as the "message", 14 to 19 tries of 20 right after a greeting), so the prompt up to here is a reply's own.
+    /// The wording on length was chosen by trial: without it the drafts ran two to ten times the owner's own length.
+    /// </summary>
     public const string ImpersonateDirective =
-        "[Write {{user}}'s next message in this role-play, as {{user}} would write it and in the same style as " +
-        "{{user}}'s earlier messages. Write only {{user}}'s own words and actions, nothing from {{char}}. " +
-        "Reply with the message only.]";
+        "[Write {{user}}'s next message in this role-play, as {{user}} would write it: in the style of {{user}}'s " +
+        "earlier messages and no longer than they are, or one to three sentences when there are none yet. " +
+        "Write only {{user}}'s own words and actions, nothing from {{char}}. Reply with the message only.]";
 
-    /// <summary>Added to the system message when drafting the user's turn, so the model knows whose voice to use.</summary>
-    public const string ImpersonateHint =
-        "[This time, write {{user}}'s next message instead of {{char}}'s: {{user}}'s own words and actions, " +
-        "written as {{user}} would write them, with nothing from {{char}}. Write a real message, never a placeholder.]";
+    /// <summary>
+    /// A draft of the owner's message without the owner's own label in front. Asked for a message where every reply
+    /// is written "Name: …" (a group chat), a model labels its answer too: "Alex: …", "[Alex]" on a line, or both.
+    /// Only labels at the very start go, and only the owner's.
+    /// </summary>
+    public static string OwnDraft(string text, string user)
+    {
+        var draft = text.TrimStart();
+        var name = user.Trim();
+        if (name.Length == 0) return draft.TrimEnd();
+        while (true)
+        {
+            var rest = AfterLabel(draft, name);
+            if (rest is null) return draft.TrimEnd();
+            draft = rest;
+        }
+    }
+
+    /// <summary><paramref name="text"/> after "[Name]", "Name:" or "**Name:**" at its start; null when it starts with none.</summary>
+    private static string? AfterLabel(string text, string name)
+    {
+        foreach (var label in new[] { "[" + name + "]", "**" + name + ":**", "**" + name + "**:", name + ":" })
+            if (text.StartsWith(label, StringComparison.OrdinalIgnoreCase))
+                return text[label.Length..].TrimStart();
+        return null;
+    }
 
     /// <summary>The system message for writing the rolling summary of older turns.</summary>
     public const string SummarySystem = "You summarise stories accurately and briefly. You never continue the story yourself.";

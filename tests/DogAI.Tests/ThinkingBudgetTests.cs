@@ -384,8 +384,10 @@ public sealed partial class ChatServiceTests
         await _chat.SendAsync(chat.Id, "Sit.");
         Assert.Null(_engine.Samplers[^1].Thinking);
         Assert.Equal(512, _engine.Samplers[^1].ThinkingBudget);
+        // Write mine's draft never thinks, whatever the level (M19 step 1).
         await _chat.ImpersonateAsync(chat.Id);
-        Assert.Equal(512, _engine.Samplers[^1].ThinkingBudget);
+        Assert.False(_engine.Samplers[^1].Thinking);
+        Assert.Null(_engine.Samplers[^1].ThinkingBudget);
 
         var (ann, bo) = await SaveGroupAsync();
         var group = await _chat.StartGroupChatAsync([ann.Id, bo.Id], turnOrder: TurnOrder.InTurn);
