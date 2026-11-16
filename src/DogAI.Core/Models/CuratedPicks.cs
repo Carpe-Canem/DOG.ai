@@ -18,9 +18,11 @@ public sealed record CuratedPick(string UseCase, string Repo, string Title, doub
             .ToList();
 
     /// <summary>Shape used for fit estimates before the real header is read.</summary>
-    public ModelShape EstimatedShape(long weightBytes) => new()
+    /// <param name="projectorBytes">The projector downloaded with it (picture input), when its repository has one.</param>
+    public ModelShape EstimatedShape(long weightBytes, long projectorBytes = 0) => new()
     {
         WeightBytes = weightBytes,
+        ProjectorBytes = projectorBytes,
         // Typical mixture-of-experts models use about one sixteenth of their experts per token.
         ExpertCount = Experts ? 128 : null,
         ExpertsUsed = Experts ? 8 : null,

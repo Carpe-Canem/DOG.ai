@@ -352,6 +352,8 @@ public partial class App : Application
             else if (job.UseCase == DogAI.Core.Images.ImageDownloads.UseCase) { }
             // The full tag list (Models › On this PC › Pictures › Tags), checked against its pinned SHA-256 by the download itself.
             else if (job.UseCase == DogAI.Engine.Images.ExtraTags.UseCase) _ = extraTags.LoadAsync(Path.GetDirectoryName(Path.GetDirectoryName(job.MainPath)));
+            // A projector fetched on its own (Get picture input) is found beside its model by rule at the next load: no record.
+            else if (job.UseCase == Projectors.UseCase) { }
             else _ = records.SaveAsync(new ModelRecord { Path = job.MainPath, Repo = job.Repo, Quant = job.Quant, UseCase = job.UseCase });
         };
         await downloads.LoadAsync();

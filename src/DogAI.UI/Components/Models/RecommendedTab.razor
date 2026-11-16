@@ -39,13 +39,13 @@
                         <div class="model-meta">@Meta(row)</div>
                         @if (useCase != "embedding")
                         {
-                            <BesidePicturesChip Fit="row.Fit" />
+                            <BesidePicturesChip Fit="row.Fit" Sees="@(row.Projector is not null)" />
                         }
                     </div>
                     <FitBadge Fit="row.Fit" />
                     <DownloadButton Repo="@row.Pick.Repo" Variant="@(row.Real ? row.Variant : null)" UseCase="@useCase" Primary="@(i == bestIndex)"
                                     Installed="@(row.Variant is { } v && Installed.Contains(v.Main.Path.Split('/')[^1]))"
-                                    Fit="row.Fit" />
+                                    Fit="row.Fit" Projector="row.Projector" />
                 </div>
             }
         </div>
@@ -67,7 +67,8 @@
     private string _filter = "all";
     private string? _error;
 
-    private sealed record Row(CuratedPick Pick, ModelVariant? Variant, FitResult? Fit, bool Real);
+    /// <param name="Projector">The projector downloaded with it so it can see pictures, when its repository has one (known once online).</param>
+    private sealed record Row(CuratedPick Pick, ModelVariant? Variant, FitResult? Fit, bool Real, RemoteFile? Projector);
 
     /// <summary>Shares the Browse tab's choice, so asking for uncensored models carries over between tabs.</summary>
     private bool Uncensored => Ctx.Filter == ModelFilters.Uncensored;
@@ -77,19 +78,26 @@
         var variants = _real.GetValueOrDefault(pick.Repo);
         var real = variants is not null;
         variants ??= pick.EstimatedVariants();
+        // Judged with the projector that comes with each version (picture input), as it will be loaded.
+        ModelShape Shape(ModelVariant v) => pick.EstimatedShape(v.Size, Projector(pick, v)?.Size ?? 0);
         // No version can run here: the smallest is listed, marked too large, and can still be downloaded.
-        var best = Ctx.Best(variants, pick.EstimatedShape) ?? variants.MinBy(v => v.Size);
-        var fit = best is null ? null : Ctx.Fit(pick.EstimatedShape(best.Size));
-        return new Row(pick, best, fit, real);
+        var best = Ctx.Best(variants, Shape) ?? variants.MinBy(v => v.Size);
+        var fit = best is null ? null : Ctx.Fit(Shape(best));
+        return new Row(pick, best, fit, real, best is null ? null : Projector(pick, best));
     });
 
     private readonly Dictionary<string, IReadOnlyList<ModelVariant>> _real = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A document search model is given no pictures, so it is offered without a projector.</summary>
+    private RemoteFile? Projector(CuratedPick pick, ModelVariant variant) =>
+        pick.UseCase == "embedding" || !_real.ContainsKey(pick.Repo) ? null : Ctx.ProjectorFor(pick.Repo, variant);
 
     private static string Meta(Row row)
     {
         if (row.Variant is null) return "No files were found for this model.";
         var size = row.Real ? Sizes.Gb(row.Variant.Size) : "≈" + Sizes.Gb(row.Variant.Size);
-        return $"{row.Variant.Quant} · {size}" + (row.Fit?.Kind == FitKind.TooLarge ? " · the smallest version; none can run on this PC" : "");
+        return $"{row.Variant.Quant} · {size}" + (row.Projector is { } p ? $" {Projectors.WithInput(p.Size)}" : "")
+            + (row.Fit?.Kind == FitKind.TooLarge ? " · the smallest version; none can run on this PC" : "");
     }
 
     protected override async Task OnInitializedAsync()

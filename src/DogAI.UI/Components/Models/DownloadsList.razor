@@ -20,7 +20,7 @@ else
             <div class="model has-fit">
                 <div class="li-text">
                     <div class="model-name">@j.Title</div>
-                    <div class="model-meta">@j.Repo · @Sizes.Gb(j.TotalBytes)@(j.Parts.Count > 1 ? $" in {j.Parts.Count} parts" : "")</div>
+                    <div class="model-meta">@j.Repo · @Sizes.Gb(j.TotalBytes)@(j.WithProjector ? $" {Projectors.WithInputParts(j.ModelParts)}" : j.Parts.Count > 1 ? $" in {j.Parts.Count} parts" : "")</div>
                     <div class="model-meta">@Line(j)</div>
                     @if (j.Message is { Length: > 0 } message)
                     {

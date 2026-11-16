@@ -40,6 +40,18 @@ public sealed class DownloadJob
 
     public required string Folder { get; init; }
     public required List<DownloadPart> Parts { get; init; }
+
+    /// <summary>
+    /// The last part is the model's projector, fetched with it so the model can see pictures (M17 step 3). The model's
+    /// own file stays the first part: <see cref="MainPath"/>, the library record and the download button go by it.
+    /// </summary>
+    public bool WithProjector { get; init; }
+
+    /// <summary>The chat model a projector fetched on its own is for (Get picture input), by its path; null for anything else.</summary>
+    public string? ForModel { get; init; }
+
+    /// <summary>How many of the parts are the model itself.</summary>
+    public int ModelParts => Parts.Count - (WithProjector && Parts.Count > 1 ? 1 : 0);
     public DownloadStatus Status { get; set; }
 
     /// <summary>Why it failed or paused, in plain words.</summary>

@@ -234,7 +234,7 @@ else
     // model is loaded or drawn with, the connection where something can be downloaded.
     private bool ShowsHardware => Place.Id is ModelsPlaces.Recommended or ModelsPlaces.Browse or ModelsPlaces.Library;
     private bool ShowsCard => ShowsHardware || Place.Id == ModelsPlaces.GetPictures || (Place.Id == ModelsPlaces.Pictures && PicturePart != ModelsPlaces.Tags);
-    private bool ShowsConnection => Place.Group == ModelsPlaces.Get || Place.Id == ModelsPlaces.Engines || (Place.Id == ModelsPlaces.Pictures && PicturePart == ModelsPlaces.Tags);
+    private bool ShowsConnection => Place.Group == ModelsPlaces.Get || Place.Id is ModelsPlaces.Engines or ModelsPlaces.Library || (Place.Id == ModelsPlaces.Pictures && PicturePart == ModelsPlaces.Tags);
 
     private bool HasAside => ShowsHardware || ShowsConnection || (ShowsCard && Ctx.Hardware.MainGpu is not null);
 

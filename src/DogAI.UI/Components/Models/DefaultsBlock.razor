@@ -73,11 +73,16 @@
         </label>
     </div>
     <p class="small">A mode with no default loads nothing when it opens, until you pick a model there.</p>
+    @if (GeneralBlind is not null)
+    {
+        <p class="small" id="default-general-sees">@PictureInput.GeneralCannotSee(GeneralBlind.Name)</p>
+    }
 </Fold>
 
 @code {
     /// <summary>A model file in the library, as the block lists it.</summary>
-    public sealed record Choice(string Path, string Name, bool Search);
+    /// <param name="Sees">It can see pictures: its projector is beside it (M17).</param>
+    public sealed record Choice(string Path, string Name, bool Search, bool Sees = false);
 
     [Parameter, EditorRequired] public IReadOnlyList<Choice> Models { get; set; } = [];
     [Parameter, EditorRequired] public AppSettings Settings { get; set; } = new();
@@ -92,6 +97,10 @@
     private bool _scanned;
 
     private IEnumerable<Choice> ChatModels => Models.Where(m => !m.Search);
+
+    /// <summary>The General default when it is here and cannot see pictures (pictures in a General chat reach it as a note), else null.</summary>
+    private Choice? GeneralBlind =>
+        ModelDefaults.For(Settings, "general") is { } general && ChatModels.FirstOrDefault(m => Same(m.Path, general)) is { Sees: false } blind ? blind : null;
     private IEnumerable<Choice> SearchModels => Models.Where(m => m.Search);
 
     private string Summary

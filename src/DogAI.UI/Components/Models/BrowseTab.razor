@@ -45,7 +45,7 @@ else
         {
             <a class="model link" href="@($"models/browse?repo={Uri.EscapeDataString(repo.Id)}")">
                 <div class="li-text">
-                    <div class="model-name">@repo.Name @if (repo.Gated) {<span class="chip">Gated</span>} @if (repo.Uncensored) {<span class="chip">Uncensored</span>} @if (!Ctx.CanRun(repo.Parameters)) {<span class="chip">Too large</span>}</div>
+                    <div class="model-name">@repo.Name @if (repo.Gated) {<span class="chip">Gated</span>} @if (repo.Uncensored) {<span class="chip">Uncensored</span>} @if (repo.SeesPictures) {<span class="chip sees-chip" title="@Projectors.Explanation">@Projectors.Label</span>} @if (!Ctx.CanRun(repo.Parameters)) {<span class="chip">Too large</span>}</div>
                     @if (Describe(repo.Id) is { } about)
                     {
                         <div class="model-about">@about</div>

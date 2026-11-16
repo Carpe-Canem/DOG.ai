@@ -697,6 +697,9 @@ namespace DogAI.Data.Migrations
                     b.Property<int?>("TunedGpuLayers")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("TunedWithProjector")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("UseCase")
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");

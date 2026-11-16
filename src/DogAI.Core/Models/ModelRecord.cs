@@ -29,6 +29,13 @@ public sealed class ModelRecord
     public DateTime? BenchAt { get; set; }
 
     /// <summary>
+    /// Whether the benchmark that found <see cref="TunedGpuLayers"/> loaded the model with its projector (M17 step 3).
+    /// Tuned layers are used only for a load the same way: a projector put beside the model later takes about 1.1 GB
+    /// more of the card than the benchmark saw, and one removed leaves room it did not.
+    /// </summary>
+    public bool TunedWithProjector { get; set; }
+
+    /// <summary>
     /// Graphics memory the model really held the last time it was loaded whole on the card, measured a moment after
     /// the load, and the context size it was loaded with. The "Fits beside pictures" mark uses it in place of the
     /// estimate, which errs high (see <see cref="BesidePictures"/>).

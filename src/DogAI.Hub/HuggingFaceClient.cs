@@ -17,9 +17,16 @@ public enum HfSort
 /// <summary>One model repository in search results.</summary>
 /// <param name="Parameters">Parameter count from the GGUF metadata, when Hugging Face has it.</param>
 /// <param name="Tags">Tags the repository's author gave it.</param>
+/// <param name="Files">The repository's file names, when Hugging Face listed them with the result.</param>
 public sealed record HfModelSummary(string Id, long Downloads, int Likes, DateTime? LastModified, bool Gated, string? PipelineTag,
-    long? Parameters = null, IReadOnlyList<string>? Tags = null)
+    long? Parameters = null, IReadOnlyList<string>? Tags = null, IReadOnlyList<string>? Files = null)
 {
+    /// <summary>
+    /// The repository has a projector DOG.ai would take, so a model from it can see pictures (the "Sees pictures" mark).
+    /// Told from its file list, not from Hugging Face's "image-text-to-text" tag, which many such repositories lack.
+    /// </summary>
+    public bool SeesPictures => Files is not null && Projectors.AnyIn(Files);
+
     public bool Uncensored => ModelFilters.IsUncensored(Id, Tags);
 
     /// <summary>The one model this was made from, by its tags. Null for originals and merges.</summary>
@@ -55,14 +62,15 @@ public sealed class HuggingFaceClient(HttpClient http, HfToken token)
             _ => "trendingScore",
         };
         var url = $"{Site}/api/models?filter=gguf&sort={sortKey}&direction=-1&limit={limit}" +
-                  "&expand[]=downloads&expand[]=likes&expand[]=lastModified&expand[]=gated&expand[]=pipeline_tag&expand[]=gguf&expand[]=tags";
+                  "&expand[]=downloads&expand[]=likes&expand[]=lastModified&expand[]=gated&expand[]=pipeline_tag&expand[]=gguf&expand[]=tags&expand[]=siblings";
         if (!string.IsNullOrWhiteSpace(query)) url += "&search=" + Uri.EscapeDataString(query.Trim());
 
         var items = await GetJsonAsync<List<ApiModel>>(url, ct).ConfigureAwait(false) ?? [];
         return items.Select(m => new HfModelSummary(m.Id, m.Downloads, m.Likes, m.LastModified, IsGated(m.Gated), m.PipelineTag,
             m.Gguf is { ValueKind: JsonValueKind.Object } g && g.TryGetProperty("total", out var total) && total.ValueKind == JsonValueKind.Number
                 ? total.GetInt64() : null,
-            m.Tags)).ToList();
+            m.Tags,
+            m.Siblings?.Select(f => f.Rfilename).OfType<string>().ToList())).ToList();
     }
 
     /// <summary>
@@ -167,7 +175,10 @@ public sealed class HuggingFaceClient(HttpClient http, HfToken token)
         JsonElement Gated,
         [property: JsonPropertyName("pipeline_tag")] string? PipelineTag,
         JsonElement? Gguf = null,
-        List<string>? Tags = null);
+        List<string>? Tags = null,
+        List<ApiSibling>? Siblings = null);
+
+    private sealed record ApiSibling(string? Rfilename);
 
     private sealed record ApiTreeItem(string Type, string Path, long Size, ApiLfs? Lfs);
 

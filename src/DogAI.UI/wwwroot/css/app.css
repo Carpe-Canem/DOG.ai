@@ -255,6 +255,7 @@ em.act { color: var(--act); }
 /* The "Fits beside pictures" mark on a chat model, with its (i); the explanation opens on a line of its own. */
 .beside-row { margin-top: 5px; align-items: center; gap: 2px; }
 .beside-chip { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.sees-chip { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .beside-row .info-text { flex-basis: 100%; }
 .rec { margin-left: 8px; font-size: .72em; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--ink); background: var(--accent); padding: 1px 7px; border-radius: 999px; vertical-align: middle; }
 .progress { width: 140px; display: grid; gap: 4px; font-size: .8em; color: var(--muted); }

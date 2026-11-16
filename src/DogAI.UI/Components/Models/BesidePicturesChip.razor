@@ -1,11 +1,21 @@
-@* The "Fits beside pictures" mark on a chat model: it can stay in graphics memory while a picture is drawn
-   (BesidePictures in Core has the rule). Nothing is rendered for a model that does not, or when there is no picture
+@* The marks under a chat model's name: "Sees pictures" (it has, or is downloaded with, its projector: Projectors in
+   Core; M17 step 3) and "Fits beside pictures" (it can stay in graphics memory while a picture is drawn: BesidePictures
+   in Core has the rule). Nothing is rendered when neither applies; "Fits beside pictures" not when there is no picture
    engine or checkpoint. *@
 @inject ModelsContext Ctx
 
-@if (Ctx.FitsBesidePictures(Fit, Measured))
+@if (Sees || Fits)
 {
-    <div class="chips beside-row"><span class="chip beside-chip">@BesidePictures.Label</span><InfoButton About="fitting beside pictures">@BesidePictures.Explanation</InfoButton></div>
+    <div class="chips beside-row">
+        @if (Sees)
+        {
+            <span class="chip sees-chip">@Projectors.Label</span><InfoButton About="seeing pictures">@Projectors.Explanation</InfoButton>
+        }
+        @if (Fits)
+        {
+            <span class="chip beside-chip">@BesidePictures.Label</span><InfoButton About="fitting beside pictures">@BesidePictures.Explanation</InfoButton>
+        }
+    </div>
 }
 
 @code {
@@ -14,4 +24,9 @@
 
     /// <summary>The graphics memory an installed model really took at this context size, when it has been loaded (it replaces the estimate).</summary>
     [Parameter] public long? Measured { get; set; }
+
+    /// <summary>The model can see pictures: its projector is beside it, or comes with the download.</summary>
+    [Parameter] public bool Sees { get; set; }
+
+    private bool Fits => Ctx.FitsBesidePictures(Fit, Measured);
 }

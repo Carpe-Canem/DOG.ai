@@ -470,7 +470,7 @@ public class HuggingFaceClientTests
     public async Task Reads_search_results_and_file_lists()
     {
         var server = new FileServer();
-        server.Files["https://huggingface.co/api/models?filter=gguf&sort=downloads&direction=-1&limit=40&expand[]=downloads&expand[]=likes&expand[]=lastModified&expand[]=gated&expand[]=pipeline_tag&expand[]=gguf&expand[]=tags&search=gemma"] =
+        server.Files["https://huggingface.co/api/models?filter=gguf&sort=downloads&direction=-1&limit=40&expand[]=downloads&expand[]=likes&expand[]=lastModified&expand[]=gated&expand[]=pipeline_tag&expand[]=gguf&expand[]=tags&expand[]=siblings&search=gemma"] =
             System.Text.Encoding.UTF8.GetBytes("""
                 [{"_id":"x","id":"unsloth/gemma-4-12b-it-GGUF","gated":false,"lastModified":"2026-11-07T06:28:34.000Z","likes":12,"downloads":2534530,"pipeline_tag":"image-text-to-text","gguf":{"total":11900000000},"tags":["gguf","abliterated"]},
                  {"_id":"y","id":"acme/locked-GGUF","gated":"manual","likes":1,"downloads":5}]

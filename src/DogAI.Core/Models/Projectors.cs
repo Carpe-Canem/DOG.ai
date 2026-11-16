@@ -36,4 +36,60 @@ public static class Projectors
             .OrderBy(c => c.Rank).ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
             .Select(c => c.Candidate)
             .FirstOrDefault();
+
+    // ---- In a repository on Hugging Face (M17 step 3) ----
+
+    /// <summary>The download use case of a projector fetched on its own (Get picture input): it is no chat model and gets no library record.</summary>
+    public const string UseCase = "projector";
+
+    /// <summary>True when a repository's file list holds a projector DOG.ai would take (the "Sees pictures" mark on Recommended and Browse).</summary>
+    public static bool AnyIn(IEnumerable<string> filePaths) => filePaths.Any(p => Rank(FileName(p)) is not null && IsProjectorName(FileName(p)));
+
+    /// <summary>
+    /// The projector offered with one version of a model, from its repository's file list, or null. Of the projectors
+    /// beside the version's file (in the same folder of the repository, else at its top), one named for this model
+    /// ("Huihui-Qwen3.5-9B-abliterated.mmproj-f16.gguf" for "Huihui-Qwen3.5-9B-abliterated.Q8_0") comes before one
+    /// named for none ("mmproj-F16.gguf"), which comes before one named for another model; then <see cref="Pick"/>.
+    /// Whether it really belongs is told from its header once it is here (the engine's <c>ModelProjector.Find</c>).
+    /// </summary>
+    public static RemoteFile? ForVariant(IEnumerable<RemoteFile> files, ModelVariant variant)
+    {
+        var projectors = files.Where(f => IsProjectorName(FileName(f.Path)) && Rank(FileName(f.Path)) is not null).ToList();
+        var folder = FolderOf(variant.Main.Path);
+        var near = projectors.Where(f => FolderOf(f.Path) == folder).ToList();
+        if (near.Count == 0) near = projectors.Where(f => FolderOf(f.Path) == "").ToList();
+        if (near.Count == 0) return null;
+        var model = FileName(variant.Main.Path);
+        var tier = near.Min(f => Tier(FileName(f.Path), model));
+        return Pick(near.Where(f => Tier(FileName(f.Path), model) == tier), f => FileName(f.Path));
+    }
+
+    /// <summary>0: named for this model; 1: named for no model; 2: named for another.</summary>
+    private static int Tier(string projector, string model)
+    {
+        var at = projector.IndexOf("mmproj", StringComparison.OrdinalIgnoreCase);
+        var named = projector[..at].TrimEnd('.', '-', '_');
+        if (named.Length == 0) return 1;
+        return model.StartsWith(named, StringComparison.OrdinalIgnoreCase) && model.Length > named.Length && model[named.Length] is '.' or '-' or '_' ? 0 : 2;
+    }
+
+    private static string FileName(string path) => path.Split('/')[^1];
+    private static string FolderOf(string path) => path.Contains('/') ? path[..path.LastIndexOf('/')] : "";
+
+    // ---- Wording (Models section) ----
+
+    /// <summary>The mark on a chat model that can look at pictures.</summary>
+    public const string Label = "Sees pictures";
+
+    /// <summary>The line behind the mark's ⓘ.</summary>
+    public const string Explanation =
+        "It can look at pictures you put in a chat. That needs a second file beside the model, its picture input (a projector, about 0.9 GB), " +
+        "which is loaded with the model whenever it is there and takes about 1.1 GB more graphics memory.";
+
+    /// <summary>What a download with its projector says beside its size.</summary>
+    public static string WithInput(long projectorBytes) => $"with picture input, + {Sizes.Gb(projectorBytes)}";
+
+    /// <summary>The download list's line for a model fetched with its projector.</summary>
+    public static string WithInputParts(int modelParts) =>
+        modelParts > 1 ? $"in {modelParts} parts, with picture input" : "with picture input";
 }

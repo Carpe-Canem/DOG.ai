@@ -58,6 +58,8 @@ public sealed class ModelBenchmark(EngineManager engine, ModelLauncher launcher,
             record.BenchReadPerSecond = timings.ReadTokensPerSecond;
             record.TunedGpuLayers = layers;
             record.TunedContext = engine.ContextLength > 0 ? context : null;
+            // What was really loaded: an engine that stopped with the projector loaded the model without it.
+            record.TunedWithProjector = engine.Projector is not null;
             record.BenchAt = DateTime.UtcNow;
             // Whole on the card: what it really holds there is remembered too (the "Fits beside pictures" mark).
             if (layers < 0 && probe is not null && engine.ProcessId is int pid && await probe.VramOfProcessAsync(pid, ct).ConfigureAwait(false) is > 0 and var held)

@@ -26,7 +26,7 @@ else
 @if (_confirm && Variant is { } asked && Fit is { } fit)
 {
     <Modal Title="@TooLargeDownload.Title" OnClose="() => _confirm = false">
-        <p id="too-large-warning">@TooLargeDownload.Warning(asked.Quant is { Length: > 0 } q ? $"{Repo.Split('/')[^1]} ({q})" : asked.Name, asked.Size, Ctx.Context, fit, Ctx.Budget)</p>
+        <p id="too-large-warning">@TooLargeDownload.Warning(asked.Quant is { Length: > 0 } q ? $"{Repo.Split('/')[^1]} ({q})" : asked.Name, asked.Size + (Projector?.Size ?? 0), Ctx.Context, fit, Ctx.Budget)</p>
         <p class="small">@TooLargeDownload.Advice</p>
         <div class="modal-foot">
             <span></span>
@@ -48,6 +48,12 @@ else
     [Parameter] public string? UseCase { get; set; }
     [Parameter] public bool Primary { get; set; }
     [Parameter] public bool Installed { get; set; }
+
+    /// <summary>
+    /// The model's projector in the same repository (picture input, M17 step 3): downloaded with it into the same folder,
+    /// as the job's last part, unless a file of that name is there already (another version of the model brought it).
+    /// </summary>
+    [Parameter] public RemoteFile? Projector { get; set; }
 
     /// <summary>How the file was judged for this PC. A too-large one asks before it downloads.</summary>
     [Parameter] public FitResult? Fit { get; set; }
@@ -99,6 +105,9 @@ else
             return;
         }
         var folder = Path.Combine(settings.ModelsDirectory, SafeName(Repo.Split('/')[^1]));
+        var files = Variant.Parts.ToList();
+        var withProjector = Projector is { } projector && !File.Exists(Path.Combine(folder, FileName(projector.Path)));
+        if (withProjector) files.Add(Projector!);
         try
         {
             await Downloads.EnqueueAsync(new DownloadJob
@@ -108,7 +117,8 @@ else
                 Quant = Variant.Quant,
                 UseCase = UseCase,
                 Folder = folder,
-                Parts = Variant.Parts.Select(p => new DownloadPart
+                WithProjector = withProjector,
+                Parts = files.Select(p => new DownloadPart
                 {
                     Url = HuggingFaceClient.ResolveUrl(Repo, p.Path),
                     FileName = FileName(p.Path),
@@ -138,6 +148,6 @@ else
 
     private static string FileName(string path) => path.Split('/')[^1];
 
-    private static string SafeName(string name) =>
+    public static string SafeName(string name) =>
         string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
 }

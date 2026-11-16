@@ -59,37 +59,39 @@ else
 {
     @if (_best is { } pick)
     {
-        var fit = Ctx.Fit(Shape(pick.Size));
+        var fit = Ctx.Fit(Shape(pick));
+        var pickProjector = ProjectorOf(pick);
         <div class="notice ok">
-            <span>Best for this PC: <b>@(pick.Quant ?? pick.Name)</b>, @Sizes.Gb(pick.Size). @fit.Label@(fit.SpeedText is { Length: > 0 } s ? $", about {s.TrimStart('~')}" : "").</span>
-            <DownloadButton Repo="@Repo" Variant="pick" Primary="true" Installed="@Installed.Contains(pick.Main.Path.Split('/')[^1])" />
+            <span>Best for this PC: <b>@(pick.Quant ?? pick.Name)</b>, @Sizes.Gb(pick.Size)@(pickProjector is { } pp ? $" {Projectors.WithInput(pp.Size)}" : ""). @fit.Label@(fit.SpeedText is { Length: > 0 } s ? $", about {s.TrimStart('~')}" : "").</span>
+            <DownloadButton Repo="@Repo" Variant="pick" Primary="true" Installed="@Installed.Contains(pick.Main.Path.Split('/')[^1])" Projector="pickProjector" />
         </div>
     }
     else
     {
         <div class="notice bad" id="repo-none-fit"><span>None of these files can run on this PC at a @Ctx.Context.ToString("N0")-token context.@(Ctx.ShowAll ? " They can still be downloaded." : " Turn on “Show models too large for this PC” to list them; they can still be downloaded.")</span></div>
     }
-    var hidden = _variants.Count(v => Ctx.Measured && Ctx.Fit(Shape(v.Size)).Kind != FitKind.Full);
+    var hidden = _variants.Count(v => Ctx.Measured && Ctx.Fit(Shape(v)).Kind != FitKind.Full);
     <h4 class="group-title">Files</h4>
     <FilterBar Hidden="hidden" />
     <div class="models">
         @foreach (var v in _variants)
         {
-            var fit = Ctx.Fit(Shape(v.Size));
+            var fit = Ctx.Fit(Shape(v));
             if (!Ctx.ShowAll && Ctx.Measured && fit.Kind != FitKind.Full) continue;
             var best = ReferenceEquals(v, _best);
-            <div class="model has-fit @(best ? "picked" : "")">
+            var projector = ProjectorOf(v);
+            <div class="model has-fit @(best ? "picked" : "")" data-variant="@v.Name">
                 <div class="li-text">
                     <div class="model-name">@(v.Quant ?? v.Name)@if (best) {<span class="rec">Best pick</span>}</div>
-                    <div class="model-meta">@Sizes.Gb(v.Size)@(v.Parts.Count > 1 ? $" · {v.Parts.Count} parts" : "") · @v.Name</div>
+                    <div class="model-meta">@Sizes.Gb(v.Size)@(projector is { } p ? $" {Projectors.WithInput(p.Size)}" : "")@(v.Parts.Count > 1 ? $" · {v.Parts.Count} parts" : "") · @v.Name</div>
                     @if (_info?.IsEmbedding(v.Main.Path) != true)
                     {
-                        <BesidePicturesChip Fit="fit" />
+                        <BesidePicturesChip Fit="fit" Sees="@(projector is not null)" />
                     }
                 </div>
                 <FitBadge Fit="fit" />
                 <DownloadButton Repo="@Repo" Variant="v" Primary="best" Installed="@Installed.Contains(v.Main.Path.Split('/')[^1])"
-                                Fit="fit" />
+                                Fit="fit" Projector="projector" />
             </div>
         }
     </div>
@@ -125,13 +127,22 @@ else
             _info.SizeLabel,
             _info.ContextLength is > 0 and var c ? $"trained for {c:N0} tokens" : null,
             _info.ExpertCount is > 1 ? "mixture of experts" : null,
+            _variants?.Any(v => ProjectorOf(v) is not null) == true ? "sees pictures" : null,
         }.Where(s => !string.IsNullOrEmpty(s)));
 
     private string ShapeNote => _info?.KvBytesPerToken is > 0
         ? $"Fit uses this model’s own layout, read from the first file, at a {Ctx.Context:N0}-token context."
         : $"Fit is estimated from file sizes at a {Ctx.Context:N0}-token context; the model’s layout could not be read.";
 
-    private ModelShape Shape(long size) => _info?.ToShape(size) ?? new ModelShape { WeightBytes = size };
+    /// <summary>The projector that comes with this version (picture input), unless the model is a document search model.</summary>
+    private RemoteFile? ProjectorOf(ModelVariant v) => _info?.IsEmbedding(v.Main.Path) == true ? null : Ctx.ProjectorFor(Repo, v);
+
+    /// <summary>Judged as it will be loaded: with the projector that comes with it.</summary>
+    private ModelShape Shape(ModelVariant v)
+    {
+        var projector = ProjectorOf(v)?.Size ?? 0;
+        return _info?.ToShape(v.Size, projector) ?? new ModelShape { WeightBytes = v.Size, ProjectorBytes = projector };
+    }
 
     protected override void OnInitialized()
     {
@@ -183,6 +194,15 @@ else
                 catch (Exception e) when (e is HubException or HttpRequestException or InvalidDataException or IOException) { _info = null; }
                 PickBest();
                 StateHasChanged();
+                // A projector named for another model, or made for another size, would never be loaded: its header says
+                // which model it belongs to, so it is read once (a small ranged read) and offered only if it belongs.
+                if (_info?.EmbeddingLength is > 0 && !_info.IsEmbedding(probe))
+                {
+                    foreach (var path in _variants.Select(v => Ctx.ProjectorFor(repo, v)?.Path).OfType<string>().Distinct())
+                        await Ctx.ProjectorFitsAsync(repo, path, _info.EmbeddingLength);
+                    PickBest();
+                    StateHasChanged();
+                }
             }
             _readme = MarkdownRenderer.StripHtmlTags(await readme);
         }

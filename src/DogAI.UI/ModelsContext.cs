@@ -1,4 +1,5 @@
 using DogAI.Core.Models;
+using DogAI.Core.Net;
 using DogAI.Core.Settings;
 using DogAI.Core.Images;
 using DogAI.Engine;
@@ -13,7 +14,7 @@ namespace DogAI.UI;
 /// </summary>
 public sealed class ModelsContext
 {
-    private readonly Dictionary<string, Task<IReadOnlyList<ModelVariant>>> _variants = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Task<IReadOnlyList<RemoteFile>>> _files = new(StringComparer.OrdinalIgnoreCase);
     private readonly HardwareProbe probe;
     private readonly EngineManager engine;
     private readonly ISettingsStore settings;
@@ -147,14 +148,17 @@ public sealed class ModelsContext
 
     public FitResult Fit(ModelShape shape) => FitEstimator.Estimate(shape, Context, Budget);
 
-    /// <summary>A repository's downloadable variants. Fetched once per session; a failed fetch is retried next time.</summary>
-    public async Task<IReadOnlyList<ModelVariant>> VariantsAsync(string repo)
+    /// <summary>A repository's downloadable variants (its projectors left out: <see cref="Quantization.Group"/>).</summary>
+    public async Task<IReadOnlyList<ModelVariant>> VariantsAsync(string repo) => Quantization.Group(await FilesAsync(repo));
+
+    /// <summary>A repository's whole file list. Fetched once per session; a failed fetch is retried next time.</summary>
+    public async Task<IReadOnlyList<RemoteFile>> FilesAsync(string repo)
     {
-        Task<IReadOnlyList<ModelVariant>> task;
-        lock (_variants)
+        Task<IReadOnlyList<RemoteFile>> task;
+        lock (_files)
         {
-            if (!_variants.TryGetValue(repo, out task!))
-                _variants[repo] = task = FetchAsync(repo);
+            if (!_files.TryGetValue(repo, out task!))
+                _files[repo] = task = hf.FilesAsync(repo);
         }
         try
         {
@@ -162,14 +166,56 @@ public sealed class ModelsContext
         }
         catch
         {
-            lock (_variants) _variants.Remove(repo);
+            lock (_files) _files.Remove(repo);
             throw;
         }
     }
 
     public bool HasVariants(string repo)
     {
-        lock (_variants) return _variants.TryGetValue(repo, out var t) && t.IsCompletedSuccessfully;
+        lock (_files) return _files.TryGetValue(repo, out var t) && t.IsCompletedSuccessfully;
+    }
+
+    /// <summary>
+    /// The projector offered with this version of a model (<see cref="Projectors.ForVariant"/>), from a file list
+    /// already fetched; null when the repository has none, when its list has not been fetched, or when its header said
+    /// it belongs to another model (<see cref="ProjectorFitsAsync"/>).
+    /// </summary>
+    public RemoteFile? ProjectorFor(string repo, ModelVariant variant)
+    {
+        IReadOnlyList<RemoteFile> files;
+        lock (_files)
+        {
+            if (!_files.TryGetValue(repo, out var task) || !task.IsCompletedSuccessfully) return null;
+            files = task.Result;
+        }
+        var projector = Projectors.ForVariant(files, variant);
+        lock (_projectorHeaders)
+            return projector is not null && _projectorHeaders.TryGetValue((repo, projector.Path), out var known) && known.Fits == false ? null : projector;
+    }
+
+    private readonly Dictionary<(string Repo, string Path), (int? Width, bool? Fits)> _projectorHeaders = new();
+
+    /// <summary>
+    /// Reads a projector's header on Hugging Face (one small ranged read, kept for the session) and says whether it
+    /// belongs to a model with this embedding length; null when it could not be read. One that does not belong is not
+    /// offered again this session.
+    /// </summary>
+    public async Task<bool?> ProjectorFitsAsync(string repo, string path, int? embeddingLength, CancellationToken ct = default)
+    {
+        if (embeddingLength is not > 0) return null;
+        lock (_projectorHeaders)
+            if (_projectorHeaders.TryGetValue((repo, path), out var known) && known.Width is not null)
+                return known.Width == embeddingLength;
+        GgufInfo? header;
+        try { header = await hf.ReadHeaderAsync(repo, path, s => GgufReader.Read(s), ct); }
+        catch (Exception e) when (e is HubException or HttpRequestException or InvalidDataException or IOException or OfflineException or HostNotAllowedException)
+        {
+            return null;
+        }
+        var fits = ModelProjector.Fits(header, embeddingLength);
+        lock (_projectorHeaders) _projectorHeaders[(repo, path)] = (header?.IsVisionProjector == true ? header.ProjectionDim : -1, fits);
+        return fits;
     }
 
     private readonly Dictionary<string, IReadOnlyList<ModelAbout>> _about = new(StringComparer.OrdinalIgnoreCase);
@@ -192,12 +238,9 @@ public sealed class ModelsContext
         return about;
     }
 
-    private async Task<IReadOnlyList<ModelVariant>> FetchAsync(string repo) =>
-        Quantization.Group(await hf.FilesAsync(repo));
-
-    /// <summary>The variant to pre-select for this PC.</summary>
-    public ModelVariant? Best(IEnumerable<ModelVariant> variants, Func<long, ModelShape> shape) =>
-        Quantization.PickBest(variants.Select(v => (v, Fit(shape(v.Size)))));
+    /// <summary>The variant to pre-select for this PC, each judged with the projector that would come with it.</summary>
+    public ModelVariant? Best(IEnumerable<ModelVariant> variants, Func<ModelVariant, ModelShape> shape) =>
+        Quantization.PickBest(variants.Select(v => (v, Fit(shape(v)))));
 
     public static string[] ContextSizes { get; } = DogAI.Core.Models.ContextSizes.Offered.Select(s => s.ToString()).ToArray();
 }

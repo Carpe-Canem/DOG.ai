@@ -7,6 +7,9 @@
 @inject ModelBenchmark Bench
 @inject IDesktopShell Desktop
 @inject EmbeddingServer Search
+@inject DownloadManager Downloads
+@inject OnlineGate Gate
+@inject OnlineSession Session
 
 @if (_models is not null)
 {
@@ -36,7 +39,7 @@
 
 @if (_status is not null)
 {
-    <div class="notice @(_statusBad ? "bad" : "ok")"><span>@_status</span></div>
+    <div class="notice @(_statusBad ? "bad" : "ok")" id="library-status"><span>@_status</span></div>
 }
 
 <section class="group">
@@ -56,13 +59,18 @@
             var record = Record(m.File.Path);
             var loaded = Same(Engine.ModelPath, m.File.Path) && Engine.State is EngineState.Ready or EngineState.Loading;
             var search = m.Info?.IsEmbedding(m.File.Path) == true;
-            <div class="model has-fit lib" data-model="@m.File.Name">
+            var getting = InputJob(m);
+            <div class="model has-fit lib" data-model="@m.File.Name" data-sees="@(m.Projector is not null ? "true" : null)">
                 <div class="li-text">
                     <div class="model-name">@(m.Info?.DisplayName(m.File.Path) ?? m.File.Name)@if (loaded) {<span class="rec">Loaded</span>}@if (Same(_searchModel, m.File.Path)) {<span class="rec">Used for document search</span>}</div>
                     <div class="model-meta">@Describe(m)@(search ? " · document search model (finds passages, does not chat)" : "")</div>
                     @if (record?.BenchTokensPerSecond is > 0 and var tps)
                     {
                         <div class="model-meta">Measured @tps.ToString("0") tok/s writing, @((record.BenchReadPerSecond ?? 0).ToString("N0")) tok/s reading@(record.TunedGpuLayers is >= 0 and var l ? $", {l} layers on the graphics card" : "")</div>
+                        @if (PictureInput.BenchmarkUnused(record, m.Projector is not null))
+                        {
+                            <div class="model-meta bench-stale">@PictureInput.BenchmarkStale(m.Projector is not null)</div>
+                        }
                     }
                     @if (ModelDefaults.JobsOf(_settings, m.File.Path) is { Count: > 0 } defaults)
                     {
@@ -70,7 +78,15 @@
                     }
                     @if (!search)
                     {
-                        <BesidePicturesChip Fit="m.Fit" Measured="@record?.MeasuredAt(Ctx.Context, m.Projector is not null)" />
+                        <BesidePicturesChip Fit="m.Fit" Measured="@record?.MeasuredAt(Ctx.Context, m.Projector is not null)" Sees="@(m.Projector is not null)" />
+                    }
+                    @if (getting is not null)
+                    {
+                        <div class="model-meta picture-input-progress">@PictureInput.Getting(DownloadButton.StatusText(getting))</div>
+                    }
+                    @if (Same(Engine.ModelPath, m.File.Path) && Engine.PictureInputProblem is { } problem)
+                    {
+                        <div class="notice bad picture-input-problem" id="picture-input-problem"><span>@problem</span></div>
                     }
                 </div>
                 <FitBadge Fit="m.Fit" MeasuredTokensPerSecond="record?.BenchTokensPerSecond" />
@@ -85,8 +101,16 @@
                         {
                             <button type="button" class="menu-item" role="menuitem" data-act="benchmark" disabled="@Busy" @onclick="() => BenchmarkAsync(m.File)">Benchmark</button>
                         }
+                        @if (!search && m.Projector is null && record?.Repo is { Length: > 0 } && getting is null)
+                        {
+                            <button type="button" class="menu-item" role="menuitem" data-act="get-input" @onclick="() => OpenGetAsync(m)">Get picture input…</button>
+                        }
+                        @if (!search && m.Belonging.Count > 0)
+                        {
+                            <button type="button" class="menu-item" role="menuitem" data-act="remove-input" disabled="@Busy" @onclick="() => OpenRemove(m)">Remove picture input…</button>
+                        }
                         <button type="button" class="menu-item" role="menuitem" data-act="folder" @onclick="() => ShowFolder(m.File)">Show in folder</button>
-                        <button type="button" class="menu-item danger" role="menuitem" data-act="delete" disabled="@Busy" @onclick="() => _confirmDelete = m.File">Delete…</button>
+                        <button type="button" class="menu-item danger" role="menuitem" data-act="delete" disabled="@Busy" @onclick="() => OpenDelete(m)">Delete…</button>
                     </MoreMenu>
                 </div>
             </div>
@@ -98,6 +122,14 @@
 {
     <Modal Title="Delete this model?" OnClose="() => _confirmDelete = null">
         <p>This permanently deletes <b>@doomed.Name</b> (@doomed.SizeText@(doomed.Parts.Count > 1 ? $", {doomed.Parts.Count} files" : "")) from <b>@Path.GetDirectoryName(doomed.Path)</b>. It does not go to the Recycle Bin. You can download it again later.</p>
+        @if (_deleteInput.Delete.Count > 0)
+        {
+            <p id="delete-input">@PictureInput.DeletedWith(_deleteInput.Delete.Select(p => (p.Name, p.SizeBytes)).ToList())</p>
+        }
+        @if (_deleteInput.Keep.Count > 0)
+        {
+            <p class="small" id="delete-input-kept">@PictureInput.KeptOnDelete(_deleteInput.Keep.Select(p => p.Name).ToList(), _deleteInput.Users)</p>
+        }
         <div class="modal-foot">
             <span></span>
             <div class="row">
@@ -108,11 +140,75 @@
     </Modal>
 }
 
+@if (_getFor is not null)
+{
+    <Modal Title="Get picture input?" OnClose="CloseGet">
+        <div id="picture-input-get">
+            @if (!Gate.IsOnline)
+            {
+                <p id="picture-input-offline">@PictureInput.GoOnline(_getFor.Repo)</p>
+            }
+            else if (_getLooking)
+            {
+                <p class="note" id="picture-input-looking">Looking in @_getFor.Repo…</p>
+            }
+            else if (_getProblem is not null)
+            {
+                <p id="picture-input-none">@_getProblem</p>
+            }
+            else if (_getFile is not null)
+            {
+                <p id="picture-input-offer">@PictureInput.Offer(_getFile.Path.Split('/')[^1], _getFile.Size, _getFor.Repo, _getFor.Folder, _getFor.Model)</p>
+                <p class="small">@PictureInput.OfferMore</p>
+            }
+            @if (_getError is not null)
+            {
+                <div class="notice bad" id="picture-input-error"><span>@_getError</span></div>
+            }
+        </div>
+        <div class="modal-foot">
+            <span></span>
+            <div class="row">
+                <button class="btn" id="picture-input-cancel" @onclick="CloseGet">Cancel</button>
+                @if (!Gate.IsOnline)
+                {
+                    <button class="btn primary" id="picture-input-online" @onclick="() => Session.SetWanted(true)">Go online</button>
+                }
+                else
+                {
+                    <button class="btn primary" id="picture-input-download" disabled="@(_getFile is null || _getLooking)" @onclick="StartGetAsync">Download</button>
+                }
+            </div>
+        </div>
+    </Modal>
+}
+
+@if (_removeFor is not null)
+{
+    <Modal Title="Remove picture input?" OnClose="() => _removeFor = null">
+        <p id="picture-input-remove">@PictureInput.RemoveText(_removeFor.Model, _removeFor.Item.Belonging.Select(p => (p.Name, p.SizeBytes)).ToList(), Path.GetDirectoryName(_removeFor.Item.File.Path) ?? "")</p>
+        @if (_removeFor.Users.Count > 0)
+        {
+            <p id="picture-input-remove-shared">@PictureInput.AlsoLoses(_removeFor.Users)</p>
+        }
+        <p class="small">@PictureInput.RemoveMore</p>
+        <div class="modal-foot">
+            <span></span>
+            <div class="row">
+                <button class="btn" id="picture-input-remove-no" @onclick="() => _removeFor = null">Keep it</button>
+                <button class="btn danger" id="picture-input-remove-yes" @onclick="RemoveInputAsync">Remove</button>
+            </div>
+        </div>
+    </Modal>
+}
+
 @code {
     /// <summary>Raised after the library changes, so the page can refresh its counts.</summary>
     [Parameter] public EventCallback Changed { get; set; }
 
-    private sealed record Item(ModelFile File, GgufInfo? Info, FitResult? Fit, ProjectorFile? Projector = null);
+    /// <param name="Projector">The projector it is loaded with (<see cref="ModelProjector.Find"/>), or null: then it cannot see pictures.</param>
+    /// <param name="Belonging">Every projector in its folder that belongs to it (Remove picture input deletes them all).</param>
+    private sealed record Item(ModelFile File, GgufInfo? Info, FitResult? Fit, ProjectorFile? Projector, IReadOnlyList<ProjectorFile> Belonging);
 
     private AppSettings _settings = new();
     private List<Item>? _models;
@@ -134,11 +230,28 @@
     {
         Engine.Changed += Refresh;
         Ctx.Changed += OnContext;
+        Downloads.Changed += Refresh;
+        Downloads.Completed += OnDownloaded;
+        Gate.Changed += OnGate;
         await ScanAsync();
     }
 
     private void Refresh() => InvokeAsync(StateHasChanged);
     private void OnContext() => InvokeAsync(ScanAsync);
+
+    /// <summary>A projector (or a model with one) arrived: the row now sees pictures, and is judged with it.</summary>
+    private void OnDownloaded(DownloadJob job) => InvokeAsync(async () =>
+    {
+        await ScanAsync();
+        if (job.UseCase == Projectors.UseCase && job.ForModel is { } model) Say(PictureInput.Arrived(NameOf(model)));
+    });
+
+    /// <summary>Went online while Get picture input waits for it: look now.</summary>
+    private void OnGate() => InvokeAsync(async () =>
+    {
+        if (Gate.IsOnline && _getFor is not null && _getFile is null && _getProblem is null && !_getLooking) await LookAsync();
+        StateHasChanged();
+    });
 
     private async Task ScanAsync()
     {
@@ -151,8 +264,9 @@
         {
             var info = GgufReader.TryRead(f.Path);
             // A model with a projector beside it is loaded with it (picture input, M17), so it is judged with it.
-            var projector = info is null ? null : ModelProjector.Find(f.Path, info);
-            return new Item(f, info, info is null ? null : budget.Fit(info.ToShape(f.SizeBytes, projector?.SizeBytes ?? 0)), projector);
+            var belonging = info is null ? [] : ModelProjector.Belonging(f.Path, info);
+            var projector = Projectors.Pick(belonging, p => p.Name);
+            return new Item(f, info, info is null ? null : budget.Fit(info.ToShape(f.SizeBytes, projector?.SizeBytes ?? 0)), projector, belonging);
         }).ToList());
         StateHasChanged();
     }
@@ -164,6 +278,7 @@
     {
         m.File.Quant,
         m.File.SizeText,
+        m.Projector is { } p ? $"picture input {Sizes.Gb(p.SizeBytes)}" : null,
         m.Info?.Architecture,
         m.Info?.ContextLength is > 0 and var c ? $"trained for {c:N0} tokens" : null,
         m.Info is null ? "header could not be read" : null,
@@ -197,7 +312,7 @@
     }
 
     private IReadOnlyList<DefaultsBlock.Choice> Choices =>
-        (_models ?? []).Select(m => new DefaultsBlock.Choice(m.File.Path, m.Info?.DisplayName(m.File.Path) ?? m.File.Name, m.Info?.IsEmbedding(m.File.Path) == true)).ToList();
+        (_models ?? []).Select(m => new DefaultsBlock.Choice(m.File.Path, m.Info?.DisplayName(m.File.Path) ?? m.File.Name, m.Info?.IsEmbedding(m.File.Path) == true, m.Projector is not null)).ToList();
 
     private string FoldersSummary => Folders.Count() is var n && n == 1 ? "1 folder" : $"{n} folders";
 
@@ -258,14 +373,25 @@
         await Ctx.RefreshAsync();
     }
 
+    private void OpenDelete(Item m)
+    {
+        var (delete, keep) = ModelProjector.WithModel(m.File.Path, m.Info);
+        var users = keep.Count == 0 ? [] : ModelProjector.AlsoUsedBy(m.File.Path, keep.Select(k => k.Path)).Select(f => NameOf(f.Path)).ToList();
+        _deleteInput = (delete, keep, users);
+        _confirmDelete = m.File;
+    }
+
     private async Task DeleteAsync()
     {
         if (_confirmDelete is not { } file) return;
         _confirmDelete = null;
-        if (Same(Engine.ModelPath, file.Path)) await Engine.UnloadAsync();
+        // Its projector goes with it, unless another model in the folder uses it (read again: the folder may have changed).
+        var projectors = ModelProjector.WithModel(file.Path).Delete;
+        if (Same(Engine.ModelPath, file.Path) || projectors.Any(p => Same(Engine.Projector, p.Path))) await Engine.UnloadAsync();
         try
         {
             foreach (var part in file.Parts) File.Delete(part);
+            foreach (var projector in projectors) File.Delete(projector.Path);
             await Records.DeleteAsync(file.Path);
             var outcome = ModelDefaults.Without(await SettingsStore.LoadAsync(), file.Path);
             _settings = outcome.Settings;
@@ -275,7 +401,7 @@
                 await Search.StopAsync();
                 Search.ChoiceChanged();
             }
-            Say($"Deleted {file.Name}.");
+            Say(projectors.Count > 0 ? $"Deleted {file.Name} and its picture input." : $"Deleted {file.Name}.");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -283,6 +409,148 @@
         }
         await ScanAsync();
         await Changed.InvokeAsync();
+    }
+
+    // ---- Picture input (M17 step 3) ----
+
+    private (IReadOnlyList<ProjectorFile> Delete, IReadOnlyList<ProjectorFile> Keep, IReadOnlyList<string> Users) _deleteInput = ([], [], []);
+
+    /// <param name="Folder">The model's own folder: the projector must land there, where <see cref="ModelProjector.Find"/> looks.</param>
+    private sealed record GetFor(Item Item, string Repo, string Folder, string Model);
+
+    private GetFor? _getFor;
+    private RemoteFile? _getFile;
+    private bool _getLooking;
+    private string? _getProblem;
+    private string? _getError;
+    private CancellationTokenSource? _getCts;
+
+    private sealed record RemoveFor(Item Item, string Model, IReadOnlyList<string> Users);
+
+    private RemoveFor? _removeFor;
+
+    private string NameOf(string path) =>
+        _models?.FirstOrDefault(m => Same(m.File.Path, path)) is { } m ? m.Info?.DisplayName(path) ?? m.File.Name : Path.GetFileNameWithoutExtension(path);
+
+    /// <summary>A projector being fetched for this model (Get picture input), until it is done.</summary>
+    private DownloadJob? InputJob(Item m) =>
+        Downloads.Jobs.LastOrDefault(j => j.UseCase == Projectors.UseCase && j.Status != DownloadStatus.Done && Same(j.ForModel, m.File.Path));
+
+    private async Task OpenGetAsync(Item m)
+    {
+        if (Record(m.File.Path)?.Repo is not { Length: > 0 } repo || Path.GetDirectoryName(m.File.Path) is not { } folder) return;
+        _getFor = new GetFor(m, repo, folder, m.Info?.DisplayName(m.File.Path) ?? m.File.Name);
+        _getFile = null;
+        _getProblem = _getError = null;
+        if (Gate.IsOnline) await LookAsync();
+    }
+
+    /// <summary>
+    /// Reads the repository the model came from and picks the projector the way a download with the model does
+    /// (<see cref="Projectors.ForVariant"/>), then reads its header: one made for another model is not offered.
+    /// </summary>
+    private async Task LookAsync()
+    {
+        if (_getFor is not { } get) return;
+        _getCts?.Cancel();
+        var cts = _getCts = new CancellationTokenSource();
+        _getLooking = true;
+        _getError = null;
+        StateHasChanged();
+        try
+        {
+            var files = await Ctx.FilesAsync(get.Repo);
+            var fileName = Path.GetFileName(get.Item.File.Path);
+            var variant = Quantization.Group(files).FirstOrDefault(v => Same(v.Main.Path.Split('/')[^1], fileName))
+                          ?? new ModelVariant(get.Item.File.Name, get.Item.File.Quant, [new RemoteFile(fileName, get.Item.File.SizeBytes, null)]);
+            var found = Projectors.ForVariant(files, variant);
+            if (cts.IsCancellationRequested) return;
+            var name = found?.Path.Split('/')[^1];
+            if (found is null || name is null) _getProblem = PictureInput.NoneIn(get.Repo);
+            else if (File.Exists(Path.Combine(get.Folder, name))) _getProblem = PictureInput.NameTaken(name, get.Folder);
+            else if (await Ctx.ProjectorFitsAsync(get.Repo, found.Path, get.Item.Info?.EmbeddingLength, cts.Token) == false) _getProblem = PictureInput.NotThisModel(name, get.Model);
+            else _getFile = found;
+        }
+        catch (Exception e) when (e is HubException or HttpRequestException or OfflineException or HostNotAllowedException or System.Text.Json.JsonException)
+        {
+            if (!cts.IsCancellationRequested) _getError = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
+        }
+        finally
+        {
+            if (ReferenceEquals(cts, _getCts)) _getLooking = false;
+        }
+        StateHasChanged();
+    }
+
+    private void CloseGet()
+    {
+        _getCts?.Cancel();
+        _getFor = null;
+        _getLooking = false;
+    }
+
+    /// <summary>Queues the projector alone, into the model's own folder.</summary>
+    private async Task StartGetAsync()
+    {
+        if (_getFor is not { } get || _getFile is not { } file) return;
+        _getError = null;
+        var name = file.Path.Split('/')[^1];
+        try
+        {
+            await Downloads.EnqueueAsync(new DownloadJob
+            {
+                Repo = get.Repo,
+                Title = PictureInput.JobTitle(get.Model),
+                ForModel = get.Item.File.Path,
+                UseCase = Projectors.UseCase,
+                Folder = get.Folder,
+                Parts =
+                [
+                    new DownloadPart
+                    {
+                        Url = HuggingFaceClient.ResolveUrl(get.Repo, file.Path),
+                        FileName = name,
+                        Size = file.Size,
+                        Sha256 = file.Sha256,
+                    },
+                ],
+            });
+            CloseGet();
+            Say(PictureInput.Started(name, get.Model));
+        }
+        catch (Exception e) when (e is DownloadRefusedException or IOException or UnauthorizedAccessException)
+        {
+            _getError = e.Message;
+        }
+    }
+
+    private void OpenRemove(Item m) =>
+        _removeFor = new RemoveFor(m, m.Info?.DisplayName(m.File.Path) ?? m.File.Name,
+            ModelProjector.AlsoUsedBy(m.File.Path, m.Belonging.Select(p => p.Path)).Select(f => NameOf(f.Path)).ToList());
+
+    /// <summary>Deletes every projector that belongs to the model (else the next one would be picked), after unloading the model that holds one.</summary>
+    private async Task RemoveInputAsync()
+    {
+        if (_removeFor is not { } removing) return;
+        _removeFor = null;
+        var files = ModelProjector.Belonging(removing.Item.File.Path);
+        _working = true;
+        try
+        {
+            if (files.Any(p => Same(Engine.Projector, p.Path))) await Engine.UnloadAsync();
+            foreach (var projector in files) File.Delete(projector.Path);
+            Say(PictureInput.Removed(removing.Model, removing.Users));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Say("Could not remove it: " + e.Message, bad: true);
+        }
+        finally
+        {
+            _working = false;
+        }
+        await ScanAsync();
+        await Ctx.RefreshAsync();
     }
 
     private void Say(string text, bool bad = false)
@@ -296,7 +564,11 @@
 
     public void Dispose()
     {
+        _getCts?.Cancel();
         Engine.Changed -= Refresh;
         Ctx.Changed -= OnContext;
+        Downloads.Changed -= Refresh;
+        Downloads.Completed -= OnDownloaded;
+        Gate.Changed -= OnGate;
     }
 }

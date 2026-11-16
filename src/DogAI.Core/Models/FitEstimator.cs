@@ -157,13 +157,14 @@ public sealed record LoadDecision(int GpuLayers, string? Refusal, FitKind? Fit =
     public bool WantsRoom => Fit is FitKind.Partial or FitKind.TooLarge;
 
     /// <summary>
-    /// Uses settings a benchmark proved for this context size; otherwise follows the fit estimate.
+    /// Uses settings a benchmark proved for this context size, with the projector loaded or not as now; otherwise follows the fit estimate.
     /// A model that does not fit even with system memory is refused, because trying only ends in an
     /// out-of-memory failure. With no estimate (header unreadable) it is loaded and left to the engine.
     /// </summary>
-    public static LoadDecision Decide(string name, int context, FitResult? plan, FitBudget? budget, ModelRecord? record)
+    /// <param name="withProjector">The model is loaded with its projector (picture input).</param>
+    public static LoadDecision Decide(string name, int context, FitResult? plan, FitBudget? budget, ModelRecord? record, bool withProjector = false)
     {
-        if (record is { TunedGpuLayers: { } tuned, TunedContext: { } tunedContext } && tunedContext == context)
+        if (record is { TunedGpuLayers: { } tuned, TunedContext: { } tunedContext } && tunedContext == context && record.TunedWithProjector == withProjector)
             return new LoadDecision(tuned, null, plan?.Kind);
         return plan?.Kind switch
         {

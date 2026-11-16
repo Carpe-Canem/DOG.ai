@@ -53,7 +53,7 @@ public sealed class ModelLauncher(EngineManager engine, HardwareProbe probe, IMo
         var budget = await BudgetAsync(ct).ConfigureAwait(false);
         var projector = await ProjectorAsync(path, info, ct).ConfigureAwait(false);
         var plan = FitEstimator.Estimate(info.ToShape(file.SizeBytes, projector?.SizeBytes ?? 0), context, budget);
-        return LoadDecision.Decide(info.DisplayName(path), context, plan, budget, record) with { Projector = projector?.Path };
+        return LoadDecision.Decide(info.DisplayName(path), context, plan, budget, record, projector is not null) with { Projector = projector?.Path };
     }
 
     /// <summary>
