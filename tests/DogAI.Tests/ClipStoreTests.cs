@@ -7,6 +7,7 @@ using DogAI.Core.Images;
 using DogAI.Core.Privacy;
 using DogAI.Core.Video;
 using DogAI.Data;
+using DogAI.Engine.Images;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -75,10 +76,10 @@ public sealed class ClipStoreTests : IDisposable
     /// A clip as the Video section keeps it: made from a sentence and a first frame, with a still. Each of its three
     /// large values holds a marker of its own, so a search of a data folder's bytes can tell them apart.
     /// </summary>
-    private static Clip Sample(int seed = 1, bool withFrame = true, int filler = 400, byte[]? marker = null, string kind = ClipOwners.Video, long owner = ClipOwners.VideoOwner)
+    private static Clip Sample(int seed = 1, bool withFrame = true, int filler = 400, byte[]? marker = null, string kind = ClipOwners.Video, long owner = ClipOwners.VideoOwner, bool faster = false)
     {
         var frame = withFrame ? KeptPictureTests.Webp(960, 640, seed: seed, marker: FrameMarker) : null;
-        var request = VideoRequest.For($"A fox runs through the snow, {Word}", VideoQuality.Quick, PictureShape.Wide, startFrame: frame);
+        var request = VideoRequest.For($"A fox runs through the snow, {Word}", VideoQuality.Quick, PictureShape.Wide, startFrame: frame, faster: faster);
         var result = new VideoResult(TestWebm.Make(960, 640, 121, seed, filler, marker), 960, 640, 121, 24, 4_000_000_000 + seed);
         return Clip.Of(kind, owner, VideoFiles.Wan22, request, result, KeptPictureTests.Webp(384, 256, 2000, seed, StillMarker));
     }
@@ -165,6 +166,19 @@ public sealed class ClipStoreTests : IDisposable
             Assert.Null(plain.Still);
             Assert.Equal((0, false, VideoDecoder.Own), (plain.StartFrameBytes, plain.HasStartFrame, plain.Decoder));
             Assert.Null(await Store(s).StartFrameAsync(second.Id));
+
+            // The choice "Faster" (M21) is kept with the clip: it changes the frames, so the request that makes the
+            // clip again must have it. Neither clip above was made with it.
+            Assert.False(read.Faster || again.Faster || plain.Faster);
+            var third = await Store(s).AddAsync(Sample(3, faster: true));
+            var faster = (await Store(s).GetAsync(third.Id))!;
+            Assert.True(faster.Faster);
+            Assert.True(faster.ToRequest().Faster);
+            Assert.Empty(faster.ToRequest().Problems());
+            Assert.Equal(again with { StartFrame = null, Seed = 0 }, faster.ToRequest() with { StartFrame = null, Seed = 0, Faster = false });
+            // Lists carry it too (a kept clip's facts say "Faster").
+            Assert.True((await Store(s).FactsAsync(third.Id))!.Faster);
+            Assert.Equal([true, false, false], (await Store(s).PageAsync(ClipOwners.Video, 0)).Clips.Select(c => c.Faster));
         });
     }
 
@@ -293,16 +307,288 @@ public sealed class ClipStoreTests : IDisposable
         Assert.Equal(
         [
             "Id", "OwnerKind", "OwnerId", "Prompt", "NegativePrompt", "Width", "Height", "Frames", "Fps", "Seed", "Steps", "Sampler", "Guidance",
-            "FlowShift", "Decoder", "Compression", "Model", "Vae", "TextEncoder", "FastDecoder", "VideoBytes", "StartFrameBytes", "CreatedAt",
+            "FlowShift", "Decoder", "Compression", "Faster", "Model", "Vae", "TextEncoder", "FastDecoder", "VideoBytes", "StartFrameBytes", "CreatedAt",
             "Still", "StartFrame", "Video",
         ], columns);
+    }
+
+    // ---- From M20's table to M21's (the ClipsFaster migration rebuilds it) ----
+
+    private const string M20 = "20261117000042_Clips";
+
+    /// <summary>The table as M20's build made it.</summary>
+    private static readonly string[] M20Columns =
+    [
+        "Id", "OwnerKind", "OwnerId", "Prompt", "NegativePrompt", "Width", "Height", "Frames", "Fps", "Seed", "Steps", "Sampler", "Guidance",
+        "FlowShift", "Decoder", "Compression", "Model", "Vae", "TextEncoder", "FastDecoder", "VideoBytes", "StartFrameBytes", "CreatedAt",
+        "Still", "StartFrame", "Video",
+    ];
+
+    /// <summary>Brings a folder's database to the schema M20's build left it with.</summary>
+    private static async Task ToM20(AppPaths paths, byte[]? key)
+    {
+        await using (var services = Open(paths, key))
+        {
+            var factory = services.GetRequiredService<IDbContextFactory<DogDbContext>>();
+            await using var db = await factory.CreateDbContextAsync();
+            await db.GetService<IMigrator>().MigrateAsync(M20);
+        }
+        SqliteConnection.ClearAllPools();
+    }
+
+    private static object? Run(AppPaths paths, byte[]? key, string sql, params (string Name, object? Value)[] values)
+    {
+        using var db = new SqliteConnection(DatabaseLock.ConnectionString(paths.DatabaseFile, key));
+        db.Open();
+        using var command = db.CreateCommand();
+        command.CommandText = sql;
+        foreach (var (name, value) in values) command.Parameters.AddWithValue(name, value ?? DBNull.Value);
+        return command.ExecuteScalar();
+    }
+
+    /// <summary>Writes a clip the way M20's build did: its 25 columns, and nothing about Faster.</summary>
+    private static long InsertM20(AppPaths paths, byte[]? key, Clip c) => (long)Run(paths, key,
+        "INSERT INTO Clips (OwnerKind, OwnerId, Prompt, NegativePrompt, Width, Height, Frames, Fps, Seed, Steps, Sampler, Guidance, FlowShift, Decoder, " +
+        "Compression, Model, Vae, TextEncoder, FastDecoder, VideoBytes, StartFrameBytes, CreatedAt, Still, StartFrame, Video) VALUES " +
+        "($kind, $owner, $prompt, $negative, $width, $height, $frames, $fps, $seed, $steps, $sampler, $guidance, $shift, $decoder, " +
+        "$compression, $model, $vae, $text, $fast, $videoBytes, $frameBytes, '2026-11-17 13:03:00', $still, $frame, $video); SELECT last_insert_rowid();",
+        ("$kind", c.OwnerKind), ("$owner", c.OwnerId), ("$prompt", c.Prompt), ("$negative", c.NegativePrompt), ("$width", c.Width), ("$height", c.Height),
+        ("$frames", c.Frames), ("$fps", c.Fps), ("$seed", c.Seed), ("$steps", c.Steps), ("$sampler", c.Sampler), ("$guidance", c.Guidance),
+        ("$shift", c.FlowShift), ("$decoder", (int)c.Decoder), ("$compression", c.Compression), ("$model", c.Model), ("$vae", c.Vae),
+        ("$text", c.TextEncoder), ("$fast", c.FastDecoder), ("$videoBytes", c.Video!.Length), ("$frameBytes", c.StartFrame?.Length ?? 0),
+        ("$still", c.Still), ("$frame", c.StartFrame), ("$video", c.Video))!;
+
+    /// <summary>How many times a file, or the files under a folder, hold these bytes.</summary>
+    private static int Count(string path, byte[] bytes)
+    {
+        var count = 0;
+        foreach (var file in Directory.Exists(path) ? Directory.GetFiles(path, "*", SearchOption.AllDirectories) : [path])
+        {
+            var data = Bytes(file).AsSpan();
+            for (var at = data.IndexOf(bytes); at >= 0;)
+            {
+                count++;
+                var next = data[(at + bytes.Length)..].IndexOf(bytes);
+                at = next < 0 ? -1 : at + bytes.Length + next;
+            }
+        }
+        return count;
+    }
+
+    [Fact]
+    public async Task Clips_kept_in_m20s_build_come_through_the_rebuild_intact_and_read_not_faster()
+    {
+        var paths = Install("a");
+        await ToM20(paths, null);
+        Run(paths, null,
+            "INSERT INTO Conversations (Mode, Title, SystemPrompt, PresetId, AuthorsNote, AuthorsNoteDepth, Summary, MemoryEnabled, RecallEnabled, TurnOrder, Pinned, CreatedAt, UpdatedAt) " +
+            "VALUES ('general', 'Old chat', '', 'balanced', '', 4, '', 1, 1, 0, 0, '2026-11-17 10:00:00', '2026-11-17 10:00:00')");
+        Run(paths, null, "INSERT INTO Messages (ConversationId, Role, Content, CreatedAt) VALUES (1, 1, 'An old reply', '2026-11-17 10:00:00')");
+        // A clip kept in the Video section from a first frame (megabytes, so its pages are spread through the file),
+        // one from a sentence at Better, one that belongs to a message, and one kept and removed again.
+        var first = Sample(1, filler: 20_000);
+        var better = VideoRequest.For("A lake at dawn.", VideoQuality.Better, PictureShape.Tall);
+        var second = Clip.Of(ClipOwners.Video, 0, VideoFiles.Wan22, better, new VideoResult(TestWebm.Make(832, 1216, 121, 5), 832, 1216, 121, 24, 55));
+        var third = Sample(3, kind: ClipOwners.Message, owner: 1);
+        Assert.Equal([1L, 2L, 3L, 4L], new[] { first, second, third, Sample(4) }.Select(c => InsertM20(paths, null, c)));
+        Run(paths, null, "DELETE FROM Clips WHERE Id = 4");
+        Assert.Equal(M20Columns, Columns(paths));
+        // What M20's build asked the engine for, for each: the request as that build made it from the row.
+        var asked = new[] { first, second }.Select(c => SdApi.VideoBody(
+            new VideoRequest(c.Prompt, c.Width, c.Height, c.Seed, c.Decoder, c.StartFrame, c.NegativePrompt, c.Frames, c.Fps, c.Steps, c.Sampler, c.Guidance, c.FlowShift, c.Compression),
+            c.Seed).ToJsonString()).ToList();
+
+        await Use(paths, null, async s =>
+        {
+            // The table was rebuilt: the new column sits before the large values, which are still last.
+            var columns = Columns(paths);
+            Assert.Equal([.. M20Columns[..16], "Faster", .. M20Columns[16..]], columns);
+            Assert.Equal(["Still", "StartFrame", "Video"], columns[^3..]);
+
+            var page = await Store(s).PageAsync(ClipOwners.Video, 0);
+            Assert.Equal([2L, 1L], page.Clips.Select(c => c.Id));
+            var one = (await Store(s).GetAsync(1))!;
+            Assert.Equal(first.Video, one.Video);
+            Assert.Equal(first.Still, one.Still);
+            Assert.Equal(first.StartFrame, one.StartFrame);
+            Assert.Equal((first.Prompt, first.Seed, first.Video!.Length, first.StartFrame!.Length, new DateTime(2026, 11, 17, 13, 3, 0)),
+                (one.Prompt, one.Seed, one.VideoBytes, one.StartFrameBytes, one.CreatedAt));
+            var two = (await Store(s).GetAsync(2))!;
+            Assert.Equal(second.Video, two.Video);
+            Assert.Equal((VideoDecoder.Own, 832, 1216, 55L), (two.Decoder, two.Width, two.Height, two.Seed));
+            Assert.Null(two.Still);
+            Assert.Null(two.StartFrame);
+
+            // Not faster, and the request each gives is the one M20's build gave: the body sent is the same text.
+            Assert.False(one.Faster || two.Faster || one.ToRequest().Faster || two.ToRequest().Faster);
+            Assert.Equal(asked[0], SdApi.VideoBody(one.ToRequest(), one.Seed).ToJsonString());
+            Assert.Equal(asked[1], SdApi.VideoBody(two.ToRequest(), two.Seed).ToJsonString());
+            Assert.DoesNotContain("cache_", asked[0] + asked[1]);
+            Assert.Empty(one.Problems());
+            // Make one like this puts back what makes that request.
+            var like = VideoLike.Of(one).Like!;
+            var again = VideoRequest.For(like.Sentence, like.Controls.Quality, like.Controls.Shape, like.Controls.Seed!.Value, like.Frame?.Bytes, like.Controls.Faster);
+            Assert.Equal(asked[0], SdApi.VideoBody(again, one.Seed).ToJsonString());
+
+            // The ids go on where the old table stopped: the removed clip's id is not given out again.
+            var kept = await Store(s).AddAsync(Sample(9, faster: true));
+            Assert.Equal(5, kept.Id);
+            Assert.True((await Store(s).FactsAsync(5))!.Faster);
+
+            // Index and triggers are back: a deleted message still takes its clip along.
+            Assert.Equal(4L, Run(paths, null,
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('IX_Clips_OwnerKind_OwnerId', 'Clips_message_ad', 'Clips_character_ad', 'Clips_persona_ad')"));
+            Assert.Equal(0L, Run(paths, null, "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE '%Clips_new%'"));
+            Assert.NotNull(await Store(s).FactsAsync(3));
+            await s.GetRequiredService<IChatStore>().DeleteAsync(1);
+            Assert.Null(await Store(s).FactsAsync(3));
+        });
+    }
+
+    [Fact]
+    public async Task The_rebuild_leaves_one_copy_of_a_clip_and_a_clip_removed_afterwards_is_gone()
+    {
+        var paths = Install("a");
+        await ToM20(paths, null);
+        // About 3 MB, as a real clip is.
+        var id = InsertM20(paths, null, Sample(1, filler: 25_000));
+        Assert.Equal(1, Count(paths.Root, TestWebm.Marker));
+
+        await using var services = Open(paths, null);
+        await services.MigrateDogDatabaseAsync();
+        await services.GetRequiredService<DatabaseTidy>().SettledAsync();
+
+        // The old table's pages were given back wiped: the video, the still, the first frame and the sentence are
+        // each in the folder once, in the new table.
+        Assert.Equal(1, Count(paths.Root, TestWebm.Marker));
+        Assert.Equal(1, Count(paths.Root, StillMarker));
+        Assert.Equal(1, Count(paths.Root, FrameMarker));
+        Assert.Equal(1, Count(paths.Root, Encoding.UTF8.GetBytes(Word)));
+
+        await Store(services).DeleteAsync(id);
+        await services.GetRequiredService<DatabaseTidy>().SettledAsync();
+        Assert.False(HoldsClip(paths.Root));
+    }
+
+    [Fact]
+    public async Task Going_back_to_m20s_build_leaves_its_table_with_every_clip_and_working_triggers()
+    {
+        var paths = Install("a");
+        await using var services = Open(paths, null);
+        await services.MigrateDogDatabaseAsync();
+        var chats = services.GetRequiredService<IChatStore>();
+        var chat = await chats.CreateAsync(new Conversation { Title = "A chat" });
+        var message = await chats.AddMessageAsync(new ChatMessage { ConversationId = chat.Id, Role = ChatRole.Assistant, Content = "A reply" });
+        var plain = Sample(1, filler: 8000);
+        var video = plain.Video!;
+        await Store(services).AddAsync(plain);
+        var faster = await Store(services).AddAsync(Sample(2, faster: true));
+        await Store(services).AddAsync(Sample(3, kind: ClipOwners.Message, owner: message.Id));
+        var factory = services.GetRequiredService<IDbContextFactory<DogDbContext>>();
+
+        await using (var db = await factory.CreateDbContextAsync())
+            await db.GetService<IMigrator>().MigrateAsync(M20);
+
+        // M20's own table, column for column, with every clip in it.
+        Assert.Equal(M20Columns, Columns(paths));
+        Assert.Equal(3L, Run(paths, null, "SELECT COUNT(*) FROM Clips"));
+        Assert.Equal(video, (byte[])Run(paths, null, "SELECT Video FROM Clips WHERE Id = 1")!);
+        Assert.Equal(4L, Run(paths, null,
+            "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('IX_Clips_OwnerKind_OwnerId', 'Clips_message_ad', 'Clips_character_ad', 'Clips_persona_ad')"));
+        // Its triggers work: a deleted chat takes its message's clip along.
+        await chats.DeleteAsync(chat.Id);
+        Assert.Equal(2L, Run(paths, null, "SELECT COUNT(*) FROM Clips"));
+
+        // And forward again. A clip that was Faster reads as plain after the round trip: M20's table has no place for it.
+        await using (var db = await factory.CreateDbContextAsync())
+            await db.GetService<IMigrator>().MigrateAsync();
+        Assert.Equal(video, await Store(services).VideoAsync(1));
+        Assert.False((await Store(services).FactsAsync(faster.Id))!.Faster);
+        Assert.Equal(4, (await Store(services).AddAsync(Sample(4))).Id);
+    }
+
+    [Fact]
+    public async Task A_locked_database_from_m20_is_rebuilt_without_a_clip_touching_the_disk_in_the_clear()
+    {
+        var (paths, key) = LockedInstall("a", "pw");
+        await ToM20(paths, key);
+        var sample = Sample(1, filler: 8000);
+        var (video, still, frame) = (sample.Video!, sample.Still!, sample.StartFrame!);
+        var id = InsertM20(paths, key, sample);
+        Assert.False(HoldsClip(paths.Root));
+
+        await Use(paths, key, async s =>
+        {
+            Assert.False(HoldsClip(paths.Root));
+            var read = (await Store(s).GetAsync(id))!;
+            Assert.Equal(video, read.Video);
+            Assert.Equal(still, read.Still);
+            Assert.Equal(frame, read.StartFrame);
+            Assert.False(read.Faster);
+            await Store(s).AddAsync(Sample(2, faster: true));
+        });
+
+        Assert.False(HoldsClip(paths.Root));
+        Assert.Equal(DatabaseFileKind.Encrypted, DatabaseLock.KindOf(paths.DatabaseFile));
+        // Turning the lock off compares every table's rows, the rebuilt one among them.
+        DatabaseLock.Decrypt(paths.DatabaseFile, key);
+        await Use(paths, null, async s =>
+        {
+            Assert.Equal(video, await Store(s).VideoAsync(id));
+            Assert.Equal([true, false], (await Store(s).PageAsync(ClipOwners.Video, 0)).Clips.Select(c => c.Faster));
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_backup_made_by_m20s_build_is_restored_and_its_clips_come_back(bool locked)
+    {
+        var (source, sourceKey) = locked ? LockedInstall("source", "backup password") : (Install("source"), null);
+        await ToM20(source, sourceKey);
+        var sample = Sample(1, filler: 6000);
+        var (video, frame) = (sample.Video!, sample.StartFrame!);
+        InsertM20(source, sourceKey, sample);
+        var zip = Path.Combine(_root, "m20-backup.zip");
+        await DatabaseBackup.CreateAsync(source, zip, "1.0.0", key: sourceKey);
+
+        // Restored into today's DOG.ai, which has a faster clip of its own; the restore replaces it.
+        var here = Install("here");
+        await Use(here, null, async s => await Store(s).AddAsync(Sample(7, withFrame: false, faster: true).Also(c => c.Prompt = "Mine")));
+        await DatabaseBackup.StageAsync(here, zip, backupPassword: locked ? "backup password" : null);
+        Assert.NotNull(DatabaseBackup.ApplyPending(here));
+        byte[]? key = null;
+        if (locked)
+        {
+            Assert.Equal(DataLockState.Locked, DataLock.Look(here, out var file));
+            key = file!.OpenWithPassword("backup password")!;
+            DataLock.Settle(here, file, key);
+        }
+        DatabaseBackup.FinishRestore(here, key);
+        // As the backup left it: M20's table, until DOG.ai starts and brings it up to date.
+        Assert.Equal(locked, DatabaseLock.KindOf(here.DatabaseFile) == DatabaseFileKind.Encrypted);
+
+        await Use(here, key, async s =>
+        {
+            var clip = Assert.Single((await Store(s).PageAsync(ClipOwners.Video, 0)).Clips);
+            Assert.Equal((1L, false), (clip.Id, clip.Faster));
+            Assert.Contains(Word, clip.Prompt);
+            Assert.Equal(video, await Store(s).VideoAsync(1));
+            Assert.Equal(frame, await Store(s).StartFrameAsync(1));
+            Assert.True((await Store(s).AddAsync(Sample(2, faster: true))).Id == 2);
+        });
+        if (locked)
+        {
+            Assert.Equal(DatabaseFileKind.Encrypted, DatabaseLock.KindOf(here.DatabaseFile));
+            Assert.False(HoldsClip(here.DatabaseFile));
+        }
     }
 
     [Fact]
     public async Task A_moved_portable_folder_needs_nothing_done_for_clips()
     {
         var paths = Install("a");
-        var sample = Sample();
+        var sample = Sample(faster: true);
         var video = sample.Video!;
         long id = 0;
         await Use(paths, null, async s =>
@@ -319,6 +605,7 @@ public sealed class ClipStoreTests : IDisposable
             var read = (await Store(s).GetAsync(id))!;
             Assert.Equal(video, read.Video);
             Assert.Equal(VideoFiles.Wan22, read.Files);
+            Assert.True(read.Faster);
             Assert.Equal(@"F:\new place\models\video", (await s.GetRequiredService<DogAI.Core.Settings.ISettingsStore>().LoadAsync()).VideoFolder());
         });
         // The text columns: the owner's kind, the two prompts, the sampler, the four file names and the date. The
@@ -537,7 +824,7 @@ public sealed class ClipStoreTests : IDisposable
     public async Task A_backup_and_restore_bring_the_kept_clips_back(bool backupLocked, bool hereLocked)
     {
         var (source, sourceKey) = backupLocked ? LockedInstall("source", "backup password") : (Install("source"), null);
-        var samples = new[] { Sample(1, filler: 6000), Sample(2, withFrame: false) };
+        var samples = new[] { Sample(1, filler: 6000, faster: true), Sample(2, withFrame: false) };
         var videos = samples.Select(c => c.Video!).ToList();
         var frame = samples[0].StartFrame!;
         await Use(source, sourceKey, async s =>
@@ -580,6 +867,8 @@ public sealed class ClipStoreTests : IDisposable
         {
             var page = await Store(s).PageAsync(ClipOwners.Video, ClipOwners.VideoOwner);
             Assert.Equal([2L, 1L], page.Clips.Select(c => c.Id));
+            // How each was made comes back with it (the first was made with Faster).
+            Assert.Equal([false, true], page.Clips.Select(c => c.Faster));
             Assert.Equal(videos[0], await Store(s).VideoAsync(1));
             Assert.Equal(videos[1], await Store(s).VideoAsync(2));
             Assert.Equal(frame, await Store(s).StartFrameAsync(1));

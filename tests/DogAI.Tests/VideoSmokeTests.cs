@@ -91,9 +91,9 @@ public class VideoSmokeTests(ITestOutputHelper output)
             clock.Restart();
             var again = await server.MakeAsync(setup.Model, sentence with { Preview = false });
             // The file itself differs in a few bytes each time (the muxer gives the track a random number), the frames do not.
-            var different = first.Webm.Length == again.Webm.Length ? first.Webm.Zip(again.Webm).Count(pair => pair.First != pair.Second) : -1;
-            output.WriteLine($"again (program started anew, files in Windows' cache): {clock.Elapsed.TotalSeconds:0.0} s; {different} bytes differ (-1: another length)");
-            Assert.InRange(different, 0, 16);
+            var different = Differing(first.Webm, again.Webm);
+            output.WriteLine($"again (program started anew, files in Windows' cache): {clock.Elapsed.TotalSeconds:0.0} s; {different} frames differ (-1: another number of frames)");
+            Assert.Equal(0, different);
             Save(first.Webm, "sentence.webm");
 
             // 3. From a first frame: a real JPEG of the clip's own shape (1024 × 640 into 768 × 480).
@@ -425,6 +425,335 @@ public class VideoSmokeTests(ITestOutputHelper output)
                 Assert.True(peak < total - (1L << 29), $"{name}: the card was filled to {Gb(peak)} of {Gb(total)}");
                 Assert.True(shared < 1L << 29, $"{name}: the video program borrowed {Gb(shared)} of shared memory");
             }
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    // ── The choice "Faster" (M21 step 2): sage attention at start, the block cache in the request ──
+
+    /// <summary>
+    /// A short clip with enough steps for the cache to have something to skip: its first 8 steps are always computed
+    /// (the warm-up), so the 8-step clip of the other tests would only try sage attention.
+    /// </summary>
+    private static VideoRequest ShortFaster(string sentence) => new(sentence, 832, 480, Seed: 4321, Frames: 33, Steps: 20) { Faster = true };
+
+    /// <summary>
+    /// How many frames two clips differ in; -1 when they have another number of frames. Frame by frame and not file
+    /// against file: the muxer gives the track a random number of six or seven bytes, so two files with the same
+    /// frames differ in a few bytes and now and then in length (seen in M21 step 2: 768,050 and 768,051 bytes).
+    /// </summary>
+    private static int Differing(byte[] a, byte[] b)
+    {
+        var (first, second) = (FramesOf(a), FramesOf(b));
+        return first.Count == second.Count && first.Count > 0 ? first.Zip(second).Count(pair => !pair.First.AsSpan().SequenceEqual(pair.Second)) : -1;
+    }
+
+    /// <summary>Every frame of a clip as the bytes in its block (after the track number, the time and the flags).</summary>
+    private static List<byte[]> FramesOf(byte[] data)
+    {
+        var frames = new List<byte[]>();
+        Walk(0, data.Length);
+        return frames;
+
+        void Walk(int at, int end)
+        {
+            while (at < end)
+            {
+                var first = data[at];
+                var idLength = first >= 0x80 ? 1 : first >= 0x40 ? 2 : first >= 0x20 ? 3 : first >= 0x10 ? 4 : 0;
+                if (idLength == 0 || at + idLength >= end) return;
+                uint id = 0;
+                for (var i = 0; i < idLength; i++) id = id << 8 | data[at + i];
+                at += idLength;
+                var lead = data[at];
+                if (lead == 0) return;
+                var sizeLength = System.Numerics.BitOperations.LeadingZeroCount((uint)lead) - 23;
+                long size = lead & (0xFF >> sizeLength);
+                var unknown = size == (0xFF >> sizeLength);
+                for (var i = 1; i < sizeLength; i++) { size = size << 8 | data[at + i]; unknown &= data[at + i] == 0xFF; }
+                at += sizeLength;
+                var bodyEnd = unknown ? end : (int)Math.Min(end, at + size);
+                if (id is 0xA3 or 0xA1) frames.Add(data[Math.Min(bodyEnd, at + 4)..bodyEnd]);
+                else if (id is 0x18538067 or 0x1F43B675 or 0xA0) Walk(at, bodyEnd);
+                at = bodyEnd;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A clip made with Faster is a clean clip like any other, the same seed gives the same frames again, and it is not
+    /// the plain clip (so the choice has to be kept with a kept clip). Takes about two minutes.
+    /// </summary>
+    [Fact]
+    public async Task A_faster_clip_is_a_clean_clip_and_the_same_seed_gives_the_same_frames()
+    {
+        if (Setup() is not { } setup) return;
+        var root = Path.Combine(Path.GetTempPath(), "dogai-videofaster-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var engineFolder = Path.GetDirectoryName(setup.Exe)!;
+        var engineFilesBefore = Listing(engineFolder);
+        var lines = new List<string>();
+        var logged = new List<string>();
+        try
+        {
+            var paths = new AppPaths(root);
+            using var http = new LoopbackHttp();
+            using var server = new VideoServer(http, new SdServerLocator(paths), paths);
+            server.Output += line => { lock (lines) lines.Add(line); };
+            server.Logged += line => { lock (logged) logged.Add(line); };
+            var request = ShortFaster($"A mountain lake at dawn, mist drifting over the water, {Marker}");
+            Assert.Empty(request.Problems());
+
+            var clock = Stopwatch.StartNew();
+            var plain = await server.MakeAsync(setup.Model, request with { Faster = false });
+            var plainTook = clock.Elapsed.TotalSeconds;
+            int plainLines;
+            lock (lines) plainLines = lines.Count;
+
+            var progress = new Collect<VideoProgress>();
+            clock.Restart();
+            var first = await server.MakeAsync(setup.Model, request with { Preview = true }, progress);
+            var fasterTook = clock.Elapsed.TotalSeconds;
+            output.WriteLine($"plain {plainTook:0.0} s (the first, files read from disk), faster {fasterTook:0.0} s; {plain.Webm.Length:N0} and {first.Webm.Length:N0} bytes");
+            output.WriteLine($"estimate: plain {VideoEstimate.For(request with { Faster = false }, warm: true).Total:0} s, faster {VideoEstimate.For(request, warm: true).Total:0} s (warm)");
+
+            // A clean clip of the size and length asked for, with nothing written into it.
+            Assert.Null(VideoClips.Problem(first.Webm, request));
+            Assert.Equal((832, 480, 33, 4321L), (first.Width, first.Height, first.Frames, first.Seed));
+            output.WriteLine(Tree(first.Webm));
+            foreach (var word in new[] { Marker, "mountain", "wan2.2", "dbcache", "DBCache", "sage", "threshold" })
+                Assert.False(Holds(first.Webm, word), word);
+            // Every step is still reported, though some are skipped inside: the bar counts as before.
+            var drawing = progress.Items.Where(p => p.Stage == VideoStages.Drawing).ToList();
+            Assert.NotEmpty(drawing);
+            Assert.All(drawing, p => Assert.Equal(20, p.TotalSteps));
+            Assert.Contains(progress.Items, p => p.Preview is not null);
+
+            // The same seed and settings give the same frames, in a program started anew.
+            var again = await server.MakeAsync(setup.Model, request);
+            var different = Differing(first.Webm, again.Webm);
+            output.WriteLine($"faster twice: {different} of {first.Frames} frames differ (-1: another number of frames)");
+            Assert.Equal(0, different);
+
+            // And it is not the plain clip: Faster changes the frames.
+            var fromPlain = Differing(plain.Webm, first.Webm);
+            output.WriteLine($"plain against faster: {fromPlain} of {first.Frames} frames differ");
+            Assert.True(fromPlain > 0, "a faster clip came out as the plain clip: the engine took neither switch");
+            Save(plain.Webm, "faster-plain.webm");
+            Save(first.Webm, "faster.webm");
+
+            // What the engine says it did, and that only the faster clips made it say so.
+            lock (lines)
+            {
+                var said = lines.Where(l => l.Contains("cache", StringComparison.OrdinalIgnoreCase) || l.Contains("sage", StringComparison.OrdinalIgnoreCase)).ToList();
+                foreach (var line in said.Distinct().Take(12)) output.WriteLine("  engine: " + line);
+                Assert.DoesNotContain(lines.Take(plainLines), l => l.Contains("DBCache", StringComparison.OrdinalIgnoreCase));
+                Assert.Contains(lines.Skip(plainLines), l => l.Contains("DBCache", StringComparison.OrdinalIgnoreCase));
+                Assert.DoesNotContain(lines, l => l.Contains(Marker, StringComparison.OrdinalIgnoreCase));
+                Assert.DoesNotContain(lines, l => l.Contains("mist drifting", StringComparison.OrdinalIgnoreCase));
+            }
+            lock (logged)
+            {
+                foreach (var word in new[] { Marker, "mountain", "drifting" })
+                    Assert.DoesNotContain(logged, l => l.Contains(word, StringComparison.OrdinalIgnoreCase));
+            }
+            Assert.False(server.IsRunning);
+            Assert.Equal(engineFilesBefore, Listing(engineFolder));
+            Assert.Equal(["dogai-blank.html"], Directory.GetFiles(root, "*", SearchOption.AllDirectories).Select(Path.GetFileName).ToList());
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// DOG.ai writes the cache's settings out in the request so that a later engine with other defaults cannot change
+    /// a kept clip. They must be this engine's own: the same clip asked for with the settings written out and with
+    /// them left to the engine gives the same frames, and another setting gives other frames (so the field is read).
+    /// Each clip in a program started anew, as DOG.ai does. Takes about a minute and a half.
+    /// </summary>
+    [Fact]
+    public async Task The_caches_settings_written_out_are_the_engines_own()
+    {
+        if (Setup() is not { } setup) return;
+        var root = Path.Combine(Path.GetTempPath(), "dogai-videocache-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var paths = new AppPaths(root);
+            using var http = new LoopbackHttp();
+            var request = ShortFaster("A red kite climbs over a green hill, the camera follows it.");
+            var said = new List<string>();
+
+            async Task<byte[]> MakeAsync(string name, Action<System.Text.Json.Nodes.JsonObject> change)
+            {
+                var port = EngineManager.FreePort();
+                var start = new ProcessStartInfo(setup.Exe)
+                {
+                    UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+                    WorkingDirectory = Path.GetDirectoryName(setup.Exe)!,
+                };
+                foreach (var arg in VideoServer.Arguments(setup.Model, request.Decoder, port, ImageServer.BlankPageIn(paths), faster: true)) start.ArgumentList.Add(arg);
+                EngineEnvironment.Clean(start);
+                using var process = new Process { StartInfo = start };
+                void Heard(string? line)
+                {
+                    if (line is not null && line.Contains("CacheDIT", StringComparison.OrdinalIgnoreCase)) lock (said) said.Add($"{name}: {line.Trim()}");
+                }
+                process.OutputDataReceived += (_, e) => Heard(e.Data);
+                process.ErrorDataReceived += (_, e) => Heard(e.Data);
+                process.Start();
+                try
+                {
+                    process.BeginOutputReadLine();
+                    process.BeginErrorReadLine();
+                    var api = new SdApi(http.Client, port);
+                    var clock = Stopwatch.StartNew();
+                    while (!await api.HealthAsync())
+                    {
+                        Assert.False(process.HasExited, "the engine ended while starting");
+                        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(60), "the engine did not answer");
+                        await Task.Delay(100);
+                    }
+                    var body = SdApi.VideoBody(request, request.Seed);
+                    change(body);
+                    var id = await api.StartVideoAsync(body);
+                    while (true)
+                    {
+                        var job = await api.VideoJobAsync(id);
+                        if (job.Status == "completed") return job.Video!.File;
+                        Assert.False(job.Status is "failed" or "cancelled", $"{name}: the clip {job.Status}: {job.Error}");
+                        Assert.True(clock.Elapsed < TimeSpan.FromMinutes(5), "the clip did not finish");
+                        await Task.Delay(1000);
+                    }
+                }
+                finally
+                {
+                    try
+                    {
+                        if (!process.HasExited) { process.Kill(entireProcessTree: true); process.WaitForExit(5000); }
+                    }
+                    catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                }
+            }
+
+            var written = await MakeAsync("written out", _ => { });
+            var left = await MakeAsync("left to the engine", body => Assert.True(body.Remove("cache_option")));
+            var other = await MakeAsync("another threshold", body => body["cache_option"] = "Fn=8,Bn=0,threshold=0.16,warmup=8");
+            lock (said) foreach (var line in said) output.WriteLine("  " + line);
+
+            Assert.Null(VideoClips.Problem(written, request));
+            var same = Differing(written, left);
+            var changed = Differing(written, other);
+            output.WriteLine($"written out against left to the engine: {same} of 33 frames differ; against threshold 0.16: {changed}");
+            Assert.Equal(0, same);
+            Assert.True(changed > 0, "another cache setting gave the same frames: the engine does not read cache_option from the request");
+            // What it says its settings are, when asked for nothing: the ones DOG.ai writes out.
+            lock (said) Assert.Contains(said, l => l.StartsWith("left to the engine:") && l.Contains("Fn: 8") && l.Contains("Bn: 0") && l.Contains("0.08") && l.Contains("warmup: 8"));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// Whole Quick clips with Faster in each of the three shapes (the M21 trial made only wide ones): each is a clean
+    /// clip of its size and takes about what the estimate says. Prints the times. Takes about five minutes.
+    /// </summary>
+    [Fact]
+    public async Task Faster_clips_of_every_quick_shape_take_about_what_the_estimate_says()
+    {
+        if (Setup() is not { } setup) return;
+        var root = Path.Combine(Path.GetTempPath(), "dogai-videoshapes-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var paths = new AppPaths(root);
+            using var http = new LoopbackHttp();
+            using var server = new VideoServer(http, new SdServerLocator(paths), paths);
+            var skipped = "";
+            server.Output += line => { if (line.Contains("CacheDIT skipped", StringComparison.OrdinalIgnoreCase)) skipped = line.Trim(); };
+            var warm = false;
+            foreach (var shape in new[] { PictureShape.Wide, PictureShape.Tall, PictureShape.Square })
+            {
+                var request = VideoRequest.For("A mountain lake at dawn, mist drifting over the water, the camera moves slowly forward.", VideoQuality.Quick, shape, seed: 77, faster: true);
+                var estimate = VideoEstimate.For(request, warm);
+                var clock = Stopwatch.StartNew();
+                var clip = await server.MakeAsync(setup.Model, request with { Preview = true }, new Collect<VideoProgress>());
+                var took = clock.Elapsed.TotalSeconds;
+                output.WriteLine($"{shape} {clip.Width} × {clip.Height}: {took:0.0} s; the estimate said {estimate.Total:0} s ({(warm ? "warm" : "cold")}; plain {VideoEstimate.For(request with { Faster = false }, warm).Total:0} s); {skipped}");
+                Assert.Null(VideoClips.Problem(clip.Webm, request));
+                // Within a third: of the warm estimate below (the files may be in Windows' cache from an earlier run), of the one said above.
+                Assert.InRange(took, VideoEstimate.For(request, warm: true).Total * 2 / 3, estimate.Total * 4 / 3);
+                Save(clip.Webm, $"faster-{shape}.webm");
+                warm = true;
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// A whole Quick clip with Faster on a card the engine is given a plan for (as when another program holds part of
+    /// it: the model is then kept in RAM and brought to the card piece by piece, and there are no previews). By hand in
+    /// the M21 trial: 93 s against 140 s plain. Prints the time and the least free RAM; needs about 17 GB of free RAM.
+    /// Takes about two minutes.
+    /// </summary>
+    [Fact]
+    public async Task A_faster_clip_is_made_with_a_plan_for_a_crowded_card_too()
+    {
+        if (Setup() is not { } setup) return;
+        var root = Path.Combine(Path.GetTempPath(), "dogai-videoplan-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var paths = new AppPaths(root);
+            using var http = new LoopbackHttp();
+            using var server = new VideoServer(http, new SdServerLocator(paths), paths);
+            var cache = new List<string>();
+            server.Output += line => { if (line.Contains("CacheDIT", StringComparison.OrdinalIgnoreCase)) lock (cache) cache.Add(line.Trim()); };
+            var request = VideoRequest.For("A mountain lake at dawn, mist drifting over the water, the camera moves slowly forward.", VideoQuality.Quick, PictureShape.Wide, seed: 77, faster: true);
+            // What the coordinator would have measured with another program holding 11 GB of a 24 GB card.
+            const long Free = 13L << 30;
+            Assert.Equal("10.0", VideoMemory.EnginePlan(Free, request.Decoder));
+
+            var probe = new HardwareProbe();
+            long peak = 0, leastRam = long.MaxValue;
+            using var stop = new CancellationTokenSource();
+            var watch = Task.Run(async () =>
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    if (await probe.MainGpuAsync() is { } gpu) peak = Math.Max(peak, gpu.TotalBytes - gpu.FreeBytes);
+                    leastRam = Math.Min(leastRam, (await probe.ProbeAsync()).RamFreeBytes);
+                    try { await Task.Delay(500, stop.Token); } catch (OperationCanceledException) { }
+                }
+            });
+            var clock = Stopwatch.StartNew();
+            var clip = await server.MakeAsync(setup.Model, request, Free, null, default);
+            stop.Cancel();
+            await watch;
+
+            var estimate = VideoEstimate.For(request);
+            output.WriteLine($"faster with a plan of 10.0: {clock.Elapsed.TotalSeconds:0.0} s (the estimate, for the whole card: {estimate.Total:0} s cold, {VideoEstimate.For(request, warm: true).Total:0} s warm; plain {VideoEstimate.For(request with { Faster = false }).Total:0} s cold)");
+            output.WriteLine($"card peak {Gb(peak)}; least free RAM {Gb(leastRam)}");
+            lock (cache) foreach (var line in cache) output.WriteLine("  engine: " + line);
+            Assert.Null(VideoClips.Problem(clip.Webm, request));
+            Assert.Equal((960, 640, 121), (clip.Width, clip.Height, clip.Frames));
+            lock (cache) Assert.Contains(cache, l => l.Contains("DBCache", StringComparison.OrdinalIgnoreCase));
+            // The plan held: the engine took about the plan and 2.8 GB, never the whole card.
+            Assert.True(peak < 17L << 30, $"the card went to {Gb(peak)} with a plan of 10 GB");
+            // No slower than a plain clip is expected to be on the whole card (by hand: 93 s).
+            Assert.True(clock.Elapsed.TotalSeconds < VideoEstimate.For(request with { Faster = false }).Total, $"it took {clock.Elapsed.TotalSeconds:0} s");
+            Save(clip.Webm, "faster-plan.webm");
+            Assert.False(server.IsRunning);
         }
         finally
         {

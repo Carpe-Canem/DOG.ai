@@ -1258,6 +1258,23 @@ public class VideoCardTests : IDisposable
         await better.Engine.MakeAsync(_model, VideoRequest.For("A fox runs through the snow.", VideoQuality.Better, PictureShape.Wide, seed: 9));
         Assert.EndsWith("so the video engine was told to plan with 13.0 GB and to send no previews.", better.Notes[^1]);
 
+        // The choice "Faster" (M21) goes through the coordinator untouched, on the whole card and on a crowded one,
+        // where it gets the plan any clip gets (by hand in the M21 trial at a plan of 10 GB: 93 s against 140 s).
+        var faster = new Rig();
+        await faster.Engine.MakeAsync(_model, Quick with { Faster = true, Preview = true });
+        Assert.True(faster.Video.Made[0].Request.Faster);
+        Assert.True(faster.Video.Made[0].Request.Preview);
+        var fasterCrowded = new Rig();
+        fasterCrowded.Card.Other = 7 * Gb;
+        await fasterCrowded.Engine.MakeAsync(_model, Quick with { Faster = true, Preview = true });
+        Assert.True(fasterCrowded.Video.Made[0].Request.Faster);
+        Assert.False(fasterCrowded.Video.Made[0].Request.Preview);
+        Assert.Equal("10.0", VideoMemory.EnginePlan(fasterCrowded.Video.Told[0], fasterCrowded.Video.Made[0].Request.Decoder));
+        Assert.Equal(["--sage-attn", "--max-vram", "10.0"],
+            VideoServer.Arguments(_model, VideoDecoder.Fast, 1, "b.html", VideoMemory.EnginePlan(fasterCrowded.Video.Told[0]), faster: true).TakeLast(3));
+        // Plain clips beside it are as they were.
+        Assert.False(rig.Video.Made[0].Request.Faster);
+
         // A clip that fails or is cancelled leaves no "crowded" behind.
         var failing = new Rig();
         failing.Card.Other = 7 * Gb;

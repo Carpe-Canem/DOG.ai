@@ -39,13 +39,17 @@ public sealed record VideoTry(
 /// from step 5, a picture DOG.ai holds), already checked as a first frame for both qualities of its shape.
 /// </summary>
 /// <param name="From">Where it came from, in words for the screen ("a file").</param>
-public sealed record VideoFrame(byte[] Bytes, int Width, int Height, PictureShape Shape, string From)
+/// <param name="Continues">
+/// True for the last frame of a clip (Continue the clip, M21): the next clip goes on where that one ended, and the
+/// page says what that costs (<see cref="VideoPanels.Continuation"/>).
+/// </param>
+public sealed record VideoFrame(byte[] Bytes, int Width, int Height, PictureShape Shape, string From, bool Continues = false)
 {
     /// <summary>
     /// The frame for these bytes, or why there is none: a WebP DOG.ai drew or a JPEG the page made (its colour profile
     /// taken out first), of one of the three shapes, acceptable to both Quick's and Better's size of that shape.
     /// </summary>
-    public static (VideoFrame? Frame, string? Problem) Of(byte[]? bytes, string from)
+    public static (VideoFrame? Frame, string? Problem) Of(byte[]? bytes, string from, bool continues = false)
     {
         if (bytes is null || bytes.Length == 0) return (null, "It is not a picture DOG.ai can open (" + ComposerPictures.Kinds + ").");
         var plain = JpegInfo.Read(bytes) is not null ? AttachedPictures.Plain(bytes) : bytes;
@@ -56,7 +60,7 @@ public sealed record VideoFrame(byte[] Bytes, int Width, int Height, PictureShap
             var (w, h) = VideoRequest.SizeOf(quality, shape);
             if (VideoStartFrame.Problem(plain, w, h) is { } problem) return (null, problem);
         }
-        return (new VideoFrame(plain, size.Width, size.Height, shape, from), null);
+        return (new VideoFrame(plain, size.Width, size.Height, shape, from, continues), null);
     }
 
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], string> Addresses = new();
@@ -413,7 +417,8 @@ public sealed class VideoSession
 
 /// <summary>The controls the Video section remembers: never the sentence or the first frame.</summary>
 /// <param name="Seed">Null: a new seed for every clip.</param>
-public sealed record VideoControls(VideoQuality Quality = VideoQuality.Quick, PictureShape Shape = PictureShape.Wide, long? Seed = null);
+/// <param name="Faster">The choice "Faster" (<see cref="VideoRequest.Faster"/>): off unless the owner chose it.</param>
+public sealed record VideoControls(VideoQuality Quality = VideoQuality.Quick, PictureShape Shape = PictureShape.Wide, long? Seed = null, bool Faster = false);
 
 /// <summary>
 /// The Video section's remembered controls (document <see cref="Key"/>; a singleton, loaded at start), as
@@ -438,11 +443,11 @@ public sealed class VideoChoices(Models.IDocumentStore? documents = null)
 
     public async Task SaveAsync(VideoControls controls, CancellationToken ct = default)
     {
-        var clean = Clean(new VideoDocument { Quality = controls.Quality, Shape = controls.Shape, Seed = controls.Seed });
+        var clean = Clean(new VideoDocument { Quality = controls.Quality, Shape = controls.Shape, Seed = controls.Seed, Faster = controls.Faster });
         if (clean == _controls) return;
         _controls = clean;
         if (documents is not null)
-            await documents.SaveAsync(Key, new VideoDocument { Quality = clean.Quality, Shape = clean.Shape, Seed = clean.Seed }, ct);
+            await documents.SaveAsync(Key, new VideoDocument { Quality = clean.Quality, Shape = clean.Shape, Seed = clean.Seed, Faster = clean.Faster }, ct);
         Changed?.Invoke();
     }
 
@@ -450,14 +455,16 @@ public sealed class VideoChoices(Models.IDocumentStore? documents = null)
     private static VideoControls Clean(VideoDocument? doc) => doc is null ? new() : new(
         Enum.IsDefined(doc.Quality) ? doc.Quality : VideoQuality.Quick,
         Enum.IsDefined(doc.Shape) ? doc.Shape : PictureShape.Wide,
-        doc.Seed is >= 0 and <= SeedChoice.Highest ? doc.Seed : null);
+        doc.Seed is >= 0 and <= SeedChoice.Highest ? doc.Seed : null,
+        doc.Faster);
 
-    /// <summary>What is saved: three controls, no sentence and no picture.</summary>
+    /// <summary>What is saved: four controls, no sentence and no picture. A document from before M21 has no Faster and reads off.</summary>
     public sealed class VideoDocument
     {
         public VideoQuality Quality { get; set; }
         public PictureShape Shape { get; set; } = PictureShape.Wide;
         public long? Seed { get; set; }
+        public bool Faster { get; set; }
     }
 }
 
@@ -480,12 +487,29 @@ public static class VideoPanels
     public const string FromFile = "a file", FromTry = "a picture in Images", FromKeptPicture = "a kept picture",
         FromPortrait = "the portrait", FromStory = "a story picture", FromChat = "a chat picture", FromKeptVideo = "the kept video";
 
+    // Continue the clip (M21): the last frame of a clip, as the first frame of the next ("From the end of the clip before · Wide · 960 × 640").
+    public const string FromTryEnd = "the end of the clip before", FromKeptVideoEnd = "the end of the kept video";
+
     /// <summary>Where a picture that had to be cut came from: "a kept picture, cut to wide".</summary>
     public static string CutFrom(string from, PictureShape shape) => $"{from}, cut to {shape.ToString().ToLowerInvariant()}";
 
     /// <summary>The note on the Make tab after a picture was handed over to start a clip.</summary>
-    public static string Arrived(VideoFrame frame) =>
-        $"The clip will start from {frame.From}. Say below what moves, then press Draw.";
+    public static string Arrived(VideoFrame frame) => frame.Continues
+        ? $"The next clip will start from {frame.From}. Change the sentence below to say what happens next, then press Draw."
+        : $"The clip will start from {frame.From}. Say below what moves, then press Draw.";
+
+    /// <summary>
+    /// Said while the last frame of a clip is held as the next clip's first frame. The M21 trial, three continuations
+    /// in a row: fine detail fell by a tenth after one, a quarter after two and a third after three, by which time
+    /// the character had become another animal in the same jacket; and the same sentence made the same motion again
+    /// (a head went on turning until it hung).
+    /// </summary>
+    public const string Continuation =
+        "Each continued clip is a little softer than the one before and drifts further from the first picture: after two it shows. " +
+        "Change the sentence, or the clip repeats the same motion.";
+
+    /// <summary>The line under the first frame held: what a continuation costs, else that a clip follows its first frame loosely.</summary>
+    public static string AboutFrame(VideoFrame frame) => frame.Continues ? Continuation : FollowsLoosely;
 
     /// <summary>
     /// The line under the grid: "3 kept videos", "30 kept videos · showing 24", or what it says when there is nothing.
@@ -511,6 +535,7 @@ public static class VideoPanels
             request.Seconds.ToString("0.#", CultureInfo.InvariantCulture) + " s",
         };
         if (request.Level is { } level) parts.Add(level.Quality.ToString());
+        if (c.Faster) parts.Add(FasterName);
         parts.Add("seed " + c.Seed.ToString(CultureInfo.InvariantCulture));
         if (c.HasStartFrame) parts.Add("from a picture");
         parts.Add((c.VideoBytes / 1_000_000.0).ToString("0.0", CultureInfo.InvariantCulture) + " MB");
@@ -528,6 +553,9 @@ public static class VideoPanels
             ? line.Replace("Draw makes the same clip", "it was made at Better, which this card cannot make, so Draw makes it at Quick", StringComparison.Ordinal)
             : line;
     }
+
+    /// <summary>The choice's name, as a clip's facts say it ("… · Quick · Faster · seed 123 · …").</summary>
+    public const string FasterName = "Faster";
 
     /// <summary>Said where the first frame is chosen and shown (the M20 trial: a closed smile became a grin by the middle).</summary>
     public const string FollowsLoosely = "A clip follows its first frame only loosely: a face in particular can change as it moves.";
@@ -580,6 +608,7 @@ public static class VideoPanels
             (t.Result.Fps > 0 ? (t.Result.Frames / (double)t.Result.Fps).ToString("0.#", CultureInfo.InvariantCulture) : "0") + " s",
         };
         if (t.Request.Level is { } level) parts.Add(level.Quality.ToString());
+        if (t.Request.Faster) parts.Add(FasterName);
         parts.Add("seed " + t.Result.Seed.ToString(CultureInfo.InvariantCulture));
         if (t.FromPicture) parts.Add("from a picture");
         parts.Add("made in " + Duration(t.Took));
@@ -627,7 +656,8 @@ public static class VideoPanels
 
 /// <summary>
 /// Kept videos › "Make one like this": what goes back onto the Make tab from a kept clip, so that Draw makes the same
-/// clip again: its sentence, its quality and shape (told from its size), its seed and its first frame.
+/// clip again: its sentence, its quality and shape (told from its size), whether it was Faster, its seed and its
+/// first frame.
 /// </summary>
 /// <param name="Frame">The first frame to hold, or null for a clip made from the sentence alone (any frame held is let go).</param>
 public sealed record VideoLike(string Sentence, VideoControls Controls, VideoFrame? Frame)
@@ -650,6 +680,41 @@ public sealed record VideoLike(string Sentence, VideoControls Controls, VideoFra
             shape = held.Shape;
         }
         var seed = clip.Seed is >= 0 and <= SeedChoice.Highest ? clip.Seed : (long?)null;
-        return (new VideoLike(clip.Prompt, new VideoControls(quality, shape, seed), frame), null);
+        return (new VideoLike(clip.Prompt, new VideoControls(quality, shape, seed, clip.Faster), frame), null);
+    }
+}
+
+/// <summary>
+/// "Continue the clip" (M21): what goes onto the Make tab so that the next clip starts where a clip ended: the clip's
+/// last frame as the first frame, its sentence (still in the box, for the owner to change), its quality and shape,
+/// whether it was Faster, and a new seed. The next clip is a clip of its own beside the first; the two are not joined.
+/// </summary>
+/// <param name="Frame">The clip's last frame, held as the next clip's first (<see cref="VideoFrame.Continues"/>).</param>
+public sealed record VideoContinue(string Sentence, VideoControls Controls, VideoFrame Frame)
+{
+    /// <summary>From a try on the Make tab.</summary>
+    public static (VideoContinue? Next, string? Problem) Of(VideoTry made, byte[]? lastFrame) =>
+        Of(made.Request, lastFrame, VideoPanels.FromTryEnd);
+
+    /// <summary>From a kept clip (read with or without its video and first frame: neither is needed).</summary>
+    public static (VideoContinue? Next, string? Problem) Of(Clip kept, byte[]? lastFrame) =>
+        Of(kept.ToRequest() with { StartFrame = null }, lastFrame, VideoPanels.FromKeptVideoEnd);
+
+    /// <summary>
+    /// What continues the clip <paramref name="made"/> asked for, or why it cannot be continued.
+    /// <paramref name="lastFrame"/> is the JPEG the page made of the clip's last frame, at the clip's own size (the
+    /// player's time set to the clip's length and drawn; quality 0.9, as chat pictures): it is checked as every first
+    /// frame is, and must be the clip's size, since anything else is not that clip's frame.
+    /// </summary>
+    public static (VideoContinue? Next, string? Problem) Of(VideoRequest made, byte[]? lastFrame, string from)
+    {
+        if (lastFrame is null || lastFrame.Length == 0) return (null, "The clip’s last frame could not be read.");
+        var (frame, problem) = VideoFrame.Of(lastFrame, from, continues: true);
+        if (frame is null) return (null, "The clip’s last frame cannot start a clip: " + problem);
+        if (frame.Width != made.Width || frame.Height != made.Height)
+            return (null, $"The last frame read is {frame.Width} × {frame.Height}, not the clip’s {made.Width} × {made.Height}.");
+        var quality = made.Level?.Quality ?? (made.Decoder == VideoDecoder.Own ? VideoQuality.Better : VideoQuality.Quick);
+        // A new seed: the clip's own seed would start the same motion over from where it ended.
+        return (new VideoContinue(made.Prompt, new VideoControls(quality, frame.Shape, Seed: null, made.Faster), frame), null);
     }
 }

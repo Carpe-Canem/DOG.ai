@@ -84,7 +84,12 @@ public sealed class VideoServer : IVideoEngine, IDisposable
     /// they left 2.7 GB free and were slower).
     /// </summary>
     /// <param name="plan">The <c>--max-vram</c> value (<see cref="VideoMemory.EnginePlan"/>): <c>-3</c> unless part of the card is in use.</param>
-    public static IReadOnlyList<string> Arguments(VideoModel model, VideoDecoder decoder, int port, string blankPage, string plan = VideoMemory.WholeCardPlan)
+    /// <param name="faster">
+    /// The clip was asked for with <see cref="VideoRequest.Faster"/>: the engine's sage attention, which only a start
+    /// switch can ask for (the program lives for one clip, so it can differ from clip to clip). Without it the list
+    /// is exactly M20's.
+    /// </param>
+    public static IReadOnlyList<string> Arguments(VideoModel model, VideoDecoder decoder, int port, string blankPage, string plan = VideoMemory.WholeCardPlan, bool faster = false)
     {
         var args = new List<string>
         {
@@ -105,6 +110,11 @@ public sealed class VideoServer : IVideoEngine, IDisposable
             "--completed-ttl-seconds", "60",
             // Without this the prompt is written inside the clip. The request cannot ask for it; only this switch can.
             "--disable-image-metadata",
+        ]);
+        // Faster attention inside the model (M21: 14 to 17% by itself, a third at Quick together with the request's cache).
+        if (faster) args.Add("--sage-attn");
+        args.AddRange(
+        [
             // Keep 3 GB of the card free: without it the first clip of a fresh program once overflowed the card. When
             // part of the card is in use, a plan in GiB that DOG.ai worked out: the engine does not see what others hold.
             "--max-vram", plan,
@@ -126,7 +136,7 @@ public sealed class VideoServer : IVideoEngine, IDisposable
         try
         {
             progress?.Report(new VideoProgress(VideoStages.Starting));
-            var api = await StartAsync(model, request.Decoder, VideoMemory.EnginePlan(cardFreeBytes, request.Decoder), ct).ConfigureAwait(false);
+            var api = await StartAsync(model, request.Decoder, VideoMemory.EnginePlan(cardFreeBytes, request.Decoder), request.Faster, ct).ConfigureAwait(false);
             try
             {
                 var result = await MakeWithAsync(api, request, progress, ct).ConfigureAwait(false);
@@ -177,7 +187,7 @@ public sealed class VideoServer : IVideoEngine, IDisposable
         return Task.CompletedTask;
     }
 
-    private async Task<SdApi> StartAsync(VideoModel model, VideoDecoder decoder, string plan, CancellationToken ct)
+    private async Task<SdApi> StartAsync(VideoModel model, VideoDecoder decoder, string plan, bool faster, CancellationToken ct)
     {
         StopProcess();
         Changed?.Invoke();
@@ -193,7 +203,7 @@ public sealed class VideoServer : IVideoEngine, IDisposable
                 RedirectStandardError = true,
                 WorkingDirectory = Path.GetDirectoryName(exe)!,
             };
-            foreach (var arg in Arguments(model, decoder, port, ImageServer.BlankPageIn(_paths), plan))
+            foreach (var arg in Arguments(model, decoder, port, ImageServer.BlankPageIn(_paths), plan, faster))
                 start.ArgumentList.Add(arg);
             EngineEnvironment.Clean(start);
 

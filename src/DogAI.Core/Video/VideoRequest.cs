@@ -77,6 +77,12 @@ public sealed record VideoModel(string DiffusionPath, string VaePath, string Tex
 /// <param name="Frames">Always one more than a multiple of four (the engine makes 117 of 120).</param>
 /// <param name="Compression">The WebM's file-size setting, 0 to 100. At 70 a clip is half the size of 90 and looks the same.</param>
 /// <param name="Preview">Send the newest frame through <see cref="VideoProgress.Preview"/> while the clip is drawn.</param>
+/// <param name="Faster">
+/// The owner's choice "Faster" (M21; off unless chosen): the engine's sage attention, a start switch, together with
+/// its block cache, asked for in the request (<see cref="FasterCacheMode"/>, <see cref="FasterCacheOption"/>). About a
+/// third faster at Quick and a quarter at Better, the same clip to the eye, but not the same frames: so it is part of
+/// the request and kept with the clip. Without it a clip is started and asked for exactly as in M20.
+/// </param>
 public sealed record VideoRequest(
     string Prompt,
     int Width = 960,
@@ -93,7 +99,8 @@ public sealed record VideoRequest(
     double FlowShift = 5,
     int Compression = 70,
     bool Preview = false,
-    int PreviewEvery = 4)
+    int PreviewEvery = 4,
+    bool Faster = false)
 {
     /// <summary>121 frames at 24 a second.</summary>
     public const int FiveSeconds = 121;
@@ -120,14 +127,28 @@ public sealed record VideoRequest(
         "malformed limbs, extra limbs, cluttered background, walking backwards";
 
     /// <summary>
+    /// The engine's block cache a Faster clip asks for. The M21 trial: with sage attention it computed 13 to 15 of the
+    /// 20 steps; "taylorseer" and "cache-dit" gave the same clip frame for frame, "easycache" and "spectrum" were
+    /// faster and visibly softer.
+    /// </summary>
+    public const string FasterCacheMode = "dbcache";
+
+    /// <summary>
+    /// The cache's settings: the engine's own (8 blocks always computed, none at the end, threshold 0.08, 8 warm-up
+    /// steps), written out so that a later engine with other defaults cannot change a kept clip. A threshold of 0.12
+    /// was two to three points faster and a little hazier.
+    /// </summary>
+    public const string FasterCacheOption = "Fn=8,Bn=0,threshold=0.08,warmup=8";
+
+    /// <summary>
     /// The clip the owner asks for: the size is DOG.ai's own picture size for the shape (Quick = Small, Better =
     /// Normal), so a picture drawn in DOG.ai becomes a first frame without being cut; Quick takes the fast decoder,
     /// Better the model's own.
     /// </summary>
-    public static VideoRequest For(string sentence, VideoQuality quality, PictureShape shape, long seed = -1, byte[]? startFrame = null)
+    public static VideoRequest For(string sentence, VideoQuality quality, PictureShape shape, long seed = -1, byte[]? startFrame = null, bool faster = false)
     {
         var (width, height) = SizeOf(quality, shape);
-        return new VideoRequest(sentence.Trim(), width, height, seed, DecoderOf(quality), startFrame);
+        return new VideoRequest(sentence.Trim(), width, height, seed, DecoderOf(quality), startFrame) { Faster = faster };
     }
 
     public static (int Width, int Height) SizeOf(VideoQuality quality, PictureShape shape) =>

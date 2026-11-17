@@ -364,7 +364,7 @@ else
     /// <summary>The shape used: the first frame's when there is one.</summary>
     private PictureShape Shape => Session.Frame?.Shape ?? _controls.Shape;
 
-    private VideoRequest Build() => VideoRequest.For(Session.Sentence, Quality, Shape, _controls.Seed ?? -1, Session.Frame?.Bytes);
+    private VideoRequest Build() => VideoRequest.For(Session.Sentence, Quality, Shape, _controls.Seed ?? -1, Session.Frame?.Bytes, _controls.Faster);
 
     private VideoEstimate Estimate() =>
         VideoEstimate.For(Build(), VideoEstimate.IsWarm(VideoProgram.LastMadeAt, DateTime.UtcNow, Engine.IsLoaded || Coordinator.IsRunning));

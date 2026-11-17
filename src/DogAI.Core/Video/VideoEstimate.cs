@@ -5,7 +5,7 @@ namespace DogAI.Core.Video;
 
 /// <summary>
 /// How long a clip is expected to take, in seconds, part by part. The numbers are the M20 trial's (docs/PLAN.md,
-/// "Trial results"): an RTX 4090 with the card cleared. Only drawing counts steps; the page runs its bar on
+/// "Trial results"), and the M21 trial's for the choice "Faster": an RTX 4090 with the card cleared. Only drawing counts steps; the page runs its bar on
 /// <see cref="Decoding"/> and <see cref="Encoding"/> for the two parts the engine reports no count for.
 /// </summary>
 /// <param name="Start">Starting the program and reading the model's files and the sentence.</param>
@@ -21,6 +21,19 @@ public sealed record VideoEstimate(double Start, double Drawing, double Decoding
     private static readonly (double Megapixels, double Seconds)[] OwnDecoder = [(0.40, 26), (0.61, 40), (0.90, 178), (1.01, 192)];
 
     private static readonly (double Megapixels, double Seconds)[] Encoder = [(0.40, 4), (0.61, 8.5), (0.90, 11), (1.01, 12.5)];
+
+    /// <summary>
+    /// What is left of the drawing time with the choice "Faster" (<see cref="VideoRequest.Faster"/>), by megapixels.
+    /// The M21 trial, whole clips of 20 steps: 0.58 to 0.64 of the plain drawing at Quick's size (960 × 640) and
+    /// 0.51 to 0.54 at Better's (1216 × 832); smaller sizes were not tried and are taken a little worse than Quick. It is a
+    /// share of the plain table and not a table of its own, so the two can never drift apart: 3.1 s a step at Quick
+    /// and 5.3 at Better. Start, decoding and encoding are untouched by it.
+    /// </summary>
+    private static readonly (double Megapixels, double Share)[] FasterDrawing = [(0.40, 0.65), (0.6144, 0.62), (1.0117, 0.53)];
+
+    /// <summary>The share of the plain drawing time a Faster clip of this size takes: between the sizes tried on a straight line, beyond them the nearest.</summary>
+    public static double FasterShare(double megapixels) =>
+        Math.Clamp(At(FasterDrawing, megapixels), FasterDrawing[^1].Share, FasterDrawing[0].Share);
 
     /// <summary>The fast decoder took one to two seconds at every size tried.</summary>
     private const double FastDecoder = 2;
@@ -61,7 +74,8 @@ public sealed record VideoEstimate(double Start, double Drawing, double Decoding
         var frames = request.Frames / (double)VideoRequest.FiveSeconds;
         return new VideoEstimate(
             (warm ? WarmStart : ColdStart) + (request.StartFrame is null ? 0 : StartFrame),
-            request.Steps * At(PerStep, megapixels) * length,
+            // With Faster the engine still reports every step (it skips 5 to 7 of 20 inside), so the bar counts as ever.
+            request.Steps * At(PerStep, megapixels) * length * (request.Faster ? FasterShare(megapixels) : 1),
             request.Decoder == VideoDecoder.Fast ? FastDecoder : At(OwnDecoder, megapixels) * frames,
             At(Encoder, megapixels) * frames);
     }

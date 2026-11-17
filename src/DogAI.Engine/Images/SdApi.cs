@@ -272,6 +272,14 @@ public sealed class SdApi(HttpClient http, int port)
         };
         // The first frame travels as bytes inside the request: never a path, never an address.
         if (request.StartFrame is { } frame) body["init_image"] = Convert.ToBase64String(frame);
+        // "Faster" (M21): the engine's block cache, with its settings written out. Added last and only then, so a
+        // plain clip's body is byte for byte what it was in M20. Never "end_image": the installed model ends such a
+        // clip on washed-out frames (the M21 trial), and DOG.ai has no end frame.
+        if (request.Faster)
+        {
+            body["cache_mode"] = VideoRequest.FasterCacheMode;
+            body["cache_option"] = VideoRequest.FasterCacheOption;
+        }
         return body;
     }
 

@@ -35,6 +35,7 @@ public sealed class SqliteClipStore(IDbContextFactory<DogDbContext> factory, Dat
         FlowShift = c.FlowShift,
         Decoder = c.Decoder,
         Compression = c.Compression,
+        Faster = c.Faster,
         Model = c.Model,
         Vae = c.Vae,
         TextEncoder = c.TextEncoder,

@@ -30,7 +30,7 @@ public static class ClipOwners
 /// </summary>
 /// <remarks>
 /// Files are named by their path inside their own folder, never by a full path. The three large values are the last
-/// columns of the table, the video last of all (the migration says why).
+/// columns of the table, the video last of all (the Clips migration says why; ClipsFaster shows how a column is added).
 /// </remarks>
 public sealed class Clip
 {
@@ -56,6 +56,12 @@ public sealed class Clip
     public double FlowShift { get; set; }
     public VideoDecoder Decoder { get; set; }
     public int Compression { get; set; }
+
+    /// <summary>
+    /// Made with the choice "Faster" (<see cref="VideoRequest.Faster"/>; M21). It changes the clip's frames, so it is
+    /// kept with the clip. False on every clip kept before M21.
+    /// </summary>
+    public bool Faster { get; set; }
 
     /// <summary>The model's four files, each as its path inside its own folder (<see cref="VideoFiles"/>).</summary>
     public string Model { get; set; } = "";
@@ -108,6 +114,7 @@ public sealed class Clip
             FlowShift = request.FlowShift,
             Decoder = request.Decoder,
             Compression = request.Compression,
+            Faster = request.Faster,
             Model = named.Model,
             Vae = named.Vae,
             TextEncoder = named.TextEncoder,
@@ -122,7 +129,7 @@ public sealed class Clip
 
     /// <summary>The request that makes this clip again: same seed, settings and first frame. Needs <see cref="StartFrame"/> read when the clip had one.</summary>
     public VideoRequest ToRequest() =>
-        new(Prompt, Width, Height, Seed, Decoder, StartFrame, NegativePrompt, Frames, Fps, Steps, Sampler, Guidance, FlowShift, Compression);
+        new(Prompt, Width, Height, Seed, Decoder, StartFrame, NegativePrompt, Frames, Fps, Steps, Sampler, Guidance, FlowShift, Compression) { Faster = Faster };
 
     /// <summary>The model to make it again with. <paramref name="videoRoot"/> is the video models folder as it is now.</summary>
     public VideoModel ModelIn(string videoRoot) => VideoFolders.ModelFor(videoRoot, Files);

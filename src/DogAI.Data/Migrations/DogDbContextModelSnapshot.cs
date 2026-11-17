@@ -776,6 +776,9 @@ namespace DogAI.Data.Migrations
                         .HasMaxLength(400)
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("Faster")
+                        .HasColumnType("INTEGER");
+
                     b.Property<double>("FlowShift")
                         .HasColumnType("REAL");
 

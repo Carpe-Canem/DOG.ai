@@ -200,9 +200,9 @@ public class VideoMakeTests : IDisposable
     {
         // In memory only: no store is given to it, and no constructor takes one.
         Assert.All(typeof(VideoSession).GetConstructors(), c => Assert.Empty(c.GetParameters()));
-        // What is remembered: three controls, never the sentence, the frame or a clip.
-        Assert.Equal(["Quality", "Seed", "Shape"], typeof(VideoChoices.VideoDocument).GetProperties().Select(p => p.Name).Order());
-        Assert.Equal(["Quality", "Seed", "Shape"], typeof(VideoControls).GetProperties().Select(p => p.Name).Order());
+        // What is remembered: four controls (Faster since M21), never the sentence, the frame or a clip.
+        Assert.Equal(["Faster", "Quality", "Seed", "Shape"], typeof(VideoChoices.VideoDocument).GetProperties().Select(p => p.Name).Order());
+        Assert.Equal(["Faster", "Quality", "Seed", "Shape"], typeof(VideoControls).GetProperties().Select(p => p.Name).Order());
     }
 
     [Fact]
