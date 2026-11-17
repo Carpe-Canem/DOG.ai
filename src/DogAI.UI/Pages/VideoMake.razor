@@ -187,6 +187,8 @@ else
                 <p class="small video-loose" id="video-loose">@VideoPanels.AboutFrame(Session.Frame)</p>
             }
             <div class="images-send">
+                <button class="btn" id="video-write" disabled="@Session.IsMaking" title="@(Session.IsMaking ? VideoWriting.WhileMaking : VideoWriting.ButtonTitle)"
+                        @onclick="() => _writerOpen = true">@VideoWriting.Button</button>
                 <span class="small images-status" id="video-status" role="status">@StatusText</span>
                 @if (Session.IsMaking)
                 {
@@ -263,8 +265,13 @@ else
     </AsideRegion>
 }
 
+@if (_writerOpen && !_kept && _ready && CanMake)
+{
+    <VideoWriterBox Blocked="@(Session.IsMaking ? VideoWriting.WhileMaking : null)" OnUse="UseWritten" OnClose="() => _writerOpen = false" />
+}
+
 @code {
-    private bool _ready, _keeping, _picking, _starting, _continuing;
+    private bool _ready, _keeping, _picking, _starting, _continuing, _writerOpen;
     private string? _root, _error, _note;
     private VideoLook? _look;
     private long? _cardTotal;
@@ -401,6 +408,15 @@ else
     }
 
     private static string Text(ChangeEventArgs e) => e.Value?.ToString() ?? "";
+
+    /// <summary>"Use this sentence" in Write it for me…: the helper's sentence replaces the box (there is one box).</summary>
+    private void UseWritten(string sentence)
+    {
+        Session.Type(sentence);
+        _writerOpen = false;
+        _error = null;
+        _note = VideoWriting.Used;
+    }
 
     private async Task SetAsync(VideoControls next)
     {

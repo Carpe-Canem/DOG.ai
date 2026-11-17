@@ -193,6 +193,40 @@ public sealed class VideoSession
         Changed?.Invoke();
     }
 
+    // ── "Write it for me…" (M21 step 4): the helper's words, its choice and its last sentence, memory only ──
+
+    /// <summary>What the owner typed in the helper's box (the words the sentence is written from). Never saved.</summary>
+    public string HelperWords { get; private set; } = "";
+
+    public void HelperSay(string words) => HelperWords = words ?? "";
+
+    private bool? _helperFrame;
+
+    /// <summary>
+    /// True when the helper writes from the first frame: as the owner chose, else whenever a first frame is held.
+    /// </summary>
+    public bool HelperFromFrame => _helperFrame ?? Frame is not null;
+
+    public void HelperFrom(bool frame)
+    {
+        if (_helperFrame == frame) return;
+        _helperFrame = frame;
+        Changed?.Invoke();
+    }
+
+    /// <summary>The helper's last sentence, until another is written or it is used. Memory only.</summary>
+    public VideoDraft? HelperDraft { get; private set; }
+
+    /// <summary>True when <see cref="HelperDraft"/> was written from the frame held: another frame lets it go.</summary>
+    public bool HelperDraftFromFrame { get; private set; }
+
+    public void HelperWrote(VideoDraft? draft, bool fromFrame = false)
+    {
+        HelperDraft = draft;
+        HelperDraftFromFrame = draft is not null && fromFrame;
+        Changed?.Invoke();
+    }
+
     /// <summary>
     /// Holds the picture the next clip starts from (null lets it go). The "Animate…" buttons (M20 step 5) and Make one
     /// like this hand their picture over through here. A picture just held is shown large in place of the clip shown
@@ -200,6 +234,8 @@ public sealed class VideoSession
     /// </summary>
     public void Hold(VideoFrame? frame)
     {
+        // A sentence the helper wrote from the frame held is not about another one.
+        if (!ReferenceEquals(frame, Frame) && HelperDraftFromFrame) (HelperDraft, HelperDraftFromFrame) = (null, false);
         Frame = frame;
         FrameShown = frame is not null;
         Changed?.Invoke();
