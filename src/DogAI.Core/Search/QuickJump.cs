@@ -102,6 +102,7 @@ public static class QuickJump
             new(JumpKind.Screen, "Images", "Make pictures from a prompt", Images.ImagesPanels.Address) { Main = true, Words = "pictures draw make prompt picture stable diffusion sdxl txt2img" },
             new(JumpKind.Screen, "Kept pictures", "Images", Images.ImagesPanels.KeptAddress) { Words = "images gallery saved pictures kept grid" },
             new(JumpKind.Screen, "Video", "Make a short clip from a sentence or a picture", Video.VideoPanels.Address) { Main = true, Words = "clip clips movie animate motion wan" },
+            new(JumpKind.Screen, "Kept videos", "Video", Video.VideoPanels.KeptAddress) { Words = "video clips saved kept gallery movie" },
             new(JumpKind.Screen, "Search", "Words inside chats and stories", "search") { Words = "find messages text" },
         };
         foreach (var place in ModelsPlaces.Groups.SelectMany(g => g.Places))

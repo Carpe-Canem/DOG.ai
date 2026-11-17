@@ -190,14 +190,22 @@ public sealed class VideoSession
     }
 
     /// <summary>
-    /// Holds the picture the next clip starts from (null lets it go). Step 5's "Animate…" buttons hand their picture
-    /// over through here.
+    /// Holds the picture the next clip starts from (null lets it go). The "Animate…" buttons (M20 step 5) and Make one
+    /// like this hand their picture over through here. A picture just held is shown large in place of the clip shown
+    /// (<see cref="Shown"/>) until a clip is picked or made.
     /// </summary>
     public void Hold(VideoFrame? frame)
     {
         Frame = frame;
+        FrameShown = frame is not null;
         Changed?.Invoke();
     }
+
+    /// <summary>True while the picture just held is shown large in place of a clip; picking a try or a new clip ends it.</summary>
+    public bool FrameShown { get; private set; }
+
+    /// <summary>The try shown large on the stage: none while the first frame just held is shown, else <see cref="Selected"/>.</summary>
+    public VideoTry? Shown => FrameShown && Frame is not null ? null : Selected;
 
     /// <summary>The tries, oldest first, as they are now: a list of its own that later changes do not touch.</summary>
     public IReadOnlyList<VideoTry> Tries => _shown;
@@ -252,6 +260,7 @@ public sealed class VideoSession
     public void Select(VideoTry shown)
     {
         _selected = shown;
+        FrameShown = false;
         Changed?.Invoke();
     }
 
@@ -385,6 +394,7 @@ public sealed class VideoSession
             }
             _selected = next;
             _shown = [.. _tries];
+            FrameShown = false;
         }
         Changed?.Invoke();
     }
@@ -451,6 +461,68 @@ public static class VideoPanels
 {
     /// <summary>The Make tab's address.</summary>
     public const string Address = "video";
+
+    /// <summary>The Kept videos tab's address (a second route of the same page, so a clip being made goes on while it is open).</summary>
+    public const string KeptAddress = "video/kept";
+
+    /// <summary>The two tabs in the header, as (address, title).</summary>
+    public static readonly IReadOnlyList<(string Id, string Title)> Tabs = [(Address, "Make"), (KeptAddress, "Kept videos")];
+
+    /// <summary>The short note in the side panel of the Kept videos tab (in place of the controls).</summary>
+    public const string KeptAbout = "Kept inside DOG.ai, and locked with the rest when the lock is on. A video leaves only through Save as a file.";
+
+    // Where a first frame came from, as the Make tab says it ("From a kept picture · Wide · 1216 × 832").
+    public const string FromFile = "a file", FromTry = "a picture in Images", FromKeptPicture = "a kept picture",
+        FromPortrait = "the portrait", FromStory = "a story picture", FromChat = "a chat picture", FromKeptVideo = "the kept video";
+
+    /// <summary>Where a picture that had to be cut came from: "a kept picture, cut to wide".</summary>
+    public static string CutFrom(string from, PictureShape shape) => $"{from}, cut to {shape.ToString().ToLowerInvariant()}";
+
+    /// <summary>The note on the Make tab after a picture was handed over to start a clip.</summary>
+    public static string Arrived(VideoFrame frame) =>
+        $"The clip will start from {frame.From}. Say below what moves, then press Draw.";
+
+    /// <summary>
+    /// The line under the grid: "3 kept videos", "30 kept videos · showing 24", or what it says when there is nothing.
+    /// </summary>
+    public static string KeptCount(int total, int shown)
+    {
+        if (total <= 0) return "No kept videos yet. Clips you keep on the Make tab show here.";
+        var count = total.ToString("N0", CultureInfo.InvariantCulture);
+        var head = total == 1 ? "1 kept video" : $"{count} kept videos";
+        return shown < total ? $"{head} · showing {shown.ToString("N0", CultureInfo.InvariantCulture)}" : head;
+    }
+
+    /// <summary>
+    /// The facts of a kept clip in its large view: "960 × 640 · 5 s · Quick · seed 123 · from a picture · 2.4 MB · kept
+    /// 17 Nov 2026, 14:03". <paramref name="keptLocal"/> is when it was kept, in local time.
+    /// </summary>
+    public static string KeptMeta(Clip c, DateTime keptLocal)
+    {
+        var request = c.ToRequest();
+        var parts = new List<string>
+        {
+            $"{c.Width} × {c.Height}",
+            request.Seconds.ToString("0.#", CultureInfo.InvariantCulture) + " s",
+        };
+        if (request.Level is { } level) parts.Add(level.Quality.ToString());
+        parts.Add("seed " + c.Seed.ToString(CultureInfo.InvariantCulture));
+        if (c.HasStartFrame) parts.Add("from a picture");
+        parts.Add((c.VideoBytes / 1_000_000.0).ToString("0.0", CultureInfo.InvariantCulture) + " MB");
+        parts.Add("kept " + keptLocal.ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture));
+        return string.Join(" · ", parts);
+    }
+
+    /// <summary>The note on the Make tab after Make one like this.</summary>
+    public static string PutBack(VideoLike like, bool betterOffered)
+    {
+        var seed = like.Controls.Seed?.ToString(CultureInfo.InvariantCulture) ?? "?";
+        var what = like.Frame is null ? "sentence, quality, shape and seed" : "sentence, first frame, quality, shape and seed";
+        var line = $"The kept video’s {what} ({seed}) are back: Draw makes the same clip. Press New seed under Seed for new ones.";
+        return like.Controls.Quality == VideoQuality.Better && !betterOffered
+            ? line.Replace("Draw makes the same clip", "it was made at Better, which this card cannot make, so Draw makes it at Quick", StringComparison.Ordinal)
+            : line;
+    }
 
     /// <summary>Said where the first frame is chosen and shown (the M20 trial: a closed smile became a grin by the middle).</summary>
     public const string FollowsLoosely = "A clip follows its first frame only loosely: a face in particular can change as it moves.";
@@ -537,4 +609,33 @@ public static class VideoPanels
     /// <summary>The note after a clip: how long it took against what was said before.</summary>
     public static string Done(VideoTry t) =>
         $"Made in {Duration(t.Took)} (the estimate said {Duration(TimeSpan.FromSeconds(t.Expected))}).";
+}
+
+/// <summary>
+/// Kept videos › "Make one like this": what goes back onto the Make tab from a kept clip, so that Draw makes the same
+/// clip again: its sentence, its quality and shape (told from its size), its seed and its first frame.
+/// </summary>
+/// <param name="Frame">The first frame to hold, or null for a clip made from the sentence alone (any frame held is let go).</param>
+public sealed record VideoLike(string Sentence, VideoControls Controls, VideoFrame? Frame)
+{
+    /// <summary>
+    /// What a kept clip puts back, or why it cannot. The clip must have been read with its first frame
+    /// (<see cref="IClipStore.GetAsync"/>) when it had one.
+    /// </summary>
+    public static (VideoLike? Like, string? Problem) Of(Clip clip)
+    {
+        var request = clip.ToRequest();
+        var (quality, shape) = request.Level ?? (request.Decoder == VideoDecoder.Own ? VideoQuality.Better : VideoQuality.Quick, VideoFrames.Nearest(clip.Width, clip.Height));
+        VideoFrame? frame = null;
+        if (clip.HasStartFrame)
+        {
+            if (clip.StartFrame is not { } bytes) return (null, "Its first frame could not be read.");
+            var (held, problem) = VideoFrame.Of(bytes, VideoPanels.FromKeptVideo);
+            if (held is null) return (null, "Its first frame cannot start a clip: " + problem);
+            frame = held;
+            shape = held.Shape;
+        }
+        var seed = clip.Seed is >= 0 and <= SeedChoice.Highest ? clip.Seed : (long?)null;
+        return (new VideoLike(clip.Prompt, new VideoControls(quality, shape, seed), frame), null);
+    }
 }

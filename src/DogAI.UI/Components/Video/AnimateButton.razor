@@ -1,0 +1,143 @@
+@* "Animate…" (M20 step 5): a button wherever a picture lives (an Images try, a kept picture, a portrait in the
+   character and persona editors, a story or chat picture's large view). It hands the picture to the Video section's
+   Make tab as the first frame of the next clip (VideoSession.Hold) and opens it. The picture there is a new thing beside
+   this one: nothing here changes. A picture VideoFrame.Of takes as it is (a WebP DOG.ai drew, of one of the three
+   shapes) goes as it is; anything else (a PNG portrait, another shape, a picture larger than the engine takes) is cut
+   by the page to the nearest shape, as a file is (attach.js openFrameBytes, VideoFrames.Cut, cutFrame).
+   Renders nothing while clips cannot be made here (no video model, no picture engine), so without the video model
+   every screen is as it was before M20. *@
+@implements IDisposable
+@inject VideoSession Session
+@inject ISettingsStore SettingsStore
+@inject DownloadManager Downloads
+@inject SdServerLocator PictureLocator
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+
+@if (_available)
+{
+    <button type="button" class="@Class" id="@Id" disabled="@(Blocked is not null || _working)"
+            title="@(Blocked ?? "Make a short video that starts with this picture. It opens Video; the picture stays as it is.")"
+            @onclick="AnimateAsync">@(_working ? "Opening Video…" : "Animate…")</button>
+    @if (_problem is not null)
+    {
+        <span class="small bad-text animate-problem" id="@($"{Id}-problem")" role="alert">@_problem</span>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public string Id { get; set; } = "";
+
+    /// <summary>The picture's bytes, read when the button is pressed (a kept row's image is read only then); null when it is gone.</summary>
+    [Parameter, EditorRequired] public Func<Task<byte[]?>> Picture { get; set; } = null!;
+
+    /// <summary>Where it comes from, in words for the Make tab (one of <see cref="VideoPanels"/>' From… lines).</summary>
+    [Parameter, EditorRequired] public string From { get; set; } = "";
+
+    /// <summary>Why it cannot be pressed now (leaving the page would stop something), or null.</summary>
+    [Parameter] public string? Blocked { get; set; }
+
+    [Parameter] public string Class { get; set; } = "btn";
+
+    private bool _available, _working, _disposed;
+    private string? _problem;
+    private IJSObjectReference? _attach;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Downloads.Completed += OnCompleted;
+        await LookAsync();
+    }
+
+    private async Task LookAsync()
+    {
+        if (PictureLocator.Find() is null)
+        {
+            _available = false;
+            return;
+        }
+        var root = (await SettingsStore.LoadAsync()).VideoFolder();
+        var arriving = VideoDownloadJobs.Arriving(Downloads.Jobs, root);
+        // Headers are read once per file (VideoLibrary keeps them by size and date); the files are only looked at here.
+        _available = (await Task.Run(() => VideoLibrary.Look(root, arriving))).Ready;
+    }
+
+    private void OnCompleted(DownloadJob job)
+    {
+        if (job.UseCase != VideoDownloads.UseCase || _disposed) return;
+        _ = InvokeAsync(async () => { await LookAsync(); StateHasChanged(); });
+    }
+
+    private async Task AnimateAsync()
+    {
+        if (Blocked is not null || _working) return;
+        _working = true;
+        _problem = null;
+        try
+        {
+            if (Session.IsMaking)
+            {
+                _problem = "A clip is being made in Video. Wait for it, or cancel it there.";
+                return;
+            }
+            var bytes = await Picture();
+            if (bytes is null || bytes.Length == 0)
+            {
+                _problem = "That picture is not there any more.";
+                return;
+            }
+            var (frame, problem) = await FrameAsync(bytes);
+            if (frame is null)
+            {
+                _problem = "That picture cannot start a video. " + problem;
+                return;
+            }
+            Session.Hold(frame);
+            Nav.NavigateTo(VideoPanels.Address);
+        }
+        finally
+        {
+            _working = false;
+        }
+    }
+
+    /// <summary>The picture as it is when it can start a clip so; else cut by the page from its middle to the nearest shape.</summary>
+    private async Task<(VideoFrame? Frame, string? Problem)> FrameAsync(byte[] bytes)
+    {
+        if (VideoFrame.Of(bytes, From).Frame is { } asItIs) return (asItIs, null);
+        try
+        {
+            _attach ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/attach.js");
+            var size = await _attach.InvokeAsync<int[]?>("openFrameBytes", bytes, ComposerPictures.MaxFileBytes);
+            if (size is not { Length: 2 }) return (null, "It is not a picture DOG.ai can open (" + ComposerPictures.Kinds + ").");
+            var cut = VideoFrames.Cut(size[0], size[1]);
+            var jpeg = await _attach.InvokeAsync<byte[]?>("cutFrame", cut.X, cut.Y, cut.Width, cut.Height, cut.OutWidth, cut.OutHeight, AttachedPictures.Quality);
+            // "cut to wide" only when it lost more than a sliver: a tall picture a few pixels off Tall's shape was not cut to it.
+            var from = VideoStartFrame.SameShape(size[0], size[1], cut.OutWidth, cut.OutHeight) ? From : VideoPanels.CutFrom(From, cut.Shape);
+            return VideoFrame.Of(jpeg, from);
+        }
+        catch (JSException)
+        {
+            return (null, "It could not be read.");
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Downloads.Completed -= OnCompleted;
+        if (_attach is not null) _ = DropAsync(_attach);
+    }
+
+    private static async Task DropAsync(IJSObjectReference module)
+    {
+        try
+        {
+            await module.InvokeVoidAsync("dropFrame");
+            await module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException or TaskCanceledException)
+        {
+        }
+    }
+}

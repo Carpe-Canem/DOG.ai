@@ -786,6 +786,17 @@ button.cite:hover { border-color: var(--accent); }
 .video-fold .seg + .small { margin-top: 6px; }
 .video-missing { max-width: 760px; margin: 24px auto; display: grid; gap: 8px; }
 @media (max-width: 520px) { .video-tries .video-try-n { width: auto; height: 88px; } }
+/* Video › Kept videos (M20 step 5): the Kept pictures grid with stills, a small mark saying each is a video, and a
+   large view that plays. */
+.kept-clip { position: relative; aspect-ratio: 4 / 3; }
+/* Placed over the whole cell: in a grid cell of its own a tall still took its natural height and was cut off. */
+.kept-clip img { position: absolute; inset: 0; }
+.kept-clip-mark { position: absolute; left: 6px; bottom: 6px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--surface); color: var(--accent); box-shadow: 0 0 0 1px var(--line); }
+.kept-clip-view video.picture-large { background: #000; }
+.kept-clip-frame-row { display: flex; gap: 10px; align-items: center; }
+.kept-clip-frame { height: 56px; width: auto; max-width: 120px; object-fit: cover; border-radius: min(var(--r), 6px); border: 1px solid var(--line); }
+.animate-problem { flex-basis: 100%; }
 /* A short window: the boxes start two lines and one line high (they can still be dragged taller), so the picture keeps room. */
 @media (max-height: 720px) { #images-prompt { height: calc(2.9em + 14px); } #images-negative { height: calc(1.45em + 14px); } .images-stage { min-height: 220px; } }
 

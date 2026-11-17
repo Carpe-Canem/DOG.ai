@@ -124,6 +124,8 @@ else
                         @onclick="() => UseSettingsAsync(shown)">Use these settings</button>
                 <button class="btn" id="images-upscale" disabled="@Session.IsDrawing" title="Make a larger picture from this one, as a new try beside it"
                         @onclick="() => OpenUpscale(UpscaleSource.Of(shown), kept: false)">Upscale…</button>
+                <AnimateButton Id="images-animate" Picture="() => Task.FromResult<byte[]?>(shown.Image)" From="@VideoPanels.FromTry"
+                               Blocked="@(Session.IsDrawing ? "A Draw is going on. Wait for it, or cancel it: leaving Images stops it." : null)" />
                 <button class="btn" id="images-save" title="Save this picture as a WebP file" @onclick="() => SaveFileAsync(shown)">Save as a file…</button>
             </div>
         }

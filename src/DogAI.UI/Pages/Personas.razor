@@ -47,6 +47,10 @@
                 <button class="btn" id="generate-picture" title="Plan and draw a picture of you with the picture engine" @onclick="() => _making = true">Generate picture</button>
                 @if (_form.Avatar is not null)
                 {
+                    <AnimateButton Id="portrait-animate" Picture="() => Task.FromResult(_form.Avatar)" From="@VideoPanels.FromPortrait" Blocked="@AnimateBlocked()" />
+                }
+                @if (_form.Avatar is not null)
+                {
                     <button class="btn" @onclick="RemovePicture">Remove</button>
                 }
             </div>
@@ -174,6 +178,18 @@
         _portrait = null;
         _portraitReplaced = false;
         _making = false;
+    }
+
+    /// <summary>
+    /// Animate… opens Video, and this page keeps nothing that is not saved when it is left (unlike the character
+    /// editor, which holds its typing): so the persona's picture is animated only when nothing here is unsaved.
+    /// </summary>
+    private string? AnimateBlocked()
+    {
+        var saved = _personas.FirstOrDefault(p => p.Id == _form.Id);
+        var unsaved = _form.Id == 0 || saved is null || _portraitReplaced || _form.Name != saved.Name || _form.Description != saved.Description
+            || _form.IsDefault != saved.IsDefault || !ReferenceEquals(_form.Avatar, saved.Avatar) || _looks != DogAI.Core.Images.Looks.Of(saved);
+        return unsaved ? "Save the persona first: leaving this page lets go of what is not saved." : null;
     }
 
     private void Cropped(byte[] avatar)

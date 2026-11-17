@@ -116,6 +116,8 @@
                     @onclick="() => WriteAsync(viewed)">Write a prompt from it…</button>
             <button class="btn" id="kept-upscale" disabled="@(UpscaleBlocked is not null || _busy)" title="@(UpscaleBlocked ?? "Make a larger picture from this one; it is kept as a new picture beside this one")"
                     @onclick="() => UpscaleAsync(viewed)">Upscale…</button>
+            <AnimateButton Id="kept-animate" Picture="() => Task.FromResult(viewed.Image)" From="@VideoPanels.FromKeptPicture"
+                           Blocked="@(Drawing is not null ? "A Draw is going on in Make. Wait for it, or cancel it there: leaving Images stops it." : _busy ? "Wait a moment." : null)" />
             <button class="btn" id="kept-save" disabled="@_busy" title="Save this picture as a WebP file" @onclick="() => SaveAsync(viewed)">Save as a file…</button>
             @if (_confirmRemove)
             {

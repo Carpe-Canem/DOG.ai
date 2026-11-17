@@ -15,6 +15,8 @@
         <div class="row">
             <button class="btn primary" id="picture-redraw" disabled="@Chat.IsBusy" title="Opens the picture maker with this picture: try again, change it and draw it again, or plan a new one"
                     @onclick="() => RedrawFromView(viewed)">Redraw</button>
+            <AnimateButton Id="picture-animate" Picture="() => ImageOf(viewed)" From="@(What == "passage" ? VideoPanels.FromStory : VideoPanels.FromChat)"
+                           Blocked="@(Chat.IsBusy ? "Wait for the reply to finish." : null)" />
             @if (_confirmRemove)
             {
                 <button class="btn danger" id="picture-remove-yes" @onclick="() => RemoveAsync(viewed)">Yes, remove it</button>
@@ -81,6 +83,9 @@
 
     /// <summary>The picture a message shows, as a data: address; null when it has none or its row is gone.</summary>
     public string? Src(ChatMessage m) => Illustrations.Shown(m) is { } id ? _pictures.GetValueOrDefault(id) : null;
+
+    /// <summary>The picture a message shows, read with its image for Animate… (only data: addresses are held here).</summary>
+    private async Task<byte[]?> ImageOf(ChatMessage m) => Illustrations.Shown(m) is { } id ? await Pictures.ImageAsync(id) : null;
 
     private string Meta(ChatMessage m) => Illustrations.Shown(m) is { } id ? _meta.GetValueOrDefault(id) ?? "" : "";
 

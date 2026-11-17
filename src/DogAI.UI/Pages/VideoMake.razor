@@ -1,4 +1,5 @@
 @page "/video"
+@page "/video/kept"
 @using System.Globalization
 @implements IDisposable
 @inject VideoSession Session
@@ -14,31 +15,44 @@
 @inject DownloadManager Downloads
 @inject IDesktopShell Desktop
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 @* The Video section (M20 step 4), modelled on the Images section's Make tab: the clip fills the page with the strip of
    tries beside it, the sentence and the first frame sit where the chat box is, and the three controls are folds in the
    side panel. The sentence, the frame and the tries live in VideoSession (memory only); the controls are remembered by
    VideoChoices; a clip reaches the disk only through Keep. A clip is played from a blob: address made from its bytes
-   (video.js), let go when another is shown or the page closes. Step 5 adds Kept videos as a second address of this
-   page, so that going from tab to tab keeps a clip being made. *@
+   (video.js), let go when another is shown or the page closes. Kept videos (step 5, video/kept) is KeptVideos: both
+   addresses are this one page, so going from tab to tab keeps a clip being made; the tab is told from the address. *@
 
 <SectionContent SectionName="title">
     <div class="head-row">
         <div class="head-text">
             <h2>Video</h2>
-            <p>Make a short clip from a sentence or a picture</p>
+            <p>@(_kept ? "The videos you kept" : "Make a short clip from a sentence or a picture")</p>
         </div>
+        <PageTabs Class="images-tabs" Label="Video" Current="@(_kept ? VideoPanels.KeptAddress : VideoPanels.Address)"
+                  Items="@VideoPanels.Tabs" Href="@(id => id)" />
         <div class="head-tools">
-            @if (_ready && CanMake)
+            @if (_kept || (_ready && CanMake))
             {
-                @* No side panel without the model (as On this PC › Voice): no opener for an empty drawer. *@
-                <AsideToggle Place="video" Hideable="false" Label="Open the video settings" />
+                @* No side panel on Make without the model (as On this PC › Voice): no opener for an empty drawer. *@
+                <AsideToggle Place="video" Hideable="false" Label="@(_kept ? "About kept videos" : "Open the video settings")" />
             }
         </div>
     </div>
 </SectionContent>
 
-@if (!_ready)
+@if (_kept)
+{
+    <KeptVideos Like="LikeFromKeptAsync" LikeBlocked="@LikeBlocked" Making="@(Session.IsMaking ? StatusText : null)" />
+    <AsideRegion Place="video" Hideable="false" Title="Video">
+        <section class="panel images-about" id="video-kept-about">
+            <h4>Kept videos</h4>
+            <p class="small">@VideoPanels.KeptAbout</p>
+        </section>
+    </AsideRegion>
+}
+else if (!_ready)
 {
     <p class="note" id="video-looking">Looking at the video model…</p>
 }
@@ -50,7 +64,7 @@ else if (!CanMake)
 }
 else
 {
-    var shown = Session.Selected;
+    var shown = Session.Shown;
     var making = Session.IsMaking;
     var live = making && Session.Preview is not null;
     <div class="images-make video-make" id="video-make">
@@ -138,7 +152,7 @@ else
     </div>
 }
 
-@if (_ready && CanMake)
+@if (!_kept && _ready && CanMake)
 {
     <SectionContent SectionName="composer">
         <div class="images-composer video-composer" id="video-composer">
@@ -257,8 +271,48 @@ else
     private bool CanMake => _look is { Ready: true } && _engine is not null && _root is not null;
     private string? _engine;
 
+    /// <summary>True on the Kept videos tab (video/kept).</summary>
+    private bool _kept;
+
+    private bool KeptAddress() =>
+        Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/').Equals(VideoPanels.KeptAddress, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Going from one tab to the other keeps this page (both addresses are this page), so nothing calls it again: the tab
+    /// follows the address. The player leaves the page with the Make tab, so its clip is let go first, while the element
+    /// is still there; coming back, the clip shown is given to the new player.
+    /// </summary>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        var kept = KeptAddress();
+        if (kept == _kept) return;
+        _ = InvokeAsync(async () =>
+        {
+            if (kept) await ReleasePlayerAsync();
+            _kept = kept;
+            StateHasChanged();
+        });
+    }
+
+    private async Task ReleasePlayerAsync()
+    {
+        if (_playing is null || _video is null) return;
+        _playing = null;
+        try
+        {
+            await _video.InvokeVoidAsync("release", _player);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+        }
+    }
+
     protected override async Task OnInitializedAsync()
     {
+        _kept = KeptAddress();
+        Nav.LocationChanged += OnLocationChanged;
+        // A picture handed over by an Animate… button (or Make one like this) is shown large: say what happens next.
+        if (!_kept && Session.FrameShown && Session.Frame is { } held && !Session.IsMaking) _note = VideoPanels.Arrived(held);
         Session.Changed += Refresh;
         Engine.Changed += Refresh;
         Downloads.Completed += OnDownloaded;
@@ -500,6 +554,36 @@ else
         }
     }
 
+    // ── Kept videos › Make one like this ──
+
+    /// <summary>Why Make one like this cannot be pressed now, or null.</summary>
+    private string? LikeBlocked =>
+        Session.IsMaking ? "A clip is being made in Make. Wait for it, or cancel it there."
+        : _ready && !CanMake ? "Clips cannot be made on this PC now: the Make tab says what is missing."
+        : null;
+
+    /// <summary>
+    /// Kept videos › "Make one like this": the clip's sentence, quality, shape, seed and first frame back on the Make tab
+    /// (<see cref="VideoLike"/>), so Draw makes the same clip. Returns what stopped it (said in the large view), or null.
+    /// </summary>
+    private async Task<string?> LikeFromKeptAsync(Clip kept)
+    {
+        if (LikeBlocked is { } blocked) return blocked;
+        // The large view read it with its first frame; read again only if it was not.
+        var clip = kept.HasStartFrame && kept.StartFrame is null ? await Clips.GetAsync(kept.Id) ?? kept : kept;
+        var (like, problem) = VideoLike.Of(clip);
+        if (like is null) return problem;
+        Session.Type(like.Sentence);
+        Session.Hold(like.Frame);
+        await SetAsync(like.Controls);
+        _seed = like.Controls.Seed is null ? SeedChoice.New : SeedChoice.Keep;
+        _error = null;
+        // Shown large is the first frame, when there is one; a clip from a sentence shows whatever was shown.
+        Nav.NavigateTo(VideoPanels.Address);
+        _note = VideoPanels.PutBack(like, VideoMemory.CardCanMake(_cardTotal, VideoQuality.Better));
+        return null;
+    }
+
     // ── The player ──
 
     private async Task PauseAsync()
@@ -520,9 +604,9 @@ else
     /// </summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        var shown = _ready && CanMake && !Session.IsMaking ? Session.Selected : null;
+        var shown = !_kept && _ready && CanMake && !Session.IsMaking ? Session.Shown : null;
         if (ReferenceEquals(shown?.Result, _playing)) return;
-        if (!CanMake)
+        if (_kept || !CanMake)
         {
             // The player is gone with the stage: nothing is held for it any more.
             _playing = null;
@@ -552,6 +636,7 @@ else
 
     public void Dispose()
     {
+        Nav.LocationChanged -= OnLocationChanged;
         Session.Changed -= Refresh;
         Engine.Changed -= Refresh;
         Downloads.Completed -= OnDownloaded;
@@ -567,6 +652,8 @@ else
         try
         {
             await module.InvokeVoidAsync("release", player);
+            // The player may already be gone from the page (then release finds nothing): let go of anything left.
+            await module.InvokeVoidAsync("releaseGone");
             await module.DisposeAsync();
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException or TaskCanceledException)

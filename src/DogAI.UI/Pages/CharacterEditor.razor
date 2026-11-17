@@ -86,6 +86,11 @@
                     <div class="row">
                         <button class="btn" @onclick="PickPictureAsync">@(_c.Avatar is null ? "Add picture" : "Change")</button>
                         <button class="btn" id="generate-picture" title="Plan and draw a picture of them with the picture engine" @onclick="() => _making = true">Generate picture</button>
+                        @if (_c.Image is not null || _c.Avatar is not null)
+                        {
+                            @* The picture as it is in the editor, saved or not (as Looks from the portrait takes it); typing is held on leaving. *@
+                            <AnimateButton Id="portrait-animate" Picture="() => Task.FromResult(_c.Image ?? _c.Avatar)" From="@VideoPanels.FromPortrait" />
+                        }
                         @if (_c.Image is not null)
                         {
                             <button class="btn" @onclick="() => _cropping = true" title="Choose the part shown in lists and chats">Crop</button>

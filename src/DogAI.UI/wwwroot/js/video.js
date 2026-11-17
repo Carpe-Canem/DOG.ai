@@ -2,15 +2,19 @@
 // address from those bytes and lets it go again as soon as another clip is shown or the page closes (the page's
 // content rules refuse data: addresses for video). Nothing is written to a file.
 
-const addresses = new WeakMap();
+// Every address made, by its element. A Map (not a WeakMap) so that releaseGone can find addresses whose element left
+// the page before it was told to let go (a dialog closed by leaving the page).
+const addresses = new Map();
 
 function forget(el) {
   const url = addresses.get(el);
   if (!url) return;
   addresses.delete(el);
-  el.pause();
-  el.removeAttribute('src');
-  el.load();
+  try {
+    el.pause();
+    el.removeAttribute('src');
+    el.load();
+  } catch { }
   URL.revokeObjectURL(url);
 }
 
@@ -32,6 +36,14 @@ export function pause(el) {
 // Lets the clip shown in the element go.
 export function release(el) {
   if (el) forget(el);
+}
+
+// Lets go of every clip whose element is no longer on the page. Called as a component goes; the page may take the
+// element away a moment after, so it looks again a second later.
+export function releaseGone() {
+  const sweep = () => { for (const el of [...addresses.keys()]) if (!el.isConnected) forget(el); };
+  sweep();
+  setTimeout(sweep, 1000);
 }
 
 // The still a clip is listed with: its first frame as a small WebP of the clip's own shape (PicturePreview's rules).

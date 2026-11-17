@@ -1,0 +1,380 @@
+@using System.Globalization
+@implements IAsyncDisposable
+@inject IClipStore Clips
+@inject VideoSession Session
+@inject IDesktopShell Desktop
+@inject IJSRuntime JS
+
+@* The Video section's Kept videos tab (M20 step 5), modelled on Images › Kept pictures: the clips kept on the Make tab
+   (owner kind Video only), newest first, a page at a time, as their stills. A clip opens large and plays (from a blob:
+   address made from its bytes, let go when it closes or another opens), with Make one like this, Save as a file… and
+   Remove. Stills are shown from memory (data: addresses made once per clip), never from a file. *@
+
+<div class="kept kept-videos" id="kept-videos">
+    @if (Making is { } making)
+    {
+        <p class="small kept-drawing" id="kept-videos-making" role="status">@making · <a class="link-text" href="@VideoPanels.Address">Make</a></p>
+    }
+
+    @if (_error is { } error)
+    {
+        <div class="notice bad" id="kept-videos-error"><span>@error</span></div>
+    }
+    @if (_note is { } note)
+    {
+        <p class="small kept-note" id="kept-videos-note" role="status">@note</p>
+    }
+
+    @if (!_loaded)
+    {
+        <p class="note">Reading the kept videos…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <div class="kept-empty" id="kept-videos-none">
+            <Icon Name="video" Size="40" />
+            <p>@VideoPanels.KeptCount(0, 0)</p>
+        </div>
+    }
+    else
+    {
+        <div class="kept-grid" id="kept-videos-grid" role="list" aria-label="Kept videos">
+            @foreach (var c in _items)
+            {
+                var item = c;
+                var shape = VideoFrames.Nearest(item.Width, item.Height);
+                <button class="kept-item kept-clip" role="listitem" data-clip="@item.Id" data-shape="@shape" title="@Short(item.Prompt)" @onclick="() => OpenAsync(item.Id)">
+                    @if (_src.TryGetValue(item.Id, out var src))
+                    {
+                        <img src="@src" alt="@($"Kept video {item.Id}")" loading="lazy" />
+                    }
+                    else
+                    {
+                        <span class="kept-noprev small">@(_failed.Contains(item.Id) ? "No still" : "…")</span>
+                    }
+                    <span class="kept-clip-mark" aria-hidden="true"><Icon Name="video" Size="14" /></span>
+                </button>
+            }
+        </div>
+    }
+    @if (_loaded)
+    {
+        <div class="kept-foot">
+            @if (_items.Count > 0)
+            {
+                <span class="small" id="kept-videos-count">@VideoPanels.KeptCount(_total, _items.Count)</span>
+            }
+            @if (_hasMore)
+            {
+                <button class="btn" id="kept-videos-more" disabled="@_loading" @onclick="MoreAsync">Show more</button>
+            }
+        </div>
+    }
+</div>
+
+@if (_viewing is { } viewed)
+{
+    <Modal Title="Kept video" Class="wide picture-view kept-view kept-clip-view" OnClose="CloseAsync">
+        <video class="picture-large kept-clip-player" id="kept-clip-player" @ref="_player" loop playsinline controls muted
+               style="@($"aspect-ratio:{viewed.Width}/{viewed.Height}")" aria-label="@($"Kept video {viewed.Id}")"></video>
+        <p class="small kept-meta" id="kept-clip-meta">@VideoPanels.KeptMeta(viewed, Local(viewed.CreatedAt))</p>
+        <div class="kept-prompts">
+            <div><span class="field-label">Sentence</span><p class="kept-text" id="kept-clip-sentence">@viewed.Prompt</p></div>
+            @if (_frameSrc is { } frame)
+            {
+                <div class="kept-clip-frame-row"><span class="field-label">First frame</span>
+                    <img class="kept-clip-frame" id="kept-clip-frame" src="@frame" alt="The picture the video started from" /></div>
+            }
+        </div>
+        @if (_viewError is { } viewError)
+        {
+            <div class="notice bad" id="kept-clip-error"><span>@viewError</span></div>
+        }
+        <div class="row kept-acts">
+            <button class="btn primary" id="kept-clip-like" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? "Its sentence, first frame, quality, shape and seed go to the Make tab: Draw makes the same clip")"
+                    @onclick="() => LikeAsync(viewed)">Make one like this</button>
+            <button class="btn" id="kept-clip-save" disabled="@_busy" title="Save this video as a WebM file" @onclick="() => SaveAsync(viewed)">Save as a file…</button>
+            @if (_confirmRemove)
+            {
+                <button class="btn danger" id="kept-clip-remove-yes" disabled="@_busy" @onclick="() => RemoveAsync(viewed)">Yes, remove it</button>
+                <button class="btn" id="kept-clip-remove-no" @onclick="() => _confirmRemove = false">Keep it</button>
+            }
+            else
+            {
+                <button class="btn" id="kept-clip-remove" disabled="@_busy" title="Remove it from DOG.ai; it cannot be brought back" @onclick="() => _confirmRemove = true">Remove</button>
+            }
+            <span class="kept-step">
+                <button class="btn" id="kept-clip-prev" disabled="@(Neighbour(viewed.Id, -1) is null || _busy)" title="The newer video" aria-label="The newer video" @onclick="() => StepAsync(viewed.Id, -1)">‹</button>
+                <button class="btn" id="kept-clip-next" disabled="@(Neighbour(viewed.Id, 1) is null || _busy)" title="The older video" aria-label="The older video" @onclick="() => StepAsync(viewed.Id, 1)">›</button>
+            </span>
+        </div>
+        @if (_confirmRemove)
+        {
+            <p class="small bad-text" id="kept-clip-remove-note">The video, its first frame and its sentence leave DOG.ai for good. Save it as a file first to keep a copy.</p>
+        }
+    </Modal>
+}
+
+@code {
+    /// <summary>"Make one like this": puts the clip on the Make tab; returns what stopped it, or null when done.</summary>
+    [Parameter, EditorRequired] public Func<Clip, Task<string?>> Like { get; set; } = null!;
+
+    /// <summary>Why Make one like this cannot be pressed now (a clip being made, no model), or null.</summary>
+    [Parameter] public string? LikeBlocked { get; set; }
+
+    /// <summary>What a clip being made on the Make tab says, or null.</summary>
+    [Parameter] public string? Making { get; set; }
+
+    private readonly List<Clip> _items = [];
+    private int _total;
+    private bool _hasMore, _loaded, _loading, _busy, _confirmRemove, _disposed;
+    private int _version;
+    private string? _error, _note, _viewError, _frameSrc;
+    private Clip? _viewing;
+    private ElementReference _player;
+    private IJSObjectReference? _video;
+
+    /// <summary>The clip the player holds now, or null; the player gets bytes only when this changes.</summary>
+    private long? _playing;
+
+    // Each clip's still as a data: address, made once per clip (never per render), and the stills being made.
+    private readonly Dictionary<long, string> _src = [];
+    private readonly HashSet<long> _failed = [], _repairing = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync(reset: true);
+
+    /// <summary>Reads a page. A reset starts again from the newest; otherwise the next page is added. A page that arrives after a newer question is dropped.</summary>
+    private async Task LoadAsync(bool reset)
+    {
+        var mine = ++_version;
+        _loading = true;
+        try
+        {
+            var page = await Clips.PageAsync(ClipOwners.Video, ClipOwners.VideoOwner, reset ? 0 : _items.Count);
+            if (mine != _version || _disposed) return;
+            if (reset) _items.Clear();
+            _items.AddRange(page.Clips.Where(c => _items.All(i => i.Id != c.Id)));
+            _total = page.Total;
+            _hasMore = page.HasMore;
+            foreach (var c in page.Clips)
+            {
+                if (c.Still is { } still) _src.TryAdd(c.Id, "data:image/webp;base64," + Convert.ToBase64String(still));
+                c.Still = null; // the address holds it now
+            }
+            _loaded = true;
+            _error = null;
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException)
+        {
+            if (mine == _version) _error = "The kept videos could not be read: " + e.Message;
+            _loaded = true;
+        }
+        finally
+        {
+            if (mine == _version) _loading = false;
+        }
+        _ = RepairStillsAsync();
+    }
+
+    private Task MoreAsync() => LoadAsync(reset: false);
+
+    private async Task<IJSObjectReference> VideoAsync() =>
+        _video ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/video.js");
+
+    /// <summary>
+    /// A clip kept without a still (the page could not make one when it was kept) gets one now, made here from the clip
+    /// in memory and kept in its row; one at a time, each tried once per visit. If it cannot be made the tile says
+    /// "No still" and the clip still opens.
+    /// </summary>
+    private async Task RepairStillsAsync()
+    {
+        foreach (var c in _items.Where(c => !_src.ContainsKey(c.Id) && !_failed.Contains(c.Id) && !_repairing.Contains(c.Id)).ToList())
+        {
+            if (_disposed) return;
+            _repairing.Add(c.Id);
+            try
+            {
+                if (await Clips.VideoAsync(c.Id) is not { } webm) continue;
+                var (w, h) = PicturePreview.SizeFor(c.Width, c.Height);
+                var module = await VideoAsync();
+                var still = PicturePreview.Plain(await module.InvokeAsync<byte[]>("still", webm, w, h));
+                if (PicturePreview.Problem(still, c.Width, c.Height) is not null) { _failed.Add(c.Id); continue; }
+                if (await Clips.SetStillAsync(c.Id, still)) _src[c.Id] = "data:image/webp;base64," + Convert.ToBase64String(still);
+            }
+            catch (Exception e) when (e is JSException or JSDisconnectedException or InvalidOperationException or IOException or TaskCanceledException)
+            {
+                _failed.Add(c.Id);
+            }
+            finally
+            {
+                _repairing.Remove(c.Id);
+                if (!_disposed) await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    // ── The large view ──
+
+    private async Task OpenAsync(long id)
+    {
+        _error = _viewError = null;
+        _note = null;
+        _confirmRemove = false;
+        await ReleaseAsync();
+        var clip = await Clips.GetAsync(id);
+        if (clip?.Video is null)
+        {
+            _viewing = null;
+            _frameSrc = null;
+            _error = "That video is not there any more.";
+            Forget(id);
+            return;
+        }
+        _viewing = clip;
+        _frameSrc = clip.StartFrame is { } frame
+            ? (WebpInfo.Read(frame) is not null ? "data:image/webp;base64," : "data:image/jpeg;base64,") + Convert.ToBase64String(frame)
+            : null;
+    }
+
+    /// <summary>The player gets the clip's bytes once per clip opened, after the dialog is drawn.</summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_viewing is not { Video: { } webm } viewed || _playing == viewed.Id) return;
+        try
+        {
+            var module = await VideoAsync();
+            _playing = viewed.Id;
+            await module.InvokeVoidAsync("play", _player, webm);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+        }
+    }
+
+    /// <summary>Lets the clip in the player go while the element is still there (a call after it is gone would leave the address held).</summary>
+    private async Task ReleaseAsync()
+    {
+        if (_playing is null || _video is null) return;
+        _playing = null;
+        try
+        {
+            await _video.InvokeVoidAsync("release", _player);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        await ReleaseAsync();
+        _viewing = null;
+        _frameSrc = null;
+        _confirmRemove = false;
+        _viewError = null;
+    }
+
+    /// <summary>The clip before (-1, newer) or after (+1, older) this one among those shown, or null.</summary>
+    private long? Neighbour(long id, int step)
+    {
+        var here = _items.FindIndex(c => c.Id == id);
+        var at = here + step;
+        return here >= 0 && at >= 0 && at < _items.Count ? _items[at].Id : null;
+    }
+
+    private async Task StepAsync(long id, int step)
+    {
+        if (Neighbour(id, step) is { } next) await OpenAsync(next);
+    }
+
+    private async Task LikeAsync(Clip clip)
+    {
+        _busy = true;
+        _viewError = null;
+        try
+        {
+            // The page opens the Make tab, which takes this tab away: let the clip go first.
+            await ReleaseAsync();
+            _viewError = await Like(clip);
+            if (_viewError is not null && !_disposed) _playing = null; // played again on the next render
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SaveAsync(Clip clip)
+    {
+        if (clip.Video is not { } webm) return;
+        _busy = true;
+        _viewError = null;
+        try
+        {
+            var saved = await Desktop.SaveFileAsync($"video-{clip.Seed.ToString(CultureInfo.InvariantCulture)}.webm", "WebM video (*.webm)|*.webm", webm);
+            if (saved is not null)
+            {
+                await CloseAsync();
+                _note = "Saved as " + System.IO.Path.GetFileName(saved) + ".";
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _viewError = "The file could not be saved: " + e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RemoveAsync(Clip clip)
+    {
+        _busy = true;
+        try
+        {
+            await Clips.DeleteAsync(clip.Id);
+            Session.Unkept(clip.Id);
+            await CloseAsync();
+            Forget(clip.Id);
+            _note = "Removed.";
+            // An emptied page that has older clips after it shows them.
+            if (_items.Count == 0 && _total > 0) await LoadAsync(reset: true);
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException)
+        {
+            _viewError = "The video could not be removed: " + e.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Forget(long id)
+    {
+        if (_items.RemoveAll(c => c.Id == id) > 0) _total = Math.Max(0, _total - 1);
+        _src.Remove(id);
+    }
+
+    private static string Short(string prompt) => prompt.Length <= 300 ? prompt : prompt[..300] + "…";
+
+    private static DateTime Local(DateTime kept) =>
+        (kept.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(kept, DateTimeKind.Utc) : kept).ToLocalTime();
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        if (_video is null) return;
+        try
+        {
+            // Normally released already (Close, Like); this catches leaving the page with the dialog open, when the
+            // element may already be gone from the page.
+            if (_playing is not null) await _video.InvokeVoidAsync("releaseGone");
+            await _video.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException or TaskCanceledException)
+        {
+        }
+    }
+}
