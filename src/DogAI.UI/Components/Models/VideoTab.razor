@@ -29,7 +29,7 @@
                         <div class="model-meta video-path">@file.Download.Folder\@file.Download.FileName@(file.Size > 0 ? " · " + Sizes.Gb(file.Size) : "")</div>
                         @if (file.Status == VideoFileStatus.Wrong || file.Unusual)
                         {
-                            <div class="small @(file.Status == VideoFileStatus.Wrong ? "bad" : "")">@file.Note</div>
+                            <div class="small @(file.Status == VideoFileStatus.Wrong ? "bad-text" : "")">@file.Note</div>
                         }
                     </div>
                 </div>

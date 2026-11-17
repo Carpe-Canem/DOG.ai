@@ -23,7 +23,7 @@
                 <div class="model-name">@VideoDownloads.Title</div>
                 <div class="model-meta">@VideoDownloads.Blurb</div>
                 <div class="model-meta">4 files · @Sizes.Gb(VideoDownloads.TotalBytes) · Apache 2.0 and MIT</div>
-                <div class="small video-fit @(FitState == "no" ? "bad" : "")" id="video-fit">@FitLine</div>
+                <div class="small video-fit @(FitState == "no" ? "bad-text" : "")" id="video-fit">@FitLine</div>
             </div>
             <div class="actions">
                 @if (Job is { } job)
