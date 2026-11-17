@@ -44,7 +44,7 @@
 
 @if (_kept)
 {
-    <KeptVideos Like="LikeFromKeptAsync" LikeBlocked="@LikeBlocked" Making="@(Session.IsMaking ? StatusText : null)" />
+    <KeptVideos Like="LikeFromKeptAsync" ContinueClip="ContinueFromKeptAsync" LikeBlocked="@LikeBlocked" Making="@(Session.IsMaking ? StatusText : null)" />
     <AsideRegion Place="video" Hideable="false" Title="Video">
         <section class="panel images-about" id="video-kept-about">
             <h4>Kept videos</h4>
@@ -136,6 +136,9 @@ else
                 {
                     <button class="btn" id="video-keep" disabled title="This clip is kept">Kept</button>
                 }
+                <button class="btn" id="video-continue" disabled="@(_continuing || LikeBlocked is not null)"
+                        title="@(LikeBlocked ?? "Start the next clip from this clip’s last frame, with the same sentence for you to change")"
+                        @onclick="() => ContinueAsync(shown)">Continue the clip</button>
                 <button class="btn" id="video-use-seed" title="Make the next clip from this clip’s seed: with the same sentence and settings, the same clip"
                         @onclick="() => UseSeedAsync(shown)">Use this seed</button>
                 <button class="btn" id="video-save" title="Save this clip as a WebM file" @onclick="() => SaveFileAsync(shown)">Save as a file…</button>
@@ -181,7 +184,7 @@ else
             </div>
             @if (Session.Frame is not null)
             {
-                <p class="small video-loose" id="video-loose">@VideoPanels.FollowsLoosely</p>
+                <p class="small video-loose" id="video-loose">@VideoPanels.AboutFrame(Session.Frame)</p>
             }
             <div class="images-send">
                 <span class="small images-status" id="video-status" role="status">@StatusText</span>
@@ -211,10 +214,10 @@ else
                     var why = VideoMemory.CannotMake(_cardTotal, quality);
                     <button type="button" id="@($"video-quality-{quality.ToString().ToLowerInvariant()}")" class="@(Quality == quality ? "active" : "")"
                             aria-pressed="@(Quality == quality ? "true" : "false")" disabled="@(why is not null || Session.IsMaking)"
-                            title="@(why ?? VideoPanels.Blurb(quality, Shape))" @onclick="() => SetAsync(_controls with { Quality = quality })">@quality</button>
+                            title="@(why ?? VideoPanels.Blurb(quality, Shape, _controls.Faster))" @onclick="() => SetAsync(_controls with { Quality = quality })">@quality</button>
                 }
             </div>
-            <p class="small" id="video-quality-about">@VideoPanels.Blurb(Quality, Shape)</p>
+            <p class="small" id="video-quality-about">@VideoPanels.Blurb(Quality, Shape, _controls.Faster)</p>
             @if (VideoMemory.CannotMake(_cardTotal, VideoQuality.Better) is not null)
             {
                 <p class="small" id="video-better-why">@VideoMemory.CannotMake(_cardTotal, VideoQuality.Better)</p>
@@ -242,6 +245,12 @@ else
             }
         </Fold>
 
+        <Fold Id="@VideoPanels.Faster" Title="@VideoPanels.Title(VideoPanels.Faster)" Summary="@VideoPanels.FasterSummary(_controls.Faster)" OpenByDefault="@VideoPanels.OpensByDefault(VideoPanels.Faster)" Level="4" Class="panel images-fold video-fold">
+            <label class="check"><input type="checkbox" id="video-faster-on" checked="@_controls.Faster" disabled="@Session.IsMaking"
+                                        @onchange="e => SetAsync(_controls with { Faster = e.Value is true })" /> Make clips faster</label>
+            <p class="small" id="video-faster-about">@VideoPanels.FasterAbout</p>
+        </Fold>
+
         <Fold Id="@VideoPanels.Seed" Title="@VideoPanels.Title(VideoPanels.Seed)" Summary="@VideoPanels.SeedSummary(_controls.Seed)" OpenByDefault="@VideoPanels.OpensByDefault(VideoPanels.Seed)" Level="4" Class="panel images-fold video-fold">
             <SeedRow Id="video-seed" Original="@SeedOriginal" Value="@_seed" ValueChanged="SeedChangedAsync" />
             <p class="small">@(_controls.Seed is null ? "A new seed for every clip. Keep takes the seed of the clip shown." : "Every clip starts from this seed: the same sentence and settings give the same clip.")</p>
@@ -255,7 +264,7 @@ else
 }
 
 @code {
-    private bool _ready, _keeping, _picking, _starting;
+    private bool _ready, _keeping, _picking, _starting, _continuing;
     private string? _root, _error, _note;
     private VideoLook? _look;
     private long? _cardTotal;
@@ -378,7 +387,7 @@ else
 
     private string StatusText =>
         Session.IsMaking ? VideoPanels.Doing(Session.Progress, Coordinator.IsVideoCrowded)
-        : $"{VideoPanels.EstimateLine(Estimate())} · {VideoPanels.QualitySummary(Quality, Shape)}";
+        : VideoPanels.Ready(Estimate(), Quality, Shape, _controls.Faster);
 
     // The preview is a full-size PNG (0.5 to 1.4 MB): its address is made once per preview, not on every render.
     private byte[]? _previewOf;
@@ -606,6 +615,79 @@ else
         // Shown large is the first frame, when there is one; a clip from a sentence shows whatever was shown.
         Nav.NavigateTo(VideoPanels.Address);
         _note = VideoPanels.PutBack(like, VideoMemory.CardCanMake(_cardTotal, VideoQuality.Better));
+        return null;
+    }
+
+    // ── Continue the clip (M21) ──
+
+    /// <summary>
+    /// The clip's last frame as a JPEG at the clip's own size, read in the page from the clip's bytes (a player of its
+    /// own, its time set to the clip's length), or null when it could not be read. Held in memory only.
+    /// </summary>
+    private async Task<byte[]?> LastFrameAsync(byte[] webm, int width, int height, int frames, int fps)
+    {
+        try
+        {
+            _video ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/video.js");
+            var lastTime = fps > 0 ? Math.Max(0, frames - 1) / (double)fps : 0;
+            return await _video.InvokeAsync<byte[]?>("lastFrame", webm, width, height, AttachedPictures.Quality, lastTime);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Puts what continues a clip on the Make tab: its sentence, its last frame shown large, its controls and a new seed.</summary>
+    private async Task PutOnAsync(VideoContinue next)
+    {
+        Session.Type(next.Sentence);
+        Session.Hold(next.Frame);
+        await SetAsync(next.Controls);
+        _seed = SeedChoice.New;
+        _error = null;
+        _note = VideoPanels.Continued(next, VideoMemory.CardCanMake(_cardTotal, VideoQuality.Better));
+    }
+
+    /// <summary>"Continue the clip" on the try shown.</summary>
+    private async Task ContinueAsync(VideoTry shown)
+    {
+        if (_continuing || LikeBlocked is not null) return;
+        _continuing = true;
+        _error = null;
+        _note = null;
+        try
+        {
+            var r = shown.Result;
+            var jpeg = await LastFrameAsync(r.Webm, r.Width, r.Height, r.Frames, r.Fps);
+            var (next, problem) = VideoContinue.Of(shown, jpeg);
+            if (next is null)
+            {
+                _error = problem;
+                return;
+            }
+            await PutOnAsync(next);
+        }
+        finally
+        {
+            _continuing = false;
+        }
+    }
+
+    /// <summary>
+    /// Kept videos › "Continue the clip": the kept clip's last frame (read from its video, which the large view holds)
+    /// with its sentence and controls go to the Make tab. Returns what stopped it (said in the large view), or null.
+    /// </summary>
+    private async Task<string?> ContinueFromKeptAsync(Clip kept)
+    {
+        if (LikeBlocked is { } blocked) return blocked;
+        var clip = kept.Video is null ? await Clips.GetAsync(kept.Id) ?? kept : kept;
+        if (clip.Video is not { } webm) return "That video is not there any more.";
+        var jpeg = await LastFrameAsync(webm, clip.Width, clip.Height, clip.Frames, clip.Fps);
+        var (next, problem) = VideoContinue.Of(clip, jpeg);
+        if (next is null) return problem;
+        await PutOnAsync(next);
+        Nav.NavigateTo(VideoPanels.Address);
         return null;
     }
 

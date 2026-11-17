@@ -91,8 +91,10 @@
             <div class="notice bad" id="kept-clip-error"><span>@viewError</span></div>
         }
         <div class="row kept-acts">
-            <button class="btn primary" id="kept-clip-like" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? "Its sentence, first frame, quality, shape and seed go to the Make tab: Draw makes the same clip")"
-                    @onclick="() => LikeAsync(viewed)">Make one like this</button>
+            <button class="btn primary" id="kept-clip-like" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? "Its sentence, first frame, quality, shape, Faster and seed go to the Make tab: Draw makes the same clip")"
+                    @onclick="() => HandOverAsync(viewed, Like)">Make one like this</button>
+            <button class="btn" id="kept-clip-continue" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? "Start a new clip from this video’s last frame, with its sentence for you to change")"
+                    @onclick="() => HandOverAsync(viewed, ContinueClip)">Continue the clip</button>
             <button class="btn" id="kept-clip-save" disabled="@_busy" title="Save this video as a WebM file" @onclick="() => SaveAsync(viewed)">Save as a file…</button>
             @if (_confirmRemove)
             {
@@ -119,7 +121,10 @@
     /// <summary>"Make one like this": puts the clip on the Make tab; returns what stopped it, or null when done.</summary>
     [Parameter, EditorRequired] public Func<Clip, Task<string?>> Like { get; set; } = null!;
 
-    /// <summary>Why Make one like this cannot be pressed now (a clip being made, no model), or null.</summary>
+    /// <summary>"Continue the clip": its last frame and sentence go to the Make tab; returns what stopped it, or null when done.</summary>
+    [Parameter, EditorRequired] public Func<Clip, Task<string?>> ContinueClip { get; set; } = null!;
+
+    /// <summary>Why Make one like this and Continue the clip cannot be pressed now (a clip being made, no model), or null.</summary>
     [Parameter] public string? LikeBlocked { get; set; }
 
     /// <summary>What a clip being made on the Make tab says, or null.</summary>
@@ -309,7 +314,8 @@
         if (Neighbour(id, step) is { } next) await OpenAsync(next);
     }
 
-    private async Task LikeAsync(Clip clip)
+    /// <summary>Make one like this or Continue the clip: both hand the clip to the Make tab, which takes this tab away.</summary>
+    private async Task HandOverAsync(Clip clip, Func<Clip, Task<string?>> handOver)
     {
         _busy = true;
         _changing = true;
@@ -318,7 +324,7 @@
         {
             // The page opens the Make tab, which takes this tab away: let the clip go first.
             await ReleaseAsync();
-            _viewError = await Like(clip);
+            _viewError = await handOver(clip);
             if (_viewError is not null && !_disposed) _playing = null; // played again on the next render
             // Done: the Make tab is opening and this view is closed, so no render gives the player the clip again.
             if (_viewError is null) (_viewing, _frameSrc) = (null, null);

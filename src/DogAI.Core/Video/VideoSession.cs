@@ -548,7 +548,8 @@ public static class VideoPanels
     {
         var seed = like.Controls.Seed?.ToString(CultureInfo.InvariantCulture) ?? "?";
         var what = like.Frame is null ? "sentence, quality, shape and seed" : "sentence, first frame, quality, shape and seed";
-        var line = $"The kept video’s {what} ({seed}) are back: Draw makes the same clip. Press New seed under Seed for new ones.";
+        var faster = like.Controls.Faster ? ", with Faster" : "";
+        var line = $"The kept video’s {what} ({seed}) are back{faster}: Draw makes the same clip. Press New seed under Seed for new ones.";
         return like.Controls.Quality == VideoQuality.Better && !betterOffered
             ? line.Replace("Draw makes the same clip", "it was made at Better, which this card cannot make, so Draw makes it at Quick", StringComparison.Ordinal)
             : line;
@@ -560,11 +561,30 @@ public static class VideoPanels
     /// <summary>Said where the first frame is chosen and shown (the M20 trial: a closed smile became a grin by the middle).</summary>
     public const string FollowsLoosely = "A clip follows its first frame only loosely: a face in particular can change as it moves.";
 
-    public const string Quality = "video-quality", Shape = "video-shape", Seed = "video-seed";
+    public const string Quality = "video-quality", Shape = "video-shape", Faster = "video-faster", Seed = "video-seed";
 
     /// <summary>Every fold of the side panel in order, and whether it starts open.</summary>
     public static readonly IReadOnlyList<(string Id, string Title, bool Open)> Folds =
-        [(Quality, "Quality", true), (Shape, "Shape", true), (Seed, "Seed", true)];
+        [(Quality, "Quality", true), (Shape, "Shape", true), (Faster, FasterName, true), (Seed, "Seed", true)];
+
+    /// <summary>The Faster fold's summary.</summary>
+    public static string FasterSummary(bool on) => on ? "On" : "Off";
+
+    /// <summary>
+    /// The line under the Faster tick. The M21 trial: a whole Quick clip 32 to 39% faster, a Better one 23 to 26%
+    /// (decoding cannot be made faster); side by side the same clip, the finest hair lines a little softer at Quick.
+    /// </summary>
+    public const string FasterAbout =
+        "About a third faster at Quick and a quarter at Better; the same clip to the eye, fine lines a little softer. A clip made with it records it, so Make one like this makes it again.";
+
+    /// <summary>
+    /// The note on the Make tab after Continue the clip: where the next clip starts, and, for a kept clip made at
+    /// Better on a card that cannot make Better, that it is made at Quick.
+    /// </summary>
+    public static string Continued(VideoContinue next, bool betterOffered) =>
+        Arrived(next.Frame) + (next.Controls.Quality == VideoQuality.Better && !betterOffered
+            ? " It was made at Better, which this card cannot make, so the next clip is made at Quick."
+            : "");
 
     public static bool OpensByDefault(string id) => Folds.FirstOrDefault(f => f.Id == id) is { Id: not null } f ? f.Open : true;
 
@@ -578,9 +598,9 @@ public static class VideoPanels
     }
 
     /// <summary>The line under a quality's button.</summary>
-    public static string Blurb(VideoQuality quality, PictureShape shape)
+    public static string Blurb(VideoQuality quality, PictureShape shape, bool faster = false)
     {
-        var words = VideoEstimate.For(VideoRequest.For("-", quality, shape)).Words();
+        var words = VideoEstimate.For(VideoRequest.For("-", quality, shape, faster: faster)).Words();
         return quality == VideoQuality.Quick
             ? $"Smaller, with the fast decoder: {words}."
             : $"Larger and sharper, with the model’s own decoder: {words}.";
@@ -590,6 +610,10 @@ public static class VideoPanels
 
     /// <summary>"Takes about 2 minutes" beside Draw.</summary>
     public static string EstimateLine(VideoEstimate estimate) => "Takes " + estimate.Words();
+
+    /// <summary>The status line beside Draw while nothing is made: "Takes about 1½ minutes · Quick · 960 × 640 · Faster".</summary>
+    public static string Ready(VideoEstimate estimate, VideoQuality quality, PictureShape shape, bool faster) =>
+        $"{EstimateLine(estimate)} · {QualitySummary(quality, shape)}" + (faster ? " · " + FasterName : "");
 
     /// <summary>How long something took: "48 s", "2 min 29 s".</summary>
     public static string Duration(TimeSpan took)

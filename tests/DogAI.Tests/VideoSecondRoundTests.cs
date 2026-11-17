@@ -375,4 +375,90 @@ public class VideoSecondRoundTests
         var kept = Kept(VideoRequest.For("A wolf.", VideoQuality.Quick, PictureShape.Wide, 5, frame.Bytes));
         Assert.False(VideoLike.Of(kept).Like!.Frame!.Continues);
     }
+
+    // ── Step 3: the screen's words for Faster and Continue ──
+
+    [Fact]
+    public void Faster_has_a_fold_of_its_own_and_is_said_in_the_estimate_and_the_status_line()
+    {
+        var ids = VideoPanels.Folds.Select(f => f.Id).ToList();
+        Assert.Equal([VideoPanels.Quality, VideoPanels.Shape, VideoPanels.Faster, VideoPanels.Seed], ids);
+        Assert.Equal("Faster", VideoPanels.Title(VideoPanels.Faster));
+        Assert.Equal("Off", VideoPanels.FasterSummary(false));
+        Assert.Equal("On", VideoPanels.FasterSummary(true));
+        Assert.Contains("a third faster at Quick and a quarter at Better", VideoPanels.FasterAbout);
+        Assert.Contains("a little softer", VideoPanels.FasterAbout);
+
+        // The line under the quality follows the choice; without it, it says what it said before M21.
+        Assert.Equal(VideoPanels.Blurb(VideoQuality.Quick, PictureShape.Wide), VideoPanels.Blurb(VideoQuality.Quick, PictureShape.Wide, faster: false));
+        foreach (var quality in Enum.GetValues<VideoQuality>())
+        {
+            var plain = VideoEstimate.For(VideoRequest.For("-", quality, PictureShape.Wide)).Total;
+            var fast = VideoEstimate.For(VideoRequest.For("-", quality, PictureShape.Wide, faster: true)).Total;
+            Assert.True(fast < plain);
+        }
+        Assert.Contains("about 2 minutes", VideoPanels.Blurb(VideoQuality.Quick, PictureShape.Wide, faster: true));
+
+        var estimate = VideoEstimate.For(VideoRequest.For("-", VideoQuality.Quick, PictureShape.Wide, faster: true));
+        Assert.Equal("Takes about 2 minutes · Quick · 960 × 640 · Faster", VideoPanels.Ready(estimate, VideoQuality.Quick, PictureShape.Wide, true));
+        Assert.Equal("Takes about 2½ minutes · Quick · 960 × 640",
+            VideoPanels.Ready(VideoEstimate.For(VideoRequest.For("-", VideoQuality.Quick, PictureShape.Wide)), VideoQuality.Quick, PictureShape.Wide, false));
+    }
+
+    [Fact]
+    public void Make_one_like_this_names_faster_when_it_puts_it_back()
+    {
+        var fast = VideoLike.Of(Kept(VideoRequest.For("A wolf.", VideoQuality.Better, PictureShape.Wide, 5, faster: true))).Like!;
+        Assert.True(fast.Controls.Faster);
+        Assert.Equal("The kept video’s sentence, quality, shape and seed (4321) are back, with Faster: Draw makes the same clip. Press New seed under Seed for new ones.",
+            VideoPanels.PutBack(fast, betterOffered: true));
+        Assert.Contains("are back, with Faster: it was made at Better, which this card cannot make, so Draw makes it at Quick", VideoPanels.PutBack(fast, betterOffered: false));
+        var plain = VideoLike.Of(Kept(VideoRequest.For("A wolf.", VideoQuality.Quick, PictureShape.Wide, 5))).Like!;
+        Assert.DoesNotContain("Faster", VideoPanels.PutBack(plain, true));
+    }
+
+    [Fact]
+    public void Continue_takes_faster_over_and_says_when_better_cannot_be_made_here()
+    {
+        var made = VideoRequest.For("A wolf turns his head.", VideoQuality.Better, PictureShape.Wide, 5, faster: true);
+        var next = VideoContinue.Of(Kept(made), TestJpegs.Make(made.Width, made.Height)).Next!;
+        Assert.True(next.Controls.Faster);
+        Assert.Null(next.Controls.Seed);
+        Assert.Equal(VideoQuality.Better, next.Controls.Quality);
+        Assert.Equal(VideoPanels.Arrived(next.Frame), VideoPanels.Continued(next, betterOffered: true));
+        Assert.EndsWith("so the next clip is made at Quick.", VideoPanels.Continued(next, betterOffered: false));
+        var quick = VideoContinue.Of(Kept(VideoRequest.For("A wolf.", VideoQuality.Quick, PictureShape.Tall, 5)), TestJpegs.Make(640, 960)).Next!;
+        Assert.False(quick.Controls.Faster);
+        Assert.Equal(VideoPanels.Arrived(quick.Frame), VideoPanels.Continued(quick, betterOffered: false));
+    }
+
+    [Fact]
+    public void The_page_has_the_new_controls_and_reads_the_last_frame_at_the_clips_own_size()
+    {
+        var ui = Path.Combine(SolutionRoot(), "src", "DogAI.UI");
+        var page = File.ReadAllText(Path.Combine(ui, "Pages", "VideoMake.razor"));
+        var kept = File.ReadAllText(Path.Combine(ui, "Components", "Video", "KeptVideos.razor"));
+        var js = File.ReadAllText(Path.Combine(ui, "wwwroot", "js", "video.js"));
+        foreach (var id in new[] { "video-continue", "video-faster-on", "video-faster-about" }) Assert.Contains($"id=\"{id}\"", page);
+        Assert.Contains("id=\"kept-clip-continue\"", kept);
+        // The line under the frame held is the continuation's for a last frame.
+        Assert.Contains("VideoPanels.AboutFrame(Session.Frame)", page);
+        Assert.DoesNotContain("@VideoPanels.FollowsLoosely", page);
+        // The size drawn is the clip's (r.Width, clip.Width), never the element's.
+        Assert.Contains("LastFrameAsync(r.Webm, r.Width, r.Height", page);
+        Assert.Contains("LastFrameAsync(webm, clip.Width, clip.Height", page);
+        Assert.Contains("export async function lastFrame(bytes, width, height, quality, lastTime)", js);
+        Assert.DoesNotContain("videoWidth", js);
+        // No end picture and no loop.
+        Assert.DoesNotContain("end_image", page + kept + js, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Loop", page.Replace("loop playsinline", ""), StringComparison.Ordinal);
+    }
+
+    private static string SolutionRoot()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "DogAI.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        return root!.FullName;
+    }
 }

@@ -82,3 +82,40 @@ export async function still(bytes, width, height) {
     URL.revokeObjectURL(url);
   }
 }
+
+// Continue the clip (M21): the clip's last frame as a JPEG at the clip's own size (width and height come from C#, never
+// from the element), for the next clip's first frame. The time is set to the clip's length: every frame of the engine's
+// files is a key frame of its own, so the seek lands on the last one. lastTime is the last frame's time, used only when
+// the file does not say its length. Nothing is written to a file; the address is let go at once.
+export async function lastFrame(bytes, width, height, quality, lastTime) {
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'video/webm' }));
+  const v = document.createElement('video');
+  v.muted = true;
+  v.preload = 'auto';
+  try {
+    await new Promise((resolve, reject) => {
+      v.onloadeddata = resolve;
+      v.onerror = () => reject(new Error('The video could not be read.'));
+      v.src = url;
+    });
+    const end = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : lastTime;
+    await new Promise((resolve, reject) => {
+      v.onseeked = resolve;
+      v.onerror = () => reject(new Error('The video could not be read.'));
+      v.currentTime = end;
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const g = canvas.getContext('2d', { alpha: false });
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(v, 0, 0, width, height);
+    const blob = await new Promise((resolve, reject) =>
+      canvas.toBlob(b => (b ? resolve(b) : reject(new Error('The last frame could not be made.'))), 'image/jpeg', quality / 100));
+    return new Uint8Array(await blob.arrayBuffer());
+  } finally {
+    v.removeAttribute('src');
+    v.load();
+    URL.revokeObjectURL(url);
+  }
+}
