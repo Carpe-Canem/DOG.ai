@@ -29,7 +29,11 @@
             <p>Make a short clip from a sentence or a picture</p>
         </div>
         <div class="head-tools">
-            <AsideToggle Place="video" Hideable="false" Label="Open the video settings" />
+            @if (_ready && CanMake)
+            {
+                @* No side panel without the model (as On this PC › Voice): no opener for an empty drawer. *@
+                <AsideToggle Place="video" Hideable="false" Label="Open the video settings" />
+            }
         </div>
     </div>
 </SectionContent>
