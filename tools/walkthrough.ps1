@@ -17,6 +17,8 @@
 #                                                seconds for the old process to end and the new one to start, and follow it
 #               @{ lock = @( <lock steps> ) }    drive the lock screen of the (adopted) process, then reconnect to its page;
 #                                                add @{ stay = $true } inside to stay at the lock screen (no reconnect)
+#               @{ reconnect = 1 }               connect to the page of the (adopted) process when its data is not locked
+#                                                (after a restore's restart: there is no lock screen to drive)
 #               @{ tray = 'Lock now' }           open the tray icon's menu, print its items, and click the named one
 #                                                (tray = '' only prints them)
 #               @{ globalkey = 1500 }            hold Ctrl+Alt+Space this many ms in Notepad (started for it, closed after)
@@ -486,6 +488,7 @@ try {
             Run-LockSteps $step.lock
             if (-not ($step.lock | Where-Object { $_.stay })) { Connect-Page }
         }
+        if ($step.reconnect) { Connect-Page }
         if ($step.realkey) { Real-Key $step.realkey }
         if ($step.winsize) {
             # Stop pretending a page size and give DOG.ai's real window this outer size, so the page sees a real resize.

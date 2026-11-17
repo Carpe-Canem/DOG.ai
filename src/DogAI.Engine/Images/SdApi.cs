@@ -287,13 +287,58 @@ public sealed class SdApi(HttpClient http, int port)
     /// <param name="shown">The preview already passed on (its step and base64 length): the engine repeats it on every poll, and it is not decoded again.</param>
     public async Task<SdVideoJob> VideoJobAsync(string id, CancellationToken ct = default, (int? Step, int Chars)? shown = null)
     {
-        using var response = await http.GetAsync(_base + "jobs/" + Uri.EscapeDataString(id), ct).ConfigureAwait(false);
-        var node = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        using var response = await http.GetAsync(_base + "jobs/" + Uri.EscapeDataString(id), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
+        {
+            var node = await ReadJsonAsync(response, ct).ConfigureAwait(false);
             throw new VideoEngineException(response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone
                 ? "The video engine no longer knows this video (it may have restarted)."
                 : Refusal(response.StatusCode, node, "video"));
-        return ParseVideoJob(node as JsonObject ?? [], shown);
+        }
+        // Every answer repeats the newest preview (up to 1.9 MB of text), once a second for minutes. Read as text and
+        // taken apart into objects, that was about 10 MB of short-lived copies a poll, and DOG.ai's own memory rose
+        // from 0.2 to 1.9 GB over ten clips (M20 step 6). So the answer is read into a borrowed buffer and walked in
+        // place: nothing of that size is made but a preview that is new, and the clip itself.
+        var (buffer, length) = await ReadBorrowedAsync(response, ct).ConfigureAwait(false);
+        try
+        {
+            return ParseVideoJob(buffer.AsSpan(0, length), shown);
+        }
+        finally
+        {
+            // Wiped before it goes back: the answer holds the clip and, in generation_info, the sentence.
+            System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+        }
+    }
+
+    private static async Task<(byte[] Buffer, int Length)> ReadBorrowedAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        var pool = System.Buffers.ArrayPool<byte>.Shared;
+        var buffer = pool.Rent((int)Math.Clamp(response.Content.Headers.ContentLength ?? 1 << 16, 1 << 12, 1 << 28));
+        var length = 0;
+        try
+        {
+            await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            while (true)
+            {
+                if (length == buffer.Length)
+                {
+                    var larger = pool.Rent(checked(buffer.Length * 2));
+                    buffer.AsSpan(0, length).CopyTo(larger);
+                    pool.Return(buffer, clearArray: true);
+                    buffer = larger;
+                }
+                var read = await stream.ReadAsync(buffer.AsMemory(length), ct).ConfigureAwait(false);
+                if (read == 0) break;
+                length += read;
+            }
+            return (buffer, length);
+        }
+        catch
+        {
+            pool.Return(buffer, clearArray: true);
+            throw;
+        }
     }
 
     /// <summary>
@@ -347,38 +392,157 @@ public sealed class SdApi(HttpClient http, int port)
     /// Reads a clip's job. Only the named fields are taken: the engine's <c>generation_info</c>, which repeats the
     /// prompt, the negative prompt and the model's file names, is never read, kept or passed on.
     /// </summary>
-    internal static SdVideoJob ParseVideoJob(JsonObject node, (int? Step, int Chars)? shown = null)
+    /// <param name="utf8">The engine's answer as it arrived. It is walked in place; the file and a new preview are the only large things made of it.</param>
+    /// <param name="shown">The preview already passed on (its step and the length of its base64 text): one like it is left as text.</param>
+    internal static SdVideoJob ParseVideoJob(ReadOnlySpan<byte> utf8, (int? Step, int Chars)? shown = null)
     {
-        var status = Text(node["status"]) ?? "unknown";
-
+        var status = "unknown";
         VideoProgress? progress = null;
-        if (node["progress"] is JsonObject p)
-        {
-            var steps = Text(p["unit"]) == "steps";
-            progress = new VideoProgress(Text(p["stage"]) ?? "", steps ? Int(p["completed"]) : null, steps ? Int(p["total"]) : null);
-        }
-
         byte[]? preview = null;
         int? previewStep = null;
         var previewChars = 0;
-        if (node["preview"] is JsonObject v && Text(v["b64_json"]) is { Length: > 0 } b64)
+        SdVideo? video = null;
+        string? error = null;
+        try
         {
-            previewStep = Int(v["step"]);
-            previewChars = b64.Length;
-            if (shown != (previewStep, previewChars)) preview = Decode(b64);
+            var reader = new Utf8JsonReader(utf8);
+            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+                return new SdVideoJob(status, null, null, null, null, null);
+            while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                if (reader.ValueTextEquals("status"u8))
+                {
+                    reader.Read();
+                    status = Str(ref reader) ?? "unknown";
+                }
+                else if (reader.ValueTextEquals("progress"u8))
+                {
+                    reader.Read();
+                    if (reader.TokenType != JsonTokenType.StartObject) { reader.Skip(); continue; }
+                    string? stage = null, unit = null;
+                    int? completed = null, total = null;
+                    while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+                    {
+                        if (reader.ValueTextEquals("stage"u8)) { reader.Read(); stage = Str(ref reader); }
+                        else if (reader.ValueTextEquals("unit"u8)) { reader.Read(); unit = Str(ref reader); }
+                        else if (reader.ValueTextEquals("completed"u8)) { reader.Read(); completed = Num(ref reader); }
+                        else if (reader.ValueTextEquals("total"u8)) { reader.Read(); total = Num(ref reader); }
+                        else { reader.Read(); reader.Skip(); }
+                    }
+                    var steps = unit == "steps";
+                    progress = new VideoProgress(stage ?? "", steps ? completed : null, steps ? total : null);
+                }
+                else if (reader.ValueTextEquals("preview"u8))
+                {
+                    reader.Read();
+                    if (reader.TokenType != JsonTokenType.StartObject) { reader.Skip(); continue; }
+                    // The text is looked at where it lies; whether it is decoded is decided once its step is known.
+                    ReadOnlySpan<byte> plain = default;
+                    byte[]? decoded = null;
+                    while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+                    {
+                        if (reader.ValueTextEquals("b64_json"u8))
+                        {
+                            reader.Read();
+                            if (reader.TokenType != JsonTokenType.String) { reader.Skip(); continue; }
+                            previewChars = reader.HasValueSequence ? (int)reader.ValueSequence.Length : reader.ValueSpan.Length;
+                            // Written with escapes (not what the engine does): decoded through the reader, which undoes them.
+                            if (reader.ValueIsEscaped || reader.HasValueSequence) decoded = reader.TryGetBytesFromBase64(out var bytes) ? bytes : null;
+                            else plain = reader.ValueSpan;
+                        }
+                        else if (reader.ValueTextEquals("step"u8)) { reader.Read(); previewStep = Num(ref reader); }
+                        else { reader.Read(); reader.Skip(); }
+                    }
+                    if (previewChars == 0) previewStep = null;
+                    else if (shown != (previewStep, previewChars)) preview = decoded ?? Decode(plain);
+                }
+                else if (reader.ValueTextEquals("result"u8))
+                {
+                    reader.Read();
+                    if (reader.TokenType != JsonTokenType.StartObject) { reader.Skip(); continue; }
+                    byte[]? file = null;
+                    int? frames = null, fps = null;
+                    string? format = null;
+                    while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+                    {
+                        if (reader.ValueTextEquals("b64_json"u8))
+                        {
+                            reader.Read();
+                            if (reader.TokenType != JsonTokenType.String) { reader.Skip(); continue; }
+                            file = reader.ValueIsEscaped || reader.HasValueSequence
+                                ? (reader.TryGetBytesFromBase64(out var bytes) ? bytes : null)
+                                : Decode(reader.ValueSpan);
+                        }
+                        else if (reader.ValueTextEquals("frame_count"u8)) { reader.Read(); frames = Num(ref reader); }
+                        else if (reader.ValueTextEquals("fps"u8)) { reader.Read(); fps = Num(ref reader); }
+                        else if (reader.ValueTextEquals("output_format"u8)) { reader.Read(); format = Str(ref reader); }
+                        // generation_info (the prompt again, the negative prompt, the model's file names) and anything else: passed over unread.
+                        else { reader.Read(); reader.Skip(); }
+                    }
+                    if (file is { Length: > 0 }) video = new SdVideo(file, frames, fps, format);
+                }
+                else if (reader.ValueTextEquals("error"u8))
+                {
+                    reader.Read();
+                    if (reader.TokenType == JsonTokenType.String) error = reader.GetString();
+                    else if (reader.TokenType == JsonTokenType.StartObject)
+                    {
+                        string? message = null, code = null;
+                        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+                        {
+                            if (reader.ValueTextEquals("message"u8)) { reader.Read(); message = Str(ref reader); }
+                            else if (reader.ValueTextEquals("code"u8)) { reader.Read(); code = Str(ref reader); }
+                            else { reader.Read(); reader.Skip(); }
+                        }
+                        error = message ?? code;
+                    }
+                    else reader.Skip();
+                }
+                else
+                {
+                    reader.Read();
+                    reader.Skip();
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // An answer cut short or not JSON: what was read before stands (a status of "unknown" is asked for again).
+        }
+        return new SdVideoJob(status, progress, previewStep, preview, video, error, previewChars);
+
+        static string? Str(ref Utf8JsonReader reader)
+        {
+            if (reader.TokenType == JsonTokenType.String) return reader.GetString();
+            reader.Skip();
+            return null;
         }
 
-        SdVideo? video = null;
-        if (node["result"] is JsonObject result && Text(result["b64_json"]) is { Length: > 0 } file && Decode(file) is { } webm)
-            video = new SdVideo(webm, Int(result["frame_count"]), Int(result["fps"]), Text(result["output_format"]));
-
-        var error = node["error"] switch
+        static int? Num(ref Utf8JsonReader reader)
         {
-            JsonObject o => Text(o["message"]) ?? Text(o["code"]),
-            JsonValue s => Text(s),
-            _ => null,
-        };
-        return new SdVideoJob(status, progress, previewStep, preview, video, error, previewChars);
+            if (reader.TokenType != JsonTokenType.Number)
+            {
+                reader.Skip();
+                return null;
+            }
+            if (reader.TryGetInt32(out var i)) return i;
+            if (reader.TryGetInt64(out var l)) return (int)Math.Clamp(l, int.MinValue, int.MaxValue);
+            return reader.TryGetDouble(out var d) && !double.IsNaN(d) ? (int)Math.Clamp(d, int.MinValue, int.MaxValue) : null;
+        }
+    }
+
+    /// <summary>The same for an answer already taken apart (tests).</summary>
+    internal static SdVideoJob ParseVideoJob(JsonObject node, (int? Step, int Chars)? shown = null) =>
+        ParseVideoJob(System.Text.Encoding.UTF8.GetBytes(node.ToJsonString()), shown);
+
+    /// <summary>Base64 text as it lies in an answer (plain ASCII, maybe a data: address) to bytes; null when it is not base64.</summary>
+    private static byte[]? Decode(ReadOnlySpan<byte> b64)
+    {
+        if (b64.StartsWith("data:"u8) && b64.IndexOf((byte)',') is >= 0 and var comma) b64 = b64[(comma + 1)..];
+        if (b64.Length == 0) return null;
+        var buffer = new byte[System.Buffers.Text.Base64.GetMaxDecodedFromUtf8Length(b64.Length)];
+        if (System.Buffers.Text.Base64.DecodeFromUtf8(b64, buffer, out _, out var written) != System.Buffers.OperationStatus.Done) return null;
+        return written == buffer.Length ? buffer : buffer[..written];
     }
 
     /// <summary>The upscaler files the engine found that can enlarge a picture (their names, without the extension).</summary>

@@ -559,7 +559,7 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         Noted?.Invoke(now is null
             ? $"a video needs the whole card (about {Gb(need)}); {moved}. The card could not be measured."
             : VideoMemory.Crowded(now.FreeBytes)
-                ? $"a video needs the whole card (about {Gb(need)}); {moved}. Only {Gb(now.FreeBytes)} is free (something else holds part of the card), so the video engine was told to plan with {VideoMemory.EnginePlan(now.FreeBytes)} GB and to send no previews."
+                ? $"a video needs the whole card (about {Gb(need)}); {moved}. Only {Gb(now.FreeBytes)} is free (something else holds part of the card), so the video engine was told to plan with {VideoMemory.EnginePlan(now.FreeBytes, request.Decoder)} GB and to send no previews."
                 : $"a video needs the whole card (about {Gb(need)}); {moved}. {Gb(now.FreeBytes)} is free.");
         return now?.FreeBytes;
     }

@@ -126,7 +126,7 @@ public sealed class VideoServer : IVideoEngine, IDisposable
         try
         {
             progress?.Report(new VideoProgress(VideoStages.Starting));
-            var api = await StartAsync(model, request.Decoder, VideoMemory.EnginePlan(cardFreeBytes), ct).ConfigureAwait(false);
+            var api = await StartAsync(model, request.Decoder, VideoMemory.EnginePlan(cardFreeBytes, request.Decoder), ct).ConfigureAwait(false);
             try
             {
                 var result = await MakeWithAsync(api, request, progress, ct).ConfigureAwait(false);

@@ -150,18 +150,29 @@ public static class VideoMemory
     public const long PlanReserve = 3 * Gb;
 
     /// <summary>
-    /// The most the engine is told to plan with when part of the card is in use. It is under the model's own 15.3 GB
-    /// on purpose: the engine then keeps a part of the model in RAM (the text encoder, 5.8 GB) and takes 14 to 17 GB
-    /// of the card (measured with another program holding 6.8 GB), where with the whole model on the card it takes
-    /// 21.7 GB whatever it was told.
+    /// The most the engine is told to plan with when part of the card is in use. With a plan of 11 GB or less the
+    /// engine keeps the model itself (9.5 GB) in RAM and brings it to the card piece by piece: it then takes the plan
+    /// and about 2.8 GB (8.6 GB at a plan of 5.8, 13.8 GB at 11) and turns the clip into frames in a second or two.
+    /// With 12.5 GB or more it keeps the model on the card instead and takes 17 GB while the clip is turned into
+    /// frames, whatever it was told: beside a program holding 6.8 GB that step then took 13 seconds in one run and
+    /// had not ended after 2½ minutes in another (M20 step 6). So the cap is well under the point where it changes.
+    /// That is for the fast decoder (Quick), which turns the whole clip into frames at once.
     /// </summary>
-    public const long PlanCap = 14 * Gb;
+    public const long PlanCap = 10 * Gb;
+
+    /// <summary>
+    /// The same for the model's own decoder (Better), and the other way round: it works in pieces and needs the
+    /// model kept on the card. With a plan of 12.5 or 13.1 GB a Better clip beside a program holding 6.8 GB took the
+    /// engine 13.6 GB and decoded in its usual 3¼ minutes; with a plan of 10 GB its decoding had not ended after nine
+    /// minutes and free RAM fell to 1.8 GB (M20 step 6, in the app).
+    /// </summary>
+    public const long PlanCapOwnDecoder = 13 * Gb;
 
     /// <summary>
     /// True when the cleared card has too little free for the whole model (something else holds part of it: another
     /// program, or a guest of DOG.ai's that is being used). The clip is still made, with a plan for the engine
-    /// (<see cref="EnginePlan"/>) and without previews: beside a program holding 6.8 GB a Quick clip then took 150
-    /// seconds against an estimate of 146 (with previews 268: each full-size preview took most of a minute).
+    /// (<see cref="EnginePlan"/>) and without previews: beside a program holding 6.8 GB a Quick clip then took
+    /// 2 min 23 s in the app against an estimate of 2 min 26 s.
     /// </summary>
     public static bool Crowded(long? freeBytes) => freeBytes is { } free && free < WholeModelFree;
 
@@ -172,13 +183,14 @@ public static class VideoMemory
     /// another program it reported 23.0 GB free, filled the card to 23.9 GB, borrowed 2.8 GB of Windows' shared memory,
     /// and a clip of 58 seconds took 222; M20 step 6). So: with the whole card free, or a card that could not be
     /// measured, <c>-3</c> as in every clip measured in M20 (the engine keeps 3 GB of what it sees); otherwise a plan
-    /// in GiB worked out here, what is free less <see cref="PlanReserve"/> and never over <see cref="PlanCap"/>.
+    /// in GiB worked out here, what is free less <see cref="PlanReserve"/> and never over the decoder's cap.
     /// </para>
     /// </summary>
-    public static string EnginePlan(long? freeBytes)
+    /// <param name="decoder">The clip's decoder: each has its own cap (<see cref="PlanCap"/>, <see cref="PlanCapOwnDecoder"/>).</param>
+    public static string EnginePlan(long? freeBytes, VideoDecoder decoder = VideoDecoder.Fast)
     {
         if (freeBytes is not { } free || !Crowded(free)) return WholeCardPlan;
-        var plan = Math.Min(free - PlanReserve, PlanCap);
+        var plan = Math.Min(free - PlanReserve, decoder == VideoDecoder.Own ? PlanCapOwnDecoder : PlanCap);
         // One decimal, rounded down, in the engine's own unit; never nothing or less (0 and below mean something else to it).
         var tenths = Math.Max(10, plan * 10 / Gb);
         return (tenths / 10.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);

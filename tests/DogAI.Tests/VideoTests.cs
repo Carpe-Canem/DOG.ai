@@ -590,21 +590,64 @@ public class VideoApiTests
     [Fact]
     public void A_preview_the_engine_repeats_is_not_decoded_again()
     {
-        var png = Convert.ToBase64String([0x89, (byte)'P', (byte)'N', (byte)'G', 1, 2, 3, 4]);
-        var node = JsonNode.Parse($$"""
-            {"status":"generating","progress":{"stage":"sampling","unit":"steps","completed":5,"total":20},"preview":{"b64_json":"{{png}}","step":4} }
-            """)!.AsObject();
+        // As the engine writes it: plain text, with the "+" and "/" of base64 as they are.
+        byte[] bytes = [0x89, (byte)'P', (byte)'N', 0xFB, 0xEF, 0xBE, 0xFF, 0xFF, 0xFF, (byte)'G', 7];
+        var png = Convert.ToBase64String(bytes);
+        Assert.Contains('+', png);
+        Assert.Contains('/', png);
+        var answer = Encoding.UTF8.GetBytes($$"""
+            {"id":"j","status":"generating","progress":{"stage":"sampling","unit":"steps","completed":5,"total":20},"preview":{"b64_json":"{{png}}","step":4},"result":null,"error":null}
+            """);
 
-        var first = SdApi.ParseVideoJob(node);
-        Assert.NotNull(first.Preview);
+        var first = SdApi.ParseVideoJob(answer);
+        Assert.Equal(bytes, first.Preview);
         Assert.Equal((4, png.Length), (first.PreviewStep, first.PreviewChars));
+        Assert.Equal(new VideoProgress(VideoStages.Drawing, 5, 20), first.Progress);
+        Assert.Equal("generating", first.Status);
 
         // The same preview on the next poll: told apart by its step and length, and left as text.
-        var again = SdApi.ParseVideoJob(node, (first.PreviewStep, first.PreviewChars));
+        var again = SdApi.ParseVideoJob(answer, (first.PreviewStep, first.PreviewChars));
         Assert.Null(again.Preview);
         Assert.Equal((4, png.Length), (again.PreviewStep, again.PreviewChars));
         // The next one is decoded.
-        Assert.NotNull(SdApi.ParseVideoJob(node, (3, png.Length)).Preview);
+        Assert.Equal(bytes, SdApi.ParseVideoJob(answer, (3, png.Length)).Preview);
+
+        // The step written before the text, and the text written with escapes: the same preview either way.
+        var escapedText = png.Replace("+", "\\u002B").Replace("/", "\\/");
+        var escaped = Encoding.UTF8.GetBytes("{\"status\":\"generating\",\"preview\":{\"step\":4,\"b64_json\":\"" + escapedText + "\"}}");
+        Assert.Equal(bytes, SdApi.ParseVideoJob(escaped).Preview);
+        Assert.Equal(4, SdApi.ParseVideoJob(escaped).PreviewStep);
+    }
+
+    [Fact]
+    public void An_answer_is_walked_in_place_and_anything_unexpected_is_passed_over()
+    {
+        var file = TestWebm.Make(640, 960, 5);
+        // The prompt comes first here, and in a part of its own after the file: neither is read.
+        var finished = Encoding.UTF8.GetBytes($$"""
+            {"extra":{"deep":[1,{"prompt":"{{Word}}"}]},"status":"completed","progress":"none","preview":7,
+             "result":{"generation_info":{"prompt":"{{Word}} a fox"},"b64_json":"{{Convert.ToBase64String(file)}}","frame_count":5.0,"fps":24,"output_format":"webm","more":[[]]},
+             "error":null,"generation_info":"{{Word}}"}
+            """);
+        var job = SdApi.ParseVideoJob(finished);
+        Assert.Equal("completed", job.Status);
+        Assert.Equal(file, job.Video!.File);
+        Assert.Equal((5, 24, "webm"), (job.Video.Frames, job.Video.Fps, job.Video.Format));
+        Assert.Null(job.Progress);
+        Assert.Null(job.Preview);
+        Assert.Null(job.Error);
+
+        // An error as a sentence, and as a part with a message or only a code.
+        Assert.Equal("out of memory", SdApi.ParseVideoJob("""{"status":"failed","error":"out of memory"}"""u8).Error);
+        Assert.Equal("no model", SdApi.ParseVideoJob("""{"status":"failed","error":{"code":"x","message":"no model"}}"""u8).Error);
+        Assert.Equal("x", SdApi.ParseVideoJob("""{"status":"failed","error":{"code":"x"}}"""u8).Error);
+
+        // Cut short, empty, or not an answer at all: never an exception; what was read before the cut stands.
+        Assert.Equal("generating", SdApi.ParseVideoJob("""{"status":"generating","preview":{"b64_json":"iVBO"""u8).Status);
+        Assert.Equal("unknown", SdApi.ParseVideoJob(""u8).Status);
+        Assert.Equal("unknown", SdApi.ParseVideoJob("<html>busy</html>"u8).Status);
+        Assert.Equal("unknown", SdApi.ParseVideoJob("[1,2]"u8).Status);
+        for (var cut = 0; cut < finished.Length; cut += 97) _ = SdApi.ParseVideoJob(finished.AsSpan(0, cut));
     }
 
     [Fact]
@@ -1143,13 +1186,23 @@ public class VideoCardTests : IDisposable
 
         // Part of it in use: what is free less 3 GB, in GiB with one decimal, rounded down.
         Assert.True(VideoMemory.Crowded(22 * Gb - 1));
-        Assert.Equal("12.7", VideoMemory.EnginePlan((long)(15.75 * Gb)));
-        Assert.Equal("11.5", VideoMemory.EnginePlan((long)(14.5 * Gb)));
-        Assert.Equal("12.0", VideoMemory.EnginePlan(15 * Gb));
-        // Never over 14 GB: under the model's own 15.3 GB, or the engine puts all of it on the card and takes 21.7 GB.
-        Assert.Equal("14.0", VideoMemory.EnginePlan((long)(21.9 * Gb)));
-        Assert.Equal("14.0", VideoMemory.EnginePlan(17 * Gb));
-        Assert.Equal("13.9", VideoMemory.EnginePlan((long)(16.95 * Gb)));
+        Assert.Equal("9.7", VideoMemory.EnginePlan((long)(12.75 * Gb)));
+        Assert.Equal("8.5", VideoMemory.EnginePlan((long)(11.5 * Gb)));
+        Assert.Equal("9.0", VideoMemory.EnginePlan(12 * Gb));
+        // Never over 10 GB: the engine then keeps the model in RAM and takes what it was told and a little; with more
+        // it keeps the model on the card and takes 17 GB while the clip is turned into frames.
+        Assert.Equal("10.0", VideoMemory.EnginePlan((long)(21.9 * Gb)));
+        Assert.Equal("10.0", VideoMemory.EnginePlan(17 * Gb));
+        Assert.Equal("10.0", VideoMemory.EnginePlan((long)(14.5 * Gb)));
+        Assert.Equal("9.9", VideoMemory.EnginePlan((long)(12.95 * Gb)));
+        // The model's own decoder (Better) is the other way round: it needs the model kept on the card, so its cap is
+        // 13 GB (with 10 its decoding did not end in nine minutes).
+        Assert.Equal("13.0", VideoMemory.EnginePlan((long)(16.1 * Gb), VideoDecoder.Own));
+        Assert.Equal("12.5", VideoMemory.EnginePlan((long)(15.5 * Gb), VideoDecoder.Own));
+        Assert.Equal("13.0", VideoMemory.EnginePlan((long)(21.9 * Gb), VideoDecoder.Own));
+        Assert.Equal("-3", VideoMemory.EnginePlan(22 * Gb, VideoDecoder.Own));
+        Assert.Equal("-3", VideoMemory.EnginePlan(null, VideoDecoder.Own));
+        Assert.Equal(VideoDecoder.Own, VideoRequest.For("a fox", VideoQuality.Better, PictureShape.Wide).Decoder);
         // Never nothing or less: to the engine 0 means "what I see is free" and below it a reserve.
         Assert.Equal("1.0", VideoMemory.EnginePlan(2 * Gb));
         Assert.Equal("1.0", VideoMemory.EnginePlan(0));
@@ -1158,7 +1211,7 @@ public class VideoCardTests : IDisposable
         var whole = VideoServer.Arguments(_model, VideoDecoder.Fast, 1, "b.html");
         var planned = VideoServer.Arguments(_model, VideoDecoder.Fast, 1, "b.html", VideoMemory.EnginePlan(17 * Gb));
         Assert.Equal(["--max-vram", "-3"], whole.TakeLast(2));
-        Assert.Equal(["--max-vram", "14.0"], planned.TakeLast(2));
+        Assert.Equal(["--max-vram", "10.0"], planned.TakeLast(2));
         Assert.Equal(whole.SkipLast(1), planned.SkipLast(1));
         Assert.Contains("--disable-image-metadata", planned);
 
@@ -1192,12 +1245,18 @@ public class VideoCardTests : IDisposable
         crowded.Video.Hold.SetResult();
         await making;
         Assert.Equal([17 * Gb], crowded.Video.Told);
-        Assert.Equal("14.0", VideoMemory.EnginePlan(crowded.Video.Told[0]));
-        Assert.EndsWith("Only 17.0 GB is free (something else holds part of the card), so the video engine was told to plan with 14.0 GB and to send no previews.", crowded.Notes[^1]);
+        Assert.Equal("10.0", VideoMemory.EnginePlan(crowded.Video.Told[0]));
+        Assert.EndsWith("Only 17.0 GB is free (something else holds part of the card), so the video engine was told to plan with 10.0 GB and to send no previews.", crowded.Notes[^1]);
         // Full-size previews are what does not fit on a crowded card: none are asked for there.
         Assert.False(crowded.Video.Made[0].Request.Preview);
         Assert.True(rig.Video.Made[0].Request.Preview);
         Assert.False(crowded.Coordinator.IsVideoCrowded);
+
+        // A Better clip (the model's own decoder) on the same card gets the larger plan.
+        var better = new Rig();
+        better.Card.Other = 7 * Gb;
+        await better.Engine.MakeAsync(_model, VideoRequest.For("A fox runs through the snow.", VideoQuality.Better, PictureShape.Wide, seed: 9));
+        Assert.EndsWith("so the video engine was told to plan with 13.0 GB and to send no previews.", better.Notes[^1]);
 
         // A clip that fails or is cancelled leaves no "crowded" behind.
         var failing = new Rig();
