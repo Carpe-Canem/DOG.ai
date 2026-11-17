@@ -33,6 +33,11 @@ export function pause(el) {
   if (el && !el.paused) el.pause();
 }
 
+// Starts a paused clip again (after a clip that was to take its place was cancelled or refused).
+export function resume(el) {
+  if (el && el.paused && addresses.has(el)) el.play().catch(() => { });
+}
+
 // Lets the clip shown in the element go.
 export function release(el) {
   if (el) forget(el);

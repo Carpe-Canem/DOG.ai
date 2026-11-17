@@ -251,6 +251,19 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
     /// <summary>True from the moment a video is asked for until it is finished, cancelled or has failed.</summary>
     public bool IsMakingVideo => Volatile.Read(ref _clips) > 0;
 
+    /// <summary>
+    /// True while a video is made on a card that something else holds part of (another program, or a guest that is
+    /// being used): the engine is then given a plan, keeps part of the model in RAM, and is asked for no previews.
+    /// </summary>
+    public bool IsVideoCrowded
+    {
+        get => _videoCrowded;
+        private set => _videoCrowded = value;
+    }
+
+    // Written by the clip's thread, read by the page's.
+    private volatile bool _videoCrowded;
+
     bool IVideoEngine.IsBusy => IsMakingVideo;
 
     bool IVideoEngine.IsRunning => _video is { IsRunning: true };
@@ -437,11 +450,18 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
             await _turn.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await ClearForVideoAsync(request, progress, ct).ConfigureAwait(false);
-                return await video.MakeAsync(model, request, progress, ct).ConfigureAwait(false);
+                var free = await ClearForVideoAsync(request, progress, ct).ConfigureAwait(false);
+                // The engine is told what is free: it does not see what other programs hold (VideoMemory.EnginePlan).
+                IsVideoCrowded = VideoMemory.Crowded(free);
+                if (IsVideoCrowded) Changed?.Invoke();
+                // On a crowded card the full-size previews are what does not fit: each one took most of a minute
+                // (a clip of 2½ minutes took 4½ with them and 2½ without, beside a program holding 6.8 GB).
+                var asked = IsVideoCrowded ? request with { Preview = false } : request;
+                return await video.MakeAsync(model, asked, free, progress, ct).ConfigureAwait(false);
             }
             finally
             {
+                IsVideoCrowded = false;
                 // The engine ends its program with the clip; this only makes sure of it before anything else gets the card.
                 await EndVideoAsync().ConfigureAwait(false);
                 _turn.Release();
@@ -463,8 +483,11 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         Noted?.Invoke("the video program was still running and was ended.");
     }
 
-    /// <summary>Takes everything off the card for a clip, then checks that the card has the room. Called while holding a turn.</summary>
-    private async Task ClearForVideoAsync(VideoRequest request, IProgress<VideoProgress>? progress, CancellationToken ct)
+    /// <summary>
+    /// Takes everything off the card for a clip, then checks that the card has the room. Called while holding a turn.
+    /// Returns what is free on the cleared card, or null when the card could not be measured.
+    /// </summary>
+    private async Task<long?> ClearForVideoAsync(VideoRequest request, IProgress<VideoProgress>? progress, CancellationToken ct)
     {
         var need = VideoMemory.Need(request);
         var stopped = Interlocked.Exchange(ref _stoppedLoad, 0) == 1;
@@ -513,6 +536,15 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
             now = await _meter.ReadAsync(ct).ConfigureAwait(false);
         }
 
+        // A card that still looks partly used may only be slow to give back what a program held that ended a moment
+        // ago (the video program of the clip before, with nothing of DOG.ai's to move this time): look a little
+        // longer before refusing the clip or planning it for a crowded card.
+        for (var look = 0; look < 4 && now is not null && VideoMemory.Crowded(now.FreeBytes); look++)
+        {
+            await Task.Delay(PollInterval, ct).ConfigureAwait(false);
+            now = await _meter.ReadAsync(ct).ConfigureAwait(false);
+        }
+
         var setAside = _chat.IsResting && (stopped || gone.Count > 0 && gone[0].StartsWith(ChatName, StringComparison.Ordinal));
         LastDecision = new CardDecision(setAside ? CardChoice.SetChatAside : CardChoice.NothingLoaded, need, now?.FreeBytes ?? -1);
         var moved = gone.Count == 0 ? "nothing else was on the card" : CardCleared.List(gone);
@@ -526,7 +558,10 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         }
         Noted?.Invoke(now is null
             ? $"a video needs the whole card (about {Gb(need)}); {moved}. The card could not be measured."
-            : $"a video needs the whole card (about {Gb(need)}); {moved}. {Gb(now.FreeBytes)} is free.");
+            : VideoMemory.Crowded(now.FreeBytes)
+                ? $"a video needs the whole card (about {Gb(need)}); {moved}. Only {Gb(now.FreeBytes)} is free (something else holds part of the card), so the video engine was told to plan with {VideoMemory.EnginePlan(now.FreeBytes)} GB and to send no previews."
+                : $"a video needs the whole card (about {Gb(need)}); {moved}. {Gb(now.FreeBytes)} is free.");
+        return now?.FreeBytes;
     }
 
     /// <summary>

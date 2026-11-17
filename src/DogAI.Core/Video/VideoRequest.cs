@@ -300,6 +300,15 @@ public interface IVideoEngine
     /// <exception cref="VideoEngineException">A file is missing, the engine is missing or failed, the card has too little room, or the clip was not a clean WebM.</exception>
     Task<VideoResult> MakeAsync(VideoModel model, VideoRequest request, IProgress<VideoProgress>? progress = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// The same, told how much graphics memory is free now, measured by whoever cleared the card for the clip (the
+    /// card coordinator). The video program is started with a plan made from it (<see cref="VideoMemory.EnginePlan"/>):
+    /// the engine does not see what other programs hold. An engine that has no use for it makes the clip as ever.
+    /// </summary>
+    /// <param name="cardFreeBytes">Free graphics memory after the card was cleared, or null when it could not be measured.</param>
+    Task<VideoResult> MakeAsync(VideoModel model, VideoRequest request, long? cardFreeBytes, IProgress<VideoProgress>? progress, CancellationToken ct) =>
+        MakeAsync(model, request, progress, ct);
+
     /// <summary>Ends the video program if it is running (a clip being made fails).</summary>
     Task StopAsync();
 }

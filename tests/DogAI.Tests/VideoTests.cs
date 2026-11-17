@@ -584,7 +584,27 @@ public class VideoApiTests
         var job = await Api(new FakeVideoSd { Steps = 0 }.Also(s => s.Started.Add(SdApi.VideoBody(request, 1)))).VideoJobAsync("job-v");
         Assert.DoesNotContain(Word, System.Text.Json.JsonSerializer.Serialize(new { made.Frames, made.Fps, made.Format, job.Status, job.Error, job.PreviewStep }));
         Assert.Equal(["File", "Frames", "Fps", "Format"], typeof(SdVideo).GetProperties().Select(p => p.Name).Where(n => n != "EqualityContract"));
-        Assert.Equal(["Status", "Progress", "PreviewStep", "Preview", "Video", "Error", "IsFinished"], typeof(SdVideoJob).GetProperties().Select(p => p.Name).Where(n => n != "EqualityContract"));
+        Assert.Equal(["Status", "Progress", "PreviewStep", "Preview", "Video", "Error", "PreviewChars", "IsFinished"], typeof(SdVideoJob).GetProperties().Select(p => p.Name).Where(n => n != "EqualityContract"));
+    }
+
+    [Fact]
+    public void A_preview_the_engine_repeats_is_not_decoded_again()
+    {
+        var png = Convert.ToBase64String([0x89, (byte)'P', (byte)'N', (byte)'G', 1, 2, 3, 4]);
+        var node = JsonNode.Parse($$"""
+            {"status":"generating","progress":{"stage":"sampling","unit":"steps","completed":5,"total":20},"preview":{"b64_json":"{{png}}","step":4} }
+            """)!.AsObject();
+
+        var first = SdApi.ParseVideoJob(node);
+        Assert.NotNull(first.Preview);
+        Assert.Equal((4, png.Length), (first.PreviewStep, first.PreviewChars));
+
+        // The same preview on the next poll: told apart by its step and length, and left as text.
+        var again = SdApi.ParseVideoJob(node, (first.PreviewStep, first.PreviewChars));
+        Assert.Null(again.Preview);
+        Assert.Equal((4, png.Length), (again.PreviewStep, again.PreviewChars));
+        // The next one is decoded.
+        Assert.NotNull(SdApi.ParseVideoJob(node, (3, png.Length)).Preview);
     }
 
     [Fact]
@@ -884,6 +904,15 @@ internal sealed class FakeVideoEngine : IVideoEngine
     public TaskCompletionSource? Hold { get; set; }
     public TaskCompletionSource Held { get; private set; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    /// <summary>What it was told is free on the card, per clip asked for through the card coordinator.</summary>
+    public List<long?> Told { get; } = [];
+
+    public Task<VideoResult> MakeAsync(VideoModel model, VideoRequest request, long? cardFreeBytes, IProgress<VideoProgress>? progress, CancellationToken ct)
+    {
+        Told.Add(cardFreeBytes);
+        return MakeAsync(model, request, progress, ct);
+    }
+
     public async Task<VideoResult> MakeAsync(VideoModel model, VideoRequest request, IProgress<VideoProgress>? progress = null, CancellationToken ct = default)
     {
         if (request.Problems() is { Count: > 0 } problems) throw new VideoEngineException(string.Join(" ", problems));
@@ -1096,6 +1125,125 @@ public class VideoCardTests : IDisposable
         Assert.False(rig.Video.IsRunning);
         Assert.False(rig.Coordinator.IsMakingVideo);
         Assert.Null(rig.Coordinator.BusyReason);
+    }
+
+    /// <summary>
+    /// M20 step 6: the engine does not see what other programs hold on the card (with 6.8 GB held it reported 23.0 GB
+    /// free, filled the card and a clip took four times as long). So the engine is told what DOG.ai measured.
+    /// </summary>
+    [Fact]
+    public void The_engine_is_given_a_plan_only_when_part_of_the_card_is_in_use()
+    {
+        // The whole card, or one that cannot be measured: as in every clip measured in M20.
+        Assert.Equal("-3", VideoMemory.EnginePlan(null));
+        Assert.Equal("-3", VideoMemory.EnginePlan((long)(22.6 * Gb)));
+        Assert.Equal("-3", VideoMemory.EnginePlan(22 * Gb));
+        Assert.False(VideoMemory.Crowded(null));
+        Assert.False(VideoMemory.Crowded(22 * Gb));
+
+        // Part of it in use: what is free less 3 GB, in GiB with one decimal, rounded down.
+        Assert.True(VideoMemory.Crowded(22 * Gb - 1));
+        Assert.Equal("12.7", VideoMemory.EnginePlan((long)(15.75 * Gb)));
+        Assert.Equal("11.5", VideoMemory.EnginePlan((long)(14.5 * Gb)));
+        Assert.Equal("12.0", VideoMemory.EnginePlan(15 * Gb));
+        // Never over 14 GB: under the model's own 15.3 GB, or the engine puts all of it on the card and takes 21.7 GB.
+        Assert.Equal("14.0", VideoMemory.EnginePlan((long)(21.9 * Gb)));
+        Assert.Equal("14.0", VideoMemory.EnginePlan(17 * Gb));
+        Assert.Equal("13.9", VideoMemory.EnginePlan((long)(16.95 * Gb)));
+        // Never nothing or less: to the engine 0 means "what I see is free" and below it a reserve.
+        Assert.Equal("1.0", VideoMemory.EnginePlan(2 * Gb));
+        Assert.Equal("1.0", VideoMemory.EnginePlan(0));
+
+        // The plan is the program's --max-vram, and nothing else about its start changes.
+        var whole = VideoServer.Arguments(_model, VideoDecoder.Fast, 1, "b.html");
+        var planned = VideoServer.Arguments(_model, VideoDecoder.Fast, 1, "b.html", VideoMemory.EnginePlan(17 * Gb));
+        Assert.Equal(["--max-vram", "-3"], whole.TakeLast(2));
+        Assert.Equal(["--max-vram", "14.0"], planned.TakeLast(2));
+        Assert.Equal(whole.SkipLast(1), planned.SkipLast(1));
+        Assert.Contains("--disable-image-metadata", planned);
+
+        Assert.Equal("Drawing, step 3 of 20", VideoPanels.Doing(new VideoProgress(VideoStages.Drawing, 3, 20), crowded: false));
+        Assert.Equal("Drawing, step 3 of 20 Part of the graphics card is in use, so nothing of the clip shows until it is done, and it may take longer than was said.", VideoPanels.Doing(new VideoProgress(VideoStages.Drawing, 3, 20), crowded: true));
+        Assert.Contains("every few steps", VideoPanels.WhileMaking(VideoDecoder.Fast));
+        Assert.DoesNotContain("every few steps", VideoPanels.WhileMaking(VideoDecoder.Fast, crowded: true));
+    }
+
+    [Fact]
+    public async Task The_engine_is_told_what_is_free_on_the_cleared_card()
+    {
+        // Nothing else on the card: 23 GB free once the chat model is aside. The engine is told so and starts as ever.
+        var rig = new Rig();
+        await rig.Engine.MakeAsync(_model, Quick with { Preview = true });
+        Assert.Equal([23 * Gb], rig.Video.Told);
+        Assert.Equal("-3", VideoMemory.EnginePlan(rig.Video.Told[0]));
+        Assert.EndsWith("23.0 GB is free.", rig.Notes[^1]);
+        Assert.False(rig.Coordinator.IsVideoCrowded);
+
+        // Another program holds 7 GB: 17 GB is free, room enough for the clip, and the engine is given a plan.
+        var crowded = new Rig();
+        crowded.Card.Other = 7 * Gb;
+        crowded.Video.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var changes = 0;
+        crowded.Coordinator.Changed += () => changes++;
+        var making = crowded.Engine.MakeAsync(_model, Quick with { Preview = true });
+        await crowded.Video.Held.Task;
+        Assert.True(crowded.Coordinator.IsVideoCrowded);
+        Assert.True(changes >= 2);
+        crowded.Video.Hold.SetResult();
+        await making;
+        Assert.Equal([17 * Gb], crowded.Video.Told);
+        Assert.Equal("14.0", VideoMemory.EnginePlan(crowded.Video.Told[0]));
+        Assert.EndsWith("Only 17.0 GB is free (something else holds part of the card), so the video engine was told to plan with 14.0 GB and to send no previews.", crowded.Notes[^1]);
+        // Full-size previews are what does not fit on a crowded card: none are asked for there.
+        Assert.False(crowded.Video.Made[0].Request.Preview);
+        Assert.True(rig.Video.Made[0].Request.Preview);
+        Assert.False(crowded.Coordinator.IsVideoCrowded);
+
+        // A clip that fails or is cancelled leaves no "crowded" behind.
+        var failing = new Rig();
+        failing.Card.Other = 7 * Gb;
+        failing.Video.FailWith = "The video engine stopped.";
+        await Assert.ThrowsAsync<VideoEngineException>(() => failing.Engine.MakeAsync(_model, Quick));
+        Assert.False(failing.Coordinator.IsVideoCrowded);
+
+        // A card that cannot be measured: the engine is told nothing and keeps its own 3 GB.
+        var blind = new Rig();
+        blind.Card.Unmeasurable = true;
+        await blind.Engine.MakeAsync(_model, Quick);
+        Assert.Equal([null], blind.Video.Told);
+    }
+
+    private sealed class SlowCard(Func<long> free) : ICardMeter
+    {
+        public Task<CardMemory?> ReadAsync(CancellationToken ct = default) => Task.FromResult<CardMemory?>(new CardMemory(24 * Gb, free(), 0, 0));
+    }
+
+    /// <summary>
+    /// M20 step 6 (the review): a clip straight after a clip finds nothing of DOG.ai's to move, and the card may not
+    /// yet have given back what the last video program held. One low reading must not refuse the clip or plan it small.
+    /// </summary>
+    [Fact]
+    public async Task A_card_slow_to_give_memory_back_is_looked_at_again()
+    {
+        var rig = new Rig(chatLoaded: false);
+        var reads = 0;
+        // 10 GB free (a clip would be refused), then 15 GB (it would be planned for a crowded card), then all of it.
+        var slow = new SlowCard(() => ++reads switch { 1 => 10 * Gb, 2 => 15 * Gb, _ => 23 * Gb });
+        var coordinator = new CardCoordinator(rig.Images, rig.Chat, slow, _ => 0, [], rig.Video) { PollInterval = TimeSpan.FromMilliseconds(5) };
+        var notes = new List<string>();
+        coordinator.Noted += notes.Add;
+
+        await ((IVideoEngine)coordinator).MakeAsync(_model, Quick);
+
+        Assert.Equal([23 * Gb], rig.Video.Told);
+        Assert.EndsWith("nothing else was on the card. 23.0 GB is free.", notes[^1]);
+
+        // A card that stays crowded costs four more looks and is then believed.
+        var stays = new SlowCard(() => 17 * Gb);
+        var crowded = new Rig(chatLoaded: false);
+        var second = new CardCoordinator(crowded.Images, crowded.Chat, stays, _ => 0, [], crowded.Video) { PollInterval = TimeSpan.FromMilliseconds(5) };
+        await ((IVideoEngine)second).MakeAsync(_model, Quick);
+        Assert.Equal([17 * Gb], crowded.Video.Told);
     }
 
     [Fact]

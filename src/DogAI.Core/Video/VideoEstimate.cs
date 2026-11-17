@@ -140,6 +140,53 @@ public static class VideoMemory
     /// <summary>Whether this much free memory on a cleared card is room enough for a clip that needs <paramref name="need"/>.</summary>
     public static bool RoomEnough(long freeBytes, long need) => freeBytes + CardSizeSlack >= need;
 
+    /// <summary>
+    /// With this much free on the cleared card the whole model and its working memory fit: the engine then takes up
+    /// to 21.7 GB by itself (measured in M20 steps 2 and 6: the card at 23.0 of 24.0 GB with Windows' 1.4 GB).
+    /// </summary>
+    public const long WholeModelFree = 22 * Gb;
+
+    /// <summary>What the engine is told to leave free of what DOG.ai measured, when part of the card is in use.</summary>
+    public const long PlanReserve = 3 * Gb;
+
+    /// <summary>
+    /// The most the engine is told to plan with when part of the card is in use. It is under the model's own 15.3 GB
+    /// on purpose: the engine then keeps a part of the model in RAM (the text encoder, 5.8 GB) and takes 14 to 17 GB
+    /// of the card (measured with another program holding 6.8 GB), where with the whole model on the card it takes
+    /// 21.7 GB whatever it was told.
+    /// </summary>
+    public const long PlanCap = 14 * Gb;
+
+    /// <summary>
+    /// True when the cleared card has too little free for the whole model (something else holds part of it: another
+    /// program, or a guest of DOG.ai's that is being used). The clip is still made, with a plan for the engine
+    /// (<see cref="EnginePlan"/>) and without previews: beside a program holding 6.8 GB a Quick clip then took 150
+    /// seconds against an estimate of 146 (with previews 268: each full-size preview took most of a minute).
+    /// </summary>
+    public static bool Crowded(long? freeBytes) => freeBytes is { } free && free < WholeModelFree;
+
+    /// <summary>
+    /// The engine's <c>--max-vram</c> value for a clip, from the free memory DOG.ai measured after it cleared the card.
+    /// <para>
+    /// The engine cannot be left to measure for itself: it does not see what other programs hold (with 6.8 GB held by
+    /// another program it reported 23.0 GB free, filled the card to 23.9 GB, borrowed 2.8 GB of Windows' shared memory,
+    /// and a clip of 58 seconds took 222; M20 step 6). So: with the whole card free, or a card that could not be
+    /// measured, <c>-3</c> as in every clip measured in M20 (the engine keeps 3 GB of what it sees); otherwise a plan
+    /// in GiB worked out here, what is free less <see cref="PlanReserve"/> and never over <see cref="PlanCap"/>.
+    /// </para>
+    /// </summary>
+    public static string EnginePlan(long? freeBytes)
+    {
+        if (freeBytes is not { } free || !Crowded(free)) return WholeCardPlan;
+        var plan = Math.Min(free - PlanReserve, PlanCap);
+        // One decimal, rounded down, in the engine's own unit; never nothing or less (0 and below mean something else to it).
+        var tenths = Math.Max(10, plan * 10 / Gb);
+        return (tenths / 10.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>The value for a card with nothing else on it: the engine keeps 3 GB of what it measures itself.</summary>
+    public const string WholeCardPlan = "-3";
+
     /// <summary>Why a card of this size cannot make clips at this quality, in words, or null when it can.</summary>
     public static string? CannotMake(long? cardTotal, VideoQuality quality)
     {

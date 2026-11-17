@@ -38,7 +38,8 @@ public static class VideoLibrary
             [VideoFileRole.FastDecoder] = model.FastDecoderPath,
         };
         var found = VideoDownloads.Wan22.Select(d => Find(d, paths[d.Role], arriving?.Contains(d.Role) == true)).ToList();
-        return new VideoLook(root, found, Others(root, paths.Values.ToHashSet(StringComparer.OrdinalIgnoreCase)));
+        // Compared as full paths: the folder may be written another way than Windows spells it (a "/" or a ".." in it).
+        return new VideoLook(root, found, Others(root, paths.Values.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase)));
     }
 
     private static VideoFileFound Find(VideoDownload d, string path, bool arriving)

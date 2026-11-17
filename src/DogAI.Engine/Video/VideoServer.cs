@@ -83,7 +83,8 @@ public sealed class VideoServer : IVideoEngine, IDisposable
     /// (<c>-m</c>), no LoRA or upscaler folder, and never <c>--offload-to-cpu</c> or <c>--mmap</c> (with 32 GB of RAM
     /// they left 2.7 GB free and were slower).
     /// </summary>
-    public static IReadOnlyList<string> Arguments(VideoModel model, VideoDecoder decoder, int port, string blankPage)
+    /// <param name="plan">The <c>--max-vram</c> value (<see cref="VideoMemory.EnginePlan"/>): <c>-3</c> unless part of the card is in use.</param>
+    public static IReadOnlyList<string> Arguments(VideoModel model, VideoDecoder decoder, int port, string blankPage, string plan = VideoMemory.WholeCardPlan)
     {
         var args = new List<string>
         {
@@ -104,13 +105,17 @@ public sealed class VideoServer : IVideoEngine, IDisposable
             "--completed-ttl-seconds", "60",
             // Without this the prompt is written inside the clip. The request cannot ask for it; only this switch can.
             "--disable-image-metadata",
-            // Keep 3 GB of the card free: without it the first clip of a fresh program once overflowed the card.
-            "--max-vram", "-3",
+            // Keep 3 GB of the card free: without it the first clip of a fresh program once overflowed the card. When
+            // part of the card is in use, a plan in GiB that DOG.ai worked out: the engine does not see what others hold.
+            "--max-vram", plan,
         ]);
         return args;
     }
 
-    public async Task<VideoResult> MakeAsync(VideoModel model, VideoRequest request, IProgress<VideoProgress>? progress = null, CancellationToken ct = default)
+    public Task<VideoResult> MakeAsync(VideoModel model, VideoRequest request, IProgress<VideoProgress>? progress = null, CancellationToken ct = default) =>
+        MakeAsync(model, request, null, progress, ct);
+
+    public async Task<VideoResult> MakeAsync(VideoModel model, VideoRequest request, long? cardFreeBytes, IProgress<VideoProgress>? progress, CancellationToken ct)
     {
         if (request.Problems() is { Count: > 0 } problems) throw new VideoEngineException(string.Join(" ", problems));
         if (model.Problem() is { } missing) throw new VideoEngineException(missing);
@@ -121,7 +126,7 @@ public sealed class VideoServer : IVideoEngine, IDisposable
         try
         {
             progress?.Report(new VideoProgress(VideoStages.Starting));
-            var api = await StartAsync(model, request.Decoder, ct).ConfigureAwait(false);
+            var api = await StartAsync(model, request.Decoder, VideoMemory.EnginePlan(cardFreeBytes), ct).ConfigureAwait(false);
             try
             {
                 var result = await MakeWithAsync(api, request, progress, ct).ConfigureAwait(false);
@@ -172,7 +177,7 @@ public sealed class VideoServer : IVideoEngine, IDisposable
         return Task.CompletedTask;
     }
 
-    private async Task<SdApi> StartAsync(VideoModel model, VideoDecoder decoder, CancellationToken ct)
+    private async Task<SdApi> StartAsync(VideoModel model, VideoDecoder decoder, string plan, CancellationToken ct)
     {
         StopProcess();
         Changed?.Invoke();
@@ -188,7 +193,7 @@ public sealed class VideoServer : IVideoEngine, IDisposable
                 RedirectStandardError = true,
                 WorkingDirectory = Path.GetDirectoryName(exe)!,
             };
-            foreach (var arg in Arguments(model, decoder, port, ImageServer.BlankPageIn(_paths)))
+            foreach (var arg in Arguments(model, decoder, port, ImageServer.BlankPageIn(_paths), plan))
                 start.ArgumentList.Add(arg);
             EngineEnvironment.Clean(start);
 

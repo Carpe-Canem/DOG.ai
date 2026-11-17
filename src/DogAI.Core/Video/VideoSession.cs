@@ -265,10 +265,10 @@ public sealed class VideoSession
     }
 
     /// <summary>Marks a try as kept, so Keep is not offered twice for it.</summary>
-    public VideoTry Kept(VideoTry kept, long id) => Replace(kept, kept with { KeptId = id });
+    public VideoTry Kept(VideoTry kept, long id) => Change(kept, t => t with { KeptId = id });
 
-    /// <summary>Gives a try the still the page made from its first frame.</summary>
-    public VideoTry WithStill(VideoTry made, byte[] still) => Replace(made, made with { Still = still });
+    /// <summary>Gives a try the still the page made from its first frame (the first one made stays).</summary>
+    public VideoTry WithStill(VideoTry made, byte[] still) => Change(made, t => t.Still is null ? t with { Still = still } : t);
 
     /// <summary>A kept clip was removed: any try kept as that row is marked not kept again. True when a try was marked.</summary>
     public bool Unkept(long id)
@@ -362,22 +362,27 @@ public sealed class VideoSession
         throw new InvalidOperationException("A video is already being made.");
     }
 
-    private VideoTry Replace(VideoTry was, VideoTry now)
+    /// <summary>
+    /// Changes the try as it is now and returns it. Found by its number, not by reference: the caller may hold the
+    /// record from before another change (its still arrived while Keep was pressed), and a change made to that old
+    /// record would be lost, leaving the clip in the strip unmarked. A try that was let go meanwhile is changed and
+    /// handed back without being put back.
+    /// </summary>
+    private VideoTry Change(VideoTry was, Func<VideoTry, VideoTry> change)
     {
-        var replaced = false;
+        VideoTry now;
         lock (_gate)
         {
-            // Compared by reference: a try's fields could match another's.
-            var index = _tries.FindIndex(t => ReferenceEquals(t, was));
-            if (index >= 0)
-            {
-                _tries[index] = now;
-                replaced = true;
-            }
-            if (ReferenceEquals(_selected, was)) _selected = now;
+            var index = _tries.FindIndex(t => t.Number == was.Number);
+            if (index < 0) return change(was);
+            var current = _tries[index];
+            now = change(current);
+            if (ReferenceEquals(now, current)) return now;
+            _tries[index] = now;
+            if (_selected?.Number == now.Number) _selected = now;
             _shown = [.. _tries];
         }
-        if (replaced) Changed?.Invoke();
+        Changed?.Invoke();
         return now;
     }
 
@@ -598,12 +603,21 @@ public static class VideoPanels
     };
 
     /// <summary>
+    /// The same, with one more line while the clip is made on a card that something else holds part of
+    /// (<see cref="CardCoordinator.IsVideoCrowded"/>): the estimate was for the whole card.
+    /// </summary>
+    public static string Doing(VideoProgress? p, bool crowded) => crowded ? $"{Doing(p)} {Crowded}" : Doing(p);
+
+    public const string Crowded = "Part of the graphics card is in use, so nothing of the clip shows until it is done, and it may take longer than was said.";
+
+    /// <summary>
     /// What the stage says while a clip is made and no picture of it has come yet. With the fast decoder the engine
     /// sends a frame every four steps; with the model's own decoder (Better) its previews failed at every step in
     /// M20 step 4 ("preview decode failed"), so nothing is promised there.
     /// </summary>
-    public static string WhileMaking(VideoDecoder decoder) => decoder == VideoDecoder.Fast
-        ? "Its frames show here every few steps while it is drawn."
+    public static string WhileMaking(VideoDecoder decoder, bool crowded = false) =>
+        crowded ? "Nothing of it shows until it is done; the bar below says how far it is."
+        : decoder == VideoDecoder.Fast ? "Its frames show here every few steps while it is drawn."
         : "At Better nothing of it shows until it is done; the bar below says how far it is.";
 
     /// <summary>The note after a clip: how long it took against what was said before.</summary>

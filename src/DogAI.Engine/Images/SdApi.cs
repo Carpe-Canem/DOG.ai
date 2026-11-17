@@ -28,7 +28,9 @@ public sealed record SdVideo(byte[] File, int? Frames, int? Fps, string? Format)
 
 /// <summary>A clip's job as sd-server reports it.</summary>
 /// <param name="Status">queued, generating, completed, failed or cancelled.</param>
-public sealed record SdVideoJob(string Status, VideoProgress? Progress, int? PreviewStep, byte[]? Preview, SdVideo? Video, string? Error)
+/// <param name="Preview">The newest preview, or null when there is none or it is the one already shown (it is then not decoded again).</param>
+/// <param name="PreviewChars">The length of the preview's base64 text: with its step, what tells one preview from the next.</param>
+public sealed record SdVideoJob(string Status, VideoProgress? Progress, int? PreviewStep, byte[]? Preview, SdVideo? Video, string? Error, int PreviewChars = 0)
 {
     public bool IsFinished => Status is "completed" or "failed" or "cancelled";
 }
@@ -282,7 +284,8 @@ public sealed class SdApi(HttpClient http, int port)
         return Text(node?["id"]) ?? throw new VideoEngineException("The video engine did not say which job it started.");
     }
 
-    public async Task<SdVideoJob> VideoJobAsync(string id, CancellationToken ct = default)
+    /// <param name="shown">The preview already passed on (its step and base64 length): the engine repeats it on every poll, and it is not decoded again.</param>
+    public async Task<SdVideoJob> VideoJobAsync(string id, CancellationToken ct = default, (int? Step, int Chars)? shown = null)
     {
         using var response = await http.GetAsync(_base + "jobs/" + Uri.EscapeDataString(id), ct).ConfigureAwait(false);
         var node = await ReadJsonAsync(response, ct).ConfigureAwait(false);
@@ -290,7 +293,7 @@ public sealed class SdApi(HttpClient http, int port)
             throw new VideoEngineException(response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone
                 ? "The video engine no longer knows this video (it may have restarted)."
                 : Refusal(response.StatusCode, node, "video"));
-        return ParseVideoJob(node as JsonObject ?? []);
+        return ParseVideoJob(node as JsonObject ?? [], shown);
     }
 
     /// <summary>
@@ -302,17 +305,18 @@ public sealed class SdApi(HttpClient http, int port)
     {
         var id = await StartVideoAsync(VideoBody(request, seed), ct).ConfigureAwait(false);
         VideoProgress? last = null;
-        (int? Step, int Length)? lastPreview = null;
+        (int? Step, int Chars)? lastPreview = null;
         try
         {
             while (true)
             {
-                var job = await VideoJobAsync(id, ct).ConfigureAwait(false);
+                // The engine repeats its newest preview (0.5 to 1.4 MB) on every poll: only a new one is decoded.
+                var job = await VideoJobAsync(id, ct, lastPreview).ConfigureAwait(false);
                 if (progress is not null && job.Progress is not null)
                 {
                     var now = job.Progress;
-                    var preview = job.Preview is not null && lastPreview != (job.PreviewStep, job.Preview.Length) ? job.Preview : null;
-                    if (preview is not null) lastPreview = (job.PreviewStep, preview.Length);
+                    var preview = job.Preview;
+                    if (preview is not null) lastPreview = (job.PreviewStep, job.PreviewChars);
                     if (preview is not null || last is null || last.Stage != now.Stage || last.Step != now.Step || last.TotalSteps != now.TotalSteps)
                     {
                         last = now;
@@ -343,7 +347,7 @@ public sealed class SdApi(HttpClient http, int port)
     /// Reads a clip's job. Only the named fields are taken: the engine's <c>generation_info</c>, which repeats the
     /// prompt, the negative prompt and the model's file names, is never read, kept or passed on.
     /// </summary>
-    internal static SdVideoJob ParseVideoJob(JsonObject node)
+    internal static SdVideoJob ParseVideoJob(JsonObject node, (int? Step, int Chars)? shown = null)
     {
         var status = Text(node["status"]) ?? "unknown";
 
@@ -356,10 +360,12 @@ public sealed class SdApi(HttpClient http, int port)
 
         byte[]? preview = null;
         int? previewStep = null;
+        var previewChars = 0;
         if (node["preview"] is JsonObject v && Text(v["b64_json"]) is { Length: > 0 } b64)
         {
-            preview = Decode(b64);
             previewStep = Int(v["step"]);
+            previewChars = b64.Length;
+            if (shown != (previewStep, previewChars)) preview = Decode(b64);
         }
 
         SdVideo? video = null;
@@ -372,7 +378,7 @@ public sealed class SdApi(HttpClient http, int port)
             JsonValue s => Text(s),
             _ => null,
         };
-        return new SdVideoJob(status, progress, previewStep, preview, video, error);
+        return new SdVideoJob(status, progress, previewStep, preview, video, error, previewChars);
     }
 
     /// <summary>The upscaler files the engine found that can enlarge a picture (their names, without the extension).</summary>

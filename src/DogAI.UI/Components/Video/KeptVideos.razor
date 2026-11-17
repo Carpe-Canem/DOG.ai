@@ -220,26 +220,40 @@
         _error = _viewError = null;
         _note = null;
         _confirmRemove = false;
-        await ReleaseAsync();
-        var clip = await Clips.GetAsync(id);
-        if (clip?.Video is null)
+        _changing = true;
+        try
         {
-            _viewing = null;
-            _frameSrc = null;
-            _error = "That video is not there any more.";
-            Forget(id);
-            return;
+            await ReleaseAsync();
+            var clip = await Clips.GetAsync(id);
+            if (clip?.Video is null)
+            {
+                _viewing = null;
+                _frameSrc = null;
+                _error = "That video is not there any more.";
+                Forget(id);
+                return;
+            }
+            _viewing = clip;
+            _frameSrc = clip.StartFrame is { } frame
+                ? (WebpInfo.Read(frame) is not null ? "data:image/webp;base64," : "data:image/jpeg;base64,") + Convert.ToBase64String(frame)
+                : null;
         }
-        _viewing = clip;
-        _frameSrc = clip.StartFrame is { } frame
-            ? (WebpInfo.Read(frame) is not null ? "data:image/webp;base64," : "data:image/jpeg;base64,") + Convert.ToBase64String(frame)
-            : null;
+        finally
+        {
+            _changing = false;
+        }
     }
+
+    /// <summary>
+    /// True while the view goes from one clip to another, or closes: a render that comes meanwhile (the page draws
+    /// every second while a clip is made) must not give the player the clip it is just letting go.
+    /// </summary>
+    private bool _changing;
 
     /// <summary>The player gets the clip's bytes once per clip opened, after the dialog is drawn.</summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_viewing is not { Video: { } webm } viewed || _playing == viewed.Id) return;
+        if (_changing || _viewing is not { Video: { } webm } viewed || _playing == viewed.Id) return;
         try
         {
             var module = await VideoAsync();
@@ -267,11 +281,19 @@
 
     private async Task CloseAsync()
     {
-        await ReleaseAsync();
-        _viewing = null;
-        _frameSrc = null;
-        _confirmRemove = false;
-        _viewError = null;
+        _changing = true;
+        try
+        {
+            await ReleaseAsync();
+            _viewing = null;
+            _frameSrc = null;
+            _confirmRemove = false;
+            _viewError = null;
+        }
+        finally
+        {
+            _changing = false;
+        }
     }
 
     /// <summary>The clip before (-1, newer) or after (+1, older) this one among those shown, or null.</summary>
@@ -290,6 +312,7 @@
     private async Task LikeAsync(Clip clip)
     {
         _busy = true;
+        _changing = true;
         _viewError = null;
         try
         {
@@ -297,10 +320,13 @@
             await ReleaseAsync();
             _viewError = await Like(clip);
             if (_viewError is not null && !_disposed) _playing = null; // played again on the next render
+            // Done: the Make tab is opening and this view is closed, so no render gives the player the clip again.
+            if (_viewError is null) (_viewing, _frameSrc) = (null, null);
         }
         finally
         {
             _busy = false;
+            _changing = false;
         }
     }
 

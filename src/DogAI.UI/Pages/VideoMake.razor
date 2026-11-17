@@ -81,7 +81,7 @@ else
                     <div class="images-empty" id="video-working">
                         <Icon Name="video" Size="40" />
                         <p>Making the clip…</p>
-                        <p class="small" id="video-working-note">@VideoPanels.WhileMaking(Session.Making?.Decoder ?? VideoDecoder.Fast)</p>
+                        <p class="small" id="video-working-note">@VideoPanels.WhileMaking(Session.Making?.Decoder ?? VideoDecoder.Fast, Coordinator.IsVideoCrowded)</p>
                     </div>
                 }
                 else if (shown is null && Session.Frame is not null)
@@ -297,13 +297,18 @@ else
     private async Task ReleasePlayerAsync()
     {
         if (_playing is null || _video is null) return;
-        _playing = null;
         try
         {
             await _video.InvokeVoidAsync("release", _player);
         }
         catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
         {
+        }
+        finally
+        {
+            // Only now: a render that came while the page let go would otherwise give the clip to the player again,
+            // just before the player leaves the page, and its address would stay held.
+            _playing = null;
         }
     }
 
@@ -372,7 +377,7 @@ else
     private IReadOnlyList<string> FieldProblems => [.. Problems.Where(p => !p.StartsWith("Say in a sentence", StringComparison.Ordinal))];
 
     private string StatusText =>
-        Session.IsMaking ? VideoPanels.Doing(Session.Progress)
+        Session.IsMaking ? VideoPanels.Doing(Session.Progress, Coordinator.IsVideoCrowded)
         : $"{VideoPanels.EstimateLine(Estimate())} · {VideoPanels.QualitySummary(Quality, Shape)}";
 
     // The preview is a full-size PNG (0.5 to 1.4 MB): its address is made once per preview, not on every render.
@@ -485,10 +490,12 @@ else
         catch (OperationCanceledException)
         {
             _note = "Cancelled.";
+            await ResumeAsync();
         }
         catch (Exception e) when (e is VideoEngineException or InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             _error = e.Message;
+            await ResumeAsync();
         }
         finally
         {
@@ -505,6 +512,24 @@ else
     private async Task<VideoTry> StillAsync(VideoTry made)
     {
         if (made.Still is not null) return made;
+        // Asked for from three places (a clip arriving, the player, Keep), often at once: the still is made once.
+        if (_stills.TryGetValue(made.Number, out var going)) return await going;
+        var making = MakeStillAsync(made);
+        _stills[made.Number] = making;
+        try
+        {
+            return await making;
+        }
+        finally
+        {
+            _stills.Remove(made.Number);
+        }
+    }
+
+    private readonly Dictionary<int, Task<VideoTry>> _stills = [];
+
+    private async Task<VideoTry> MakeStillAsync(VideoTry made)
+    {
         try
         {
             _video ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/video.js");
@@ -594,6 +619,19 @@ else
             await _video.InvokeVoidAsync("pause", _player);
         }
         catch (JSException)
+        {
+        }
+    }
+
+    /// <summary>No new clip came (cancelled, refused): the clip shown before plays on, as it did before Draw paused it.</summary>
+    private async Task ResumeAsync()
+    {
+        if (_playing is null || _video is null) return;
+        try
+        {
+            await _video.InvokeVoidAsync("resume", _player);
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException or TaskCanceledException)
         {
         }
     }

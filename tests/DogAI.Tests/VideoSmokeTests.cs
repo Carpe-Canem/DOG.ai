@@ -167,6 +167,84 @@ public class VideoSmokeTests(ITestOutputHelper output)
         }
     }
 
+    /// <summary>
+    /// What the WebM check is for, on the real engine: the same program started <b>without</b> its metadata switch
+    /// writes the sentence inside the clip (the trial saw it), and DOG.ai refuses that clip, in words that do not
+    /// repeat the sentence. If a later engine version writes the prompt some other way, this is the test that says so.
+    /// Takes about half a minute.
+    /// </summary>
+    [Fact]
+    public async Task The_real_engine_started_without_its_metadata_switch_is_refused()
+    {
+        if (Setup() is not { } setup) return;
+        var root = Path.Combine(Path.GetTempPath(), "dogai-videonoswitch-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        Process? process = null;
+        try
+        {
+            var paths = new AppPaths(root);
+            using var http = new LoopbackHttp();
+            using var server = new VideoServer(http, new SdServerLocator(paths), paths);
+            var port = EngineManager.FreePort();
+            var switches = VideoServer.Arguments(setup.Model, VideoDecoder.Fast, port, ImageServer.BlankPageIn(paths));
+            var without = switches.Where(a => a != "--disable-image-metadata").ToList();
+            Assert.Equal(switches.Count - 1, without.Count);
+
+            var start = new ProcessStartInfo(setup.Exe)
+            {
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+                WorkingDirectory = Path.GetDirectoryName(setup.Exe)!,
+            };
+            foreach (var arg in without) start.ArgumentList.Add(arg);
+            EngineEnvironment.Clean(start);
+            process = new Process { StartInfo = start };
+            process.OutputDataReceived += (_, _) => { };
+            process.ErrorDataReceived += (_, _) => { };
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            var api = new SdApi(http.Client, port);
+            var clock = Stopwatch.StartNew();
+            while (!await api.HealthAsync())
+            {
+                Assert.False(process.HasExited, "the engine ended while starting");
+                Assert.True(clock.Elapsed < TimeSpan.FromSeconds(60), "the engine did not answer");
+                await Task.Delay(100);
+            }
+
+            // What the engine sends back when nothing told it to leave the clip plain: the sentence is inside the file.
+            var request = Short($"A red kite climbs over a green hill, {Marker}");
+            var made = await api.MakeVideoAsync(request, 4321, null, default);
+            output.WriteLine($"without the switch: {made.File.Length:N0} bytes");
+            output.WriteLine(Tree(made.File));
+            Assert.True(Holds(made.File, Marker), "this engine no longer writes the sentence into a clip made without the switch: look at what it writes instead");
+
+            // The check every clip goes through (before it is shown, and again before it is kept) refuses it.
+            var problem = VideoClips.Problem(made.File, request);
+            output.WriteLine("refused: " + problem);
+            Assert.NotNull(problem);
+            Assert.DoesNotContain(Marker, problem, StringComparison.OrdinalIgnoreCase);
+
+            // And so does the way DOG.ai asks for a clip: nothing is handed on.
+            var e = await Assert.ThrowsAsync<VideoEngineException>(() => server.MakeWithAsync(api, request, null, default));
+            output.WriteLine("DOG.ai says: " + e.Message);
+            Assert.StartsWith("The video engine made a file DOG.ai does not show or keep.", e.Message);
+            Assert.DoesNotContain(Marker, e.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("kite", e.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            try
+            {
+                if (process is { HasExited: false }) { process.Kill(entireProcessTree: true); process.WaitForExit(5000); }
+            }
+            catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+            process?.Dispose();
+            try { Directory.Delete(root, recursive: true); } catch (IOException) { }
+        }
+    }
+
     private sealed class NoRecords : IModelRecordStore
     {
         public Task<IReadOnlyList<ModelRecord>> AllAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ModelRecord>>([]);

@@ -162,6 +162,39 @@ public class VideoMakeTests : IDisposable
         Assert.False(session.Unkept(42));
     }
 
+    /// <summary>
+    /// M20 step 6 (the review): Keep can be pressed while the clip's still is being made, and then holds the record
+    /// from before the still arrived. Marking that old record must mark the clip in the strip, or Keep is offered again
+    /// and the same clip is written twice.
+    /// </summary>
+    [Fact]
+    public async Task A_try_is_marked_by_whoever_holds_an_older_record_of_it()
+    {
+        var session = new VideoSession();
+        var made = await session.MakeAsync(new FakeVideoEngine(), _model, Quick(3), Estimate(Quick(3)));
+        var still = KeptPictureTests.Webp(384, 256);
+
+        // The still arrives; then Keep, which read the try before that, marks it.
+        session.WithStill(made, still);
+        var kept = session.Kept(made, 7);
+        Assert.Equal(7, kept.KeptId);
+        Assert.Same(still, kept.Still);
+        Assert.Same(kept, Assert.Single(session.Tries));
+        Assert.Same(kept, session.Selected);
+
+        // A second still for the same try (two places asked at once) changes nothing: the first one stays.
+        var changes = 0;
+        session.Changed += () => changes++;
+        var second = session.WithStill(made, KeptPictureTests.Webp(384, 256));
+        Assert.Same(kept, second);
+        Assert.Equal(0, changes);
+
+        // A try that was let go meanwhile is handed back changed, and is not put back.
+        session.Clear();
+        Assert.Equal(9, session.Kept(made, 9).KeptId);
+        Assert.Empty(session.Tries);
+    }
+
     [Fact]
     public void The_session_holds_nothing_that_could_be_saved_and_the_controls_document_holds_no_sentence()
     {
