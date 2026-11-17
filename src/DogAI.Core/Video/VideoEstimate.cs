@@ -1,4 +1,5 @@
 using DogAI.Core.Images;
+using DogAI.Core.Models;
 
 namespace DogAI.Core.Video;
 
@@ -38,6 +39,16 @@ public sealed record VideoEstimate(double Start, double Drawing, double Decoding
 
     /// <summary>A start frame is read in half a second.</summary>
     private const double StartFrame = 0.5;
+
+    /// <summary>How long after a clip Windows is taken to still hold the model's files.</summary>
+    public static readonly TimeSpan WarmFor = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Whether the next clip starts warm: one was finished within <see cref="WarmFor"/> and nothing large (a chat model,
+    /// the picture model) is in memory now, which would have pushed the files out of Windows' cache. Errs cold.
+    /// </summary>
+    public static bool IsWarm(DateTime? lastMadeAtUtc, DateTime nowUtc, bool somethingLargeInMemory) =>
+        !somethingLargeInMemory && lastMadeAtUtc is { } last && nowUtc - last >= TimeSpan.Zero && nowUtc - last <= WarmFor;
 
     /// <param name="warm">True when a clip was made a moment ago and nothing large was loaded since.</param>
     public static VideoEstimate For(VideoRequest request, bool warm = false)
@@ -100,6 +111,43 @@ public static class VideoMemory
     /// asked of the engine in the trial but never tried on such a card.
     /// </summary>
     public const long SmallestCard = 16 * Gb;
+
+    /// <summary>
+    /// What a graphics card reports for its size is a little under the size on the box (this PC's 24 GB card says
+    /// 24,564 MiB, a 16 GB card about 16,376), and the needs above are whole gigabytes with a margin in them. So a card,
+    /// and the room on it, count within this of a need.
+    /// </summary>
+    public const long CardSizeSlack = 512L << 20;
+
+    /// <summary>What Windows itself keeps on the card while nothing else is there (0.9 to 1.4 GB measured here).</summary>
+    public const long WindowsHolds = 1 * Gb;
+
+    /// <summary>The need of a clip at this quality (any shape: the shapes of one quality have the same need).</summary>
+    public static long Need(VideoQuality quality) => Need(VideoRequest.For("-", quality, PictureShape.Wide));
+
+    /// <summary>
+    /// Whether a card of this size can make the clip at all: once everything else has left it, what Windows keeps
+    /// aside, the need must fit (within <see cref="CardSizeSlack"/>). A card that could not be measured counts as able
+    /// (the coordinator clears it and goes ahead). One rule for the page (Better is not offered on a 16 GB card) and
+    /// for <see cref="CardCoordinator"/>, which refuses before anything is moved.
+    /// </summary>
+    public static bool CardCanMake(long? cardTotal, VideoRequest request) =>
+        cardTotal is not { } total || total - WindowsHolds + CardSizeSlack >= Need(request);
+
+    public static bool CardCanMake(long? cardTotal, VideoQuality quality) =>
+        CardCanMake(cardTotal, VideoRequest.For("-", quality, PictureShape.Wide));
+
+    /// <summary>Whether this much free memory on a cleared card is room enough for a clip that needs <paramref name="need"/>.</summary>
+    public static bool RoomEnough(long freeBytes, long need) => freeBytes + CardSizeSlack >= need;
+
+    /// <summary>Why a card of this size cannot make clips at this quality, in words, or null when it can.</summary>
+    public static string? CannotMake(long? cardTotal, VideoQuality quality)
+    {
+        if (CardCanMake(cardTotal, quality)) return null;
+        var need = Need(quality);
+        return $"{quality} needs about {Sizes.Gb(need)} of free graphics memory, more than this card ({Sizes.Gb(cardTotal ?? 0)}) has once Windows has its part." +
+            (quality == VideoQuality.Better && CardCanMake(cardTotal, VideoQuality.Quick) ? " Quick works on it." : "");
+    }
 }
 
 /// <summary>

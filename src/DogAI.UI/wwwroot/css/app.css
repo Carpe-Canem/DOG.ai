@@ -30,17 +30,18 @@ html, body { margin: 0; height: 100%; background: #16181c; }
   --fs: 15px; --readfs: 17px; --r: 18px;
   --bg: #16132b; --surface: #201c3b; --surface2: #2c2752; --line: #3a3468; --text: #f4f1ff; --muted: #aaa4d1;
   --ink: #12102a; --ok: #5fe0a8; --warn: #ffc864; --bad: #ff8f9c;
-  --c-general: #6cb2ff; --c-characters: #ff86a5; --c-story: #bb95ff; --c-images: #ffb35c; --c-models: #5fe0a8;
+  --c-general: #6cb2ff; --c-characters: #ff86a5; --c-story: #bb95ff; --c-images: #ffb35c; --c-video: #ff8f73; --c-models: #5fe0a8;
   --accent: var(--c-general);
 }
 .skin-playhouse[data-theme=light] {
   --bg: #f2efff; --surface: #fff; --surface2: #ece8ff; --line: #d9d2f6; --text: #211c3c; --muted: #655f88;
   --ink: #fff; --ok: #11794f; --warn: #855600; --bad: #b3264a;
-  --c-general: #1c69c9; --c-characters: #c8325e; --c-story: #7140cf; --c-images: #a85a00; --c-models: #11794f;
+  --c-general: #1c69c9; --c-characters: #c8325e; --c-story: #7140cf; --c-images: #a85a00; --c-video: #b8432a; --c-models: #11794f;
 }
 .skin-playhouse[data-screen=characters] { --accent: var(--c-characters); }
 .skin-playhouse[data-screen=story] { --accent: var(--c-story); }
 .skin-playhouse[data-screen=images] { --accent: var(--c-images); }
+.skin-playhouse[data-screen=video] { --accent: var(--c-video); }
 .skin-playhouse[data-screen=models] { --accent: var(--c-models); }
 
 /* ───────── 2. Shared components ───────── */
@@ -770,6 +771,21 @@ button.cite:hover { border-color: var(--accent); }
   .kept-tools .kept-find { flex-basis: 100%; }
   .kept-tools select { flex: 1 1 0; }
 }
+/* The Video section (M20 step 4): the Images layout with a player in the picture's place and a bar under it while a clip is made. */
+.video-screen video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: min(var(--r), 10px); }
+.video-screen video[hidden] { display: none; }
+.video-bar { flex: none; width: min(100%, 720px); margin: 0 auto; height: 6px; border-radius: 999px; background: var(--surface2); border: 1px solid var(--line); overflow: hidden; }
+.video-bar > span { display: block; height: 100%; background: var(--accent); transition: width .9s linear; }
+.video-try-n { display: grid; place-items: center; width: 100%; color: var(--muted); font-weight: 600; line-height: 1.2; }
+.video-frame { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+#video-frame-thumb { height: 48px; width: auto; max-width: 96px; object-fit: cover; border-radius: min(var(--r), 6px); border: 1px solid var(--line); }
+.video-frame-from { flex: 1 1 160px; min-width: 0; color: var(--muted); }
+.video-loose { margin: 0; color: var(--muted); }
+.video-qualities { display: flex; }
+.video-qualities button { flex: 1; }
+.video-fold .seg + .small { margin-top: 6px; }
+.video-missing { max-width: 760px; margin: 24px auto; display: grid; gap: 8px; }
+@media (max-width: 520px) { .video-tries .video-try-n { width: auto; height: 88px; } }
 /* A short window: the boxes start two lines and one line high (they can still be dragged taller), so the picture keeps room. */
 @media (max-height: 720px) { #images-prompt { height: calc(2.9em + 14px); } #images-negative { height: calc(1.45em + 14px); } .images-stage { min-height: 220px; } }
 

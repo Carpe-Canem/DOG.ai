@@ -1,0 +1,584 @@
+@page "/video"
+@using System.Globalization
+@implements IDisposable
+@inject VideoSession Session
+@inject VideoChoices Choices
+@inject IVideoEngine Video
+@inject CardCoordinator Coordinator
+@inject VideoServer VideoProgram
+@inject ICardMeter Meter
+@inject IClipStore Clips
+@inject EngineManager Engine
+@inject ISettingsStore SettingsStore
+@inject SdServerLocator PictureLocator
+@inject DownloadManager Downloads
+@inject IDesktopShell Desktop
+@inject IJSRuntime JS
+
+@* The Video section (M20 step 4), modelled on the Images section's Make tab: the clip fills the page with the strip of
+   tries beside it, the sentence and the first frame sit where the chat box is, and the three controls are folds in the
+   side panel. The sentence, the frame and the tries live in VideoSession (memory only); the controls are remembered by
+   VideoChoices; a clip reaches the disk only through Keep. A clip is played from a blob: address made from its bytes
+   (video.js), let go when another is shown or the page closes. Step 5 adds Kept videos as a second address of this
+   page, so that going from tab to tab keeps a clip being made. *@
+
+<SectionContent SectionName="title">
+    <div class="head-row">
+        <div class="head-text">
+            <h2>Video</h2>
+            <p>Make a short clip from a sentence or a picture</p>
+        </div>
+        <div class="head-tools">
+            <AsideToggle Place="video" Hideable="false" Label="Open the video settings" />
+        </div>
+    </div>
+</SectionContent>
+
+@if (!_ready)
+{
+    <p class="note" id="video-looking">Looking at the video model…</p>
+}
+else if (!CanMake)
+{
+    <div class="video-missing">
+        <VideoModelMissing Look="_look" />
+    </div>
+}
+else
+{
+    var shown = Session.Selected;
+    var making = Session.IsMaking;
+    var live = making && Session.Preview is not null;
+    <div class="images-make video-make" id="video-make">
+        <div class="images-stage">
+            <div class="images-picture video-screen @(making ? "drawing" : "")">
+                <video id="video-player" @ref="_player" loop playsinline controls muted hidden="@(making || shown is null)"
+                       aria-label="@(shown is null ? "Video" : $"Try {shown.Number}")"></video>
+                @if (live)
+                {
+                    <img id="video-preview" src="@PreviewSrc()" alt="The clip so far" />
+                }
+                else if (making)
+                {
+                    <div class="images-empty" id="video-working">
+                        <Icon Name="video" Size="40" />
+                        <p>Making the clip…</p>
+                        <p class="small" id="video-working-note">@VideoPanels.WhileMaking(Session.Making?.Decoder ?? VideoDecoder.Fast)</p>
+                    </div>
+                }
+                else if (shown is null && Session.Frame is not null)
+                {
+                    <img id="video-frame-large" src="@Session.Frame.Src" alt="The first frame: the clip begins with this picture" />
+                }
+                else if (shown is null)
+                {
+                    <div class="images-empty" id="video-empty">
+                        <Icon Name="video" Size="40" />
+                        <p>Say below what the clip shows and what moves, then press Draw.</p>
+                        <p class="small">Five seconds, no sound. Add a picture to start from, if you like. Clips stay in memory until you keep one.</p>
+                    </div>
+                }
+            </div>
+            @if (Session.Tries.Count > 0)
+            {
+                <div class="images-tries video-tries" id="video-tries" role="list" aria-label="Tries">
+                    @foreach (var t in Session.Tries)
+                    {
+                        var item = t;
+                        <button class="images-try @(ReferenceEquals(item, shown) ? "active" : "") @(item.KeptId is null ? "" : "kept")" role="listitem" data-try="@item.Number"
+                                title="@VideoPanels.Meta(item)" @onclick="() => Session.Select(item)">
+                            @if (item.StillSrc is { } still)
+                            {
+                                <img src="@still" alt="@($"Try {item.Number}")" />
+                            }
+                            else
+                            {
+                                <span class="video-try-n" style="@($"aspect-ratio:{item.Result.Width}/{item.Result.Height}")">@item.Number</span>
+                            }
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+        @if (making)
+        {
+            var share = Session.BarAt(DateTime.UtcNow);
+            <div class="video-bar" id="video-progress" role="progressbar" aria-label="How far the clip is" aria-valuemin="0" aria-valuemax="100"
+                 aria-valuenow="@((int)Math.Round(share * 100))"><span style="@($"width:{(share * 100).ToString("0.#", CultureInfo.InvariantCulture)}%")"></span></div>
+        }
+        @if (shown is not null && !making)
+        {
+            <p class="images-meta small" id="video-meta">@VideoPanels.Meta(shown)</p>
+            <div class="images-acts">
+                @if (shown.KeptId is null)
+                {
+                    <button class="btn primary" id="video-keep" disabled="@_keeping" title="Keep this clip inside DOG.ai" @onclick="() => KeepAsync(shown)">Keep</button>
+                }
+                else
+                {
+                    <button class="btn" id="video-keep" disabled title="This clip is kept">Kept</button>
+                }
+                <button class="btn" id="video-use-seed" title="Make the next clip from this clip’s seed: with the same sentence and settings, the same clip"
+                        @onclick="() => UseSeedAsync(shown)">Use this seed</button>
+                <button class="btn" id="video-save" title="Save this clip as a WebM file" @onclick="() => SaveFileAsync(shown)">Save as a file…</button>
+            </div>
+        }
+        @if (_error is not null)
+        {
+            <div class="notice bad" id="video-error"><span>@_error</span></div>
+        }
+        @if (_note is not null && !making)
+        {
+            <p class="small images-note" id="video-note" role="status">@_note</p>
+        }
+    </div>
+}
+
+@if (_ready && CanMake)
+{
+    <SectionContent SectionName="composer">
+        <div class="images-composer video-composer" id="video-composer">
+            <label class="images-box">
+                <span>Sentence</span>
+                <textarea class="field" id="video-prompt" rows="3" placeholder="What the clip shows and what moves, e.g. A grey wolf in a leather jacket turns his head to the campfire; the flames flicker."
+                          value="@Session.Sentence" @oninput="e => Session.Type(Text(e))"></textarea>
+            </label>
+            <div class="images-box video-frame-row">
+                <span>First frame</span>
+                <div class="video-frame" id="video-frame">
+                    @if (Session.Frame is not null)
+                    {
+                        <img id="video-frame-thumb" src="@Session.Frame.Src" alt="The first frame" />
+                        <span class="small video-frame-from" id="video-frame-from">From @Session.Frame.From · @Session.Frame.Shape · @Session.Frame.Width × @Session.Frame.Height</span>
+                        <button type="button" class="btn" id="video-frame-remove" disabled="@Session.IsMaking" title="Make clips from the sentence alone" @onclick="() => Session.Hold(null)">Remove</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn" id="video-frame-add" disabled="@(Session.IsMaking || _picking)" title="@($"Open a picture file ({ComposerPictures.Kinds}); the clip begins with it")"
+                                @onclick="ChooseFrameAsync">Start from a picture…</button>
+                        <span class="small video-frame-from">Optional: the clip then begins with that picture.</span>
+                    }
+                    <input type="file" class="video-file" accept="@ComposerPictures.Accept" hidden @ref="_file" />
+                </div>
+            </div>
+            @if (Session.Frame is not null)
+            {
+                <p class="small video-loose" id="video-loose">@VideoPanels.FollowsLoosely</p>
+            }
+            <div class="images-send">
+                <span class="small images-status" id="video-status" role="status">@StatusText</span>
+                @if (Session.IsMaking)
+                {
+                    <button class="btn" id="video-cancel" @onclick="Session.Cancel">Cancel</button>
+                }
+                else
+                {
+                    <button class="btn primary" id="video-draw" disabled="@(Problems.Count > 0)" title="@(Problems.Count > 0 ? string.Join(" ", Problems) : "Make the clip: " + Estimate().Words())"
+                            @onclick="DrawAsync">Draw</button>
+                }
+            </div>
+            @if (!Session.IsMaking && FieldProblems.Count > 0)
+            {
+                <p class="small bad-text" id="video-problems" role="alert">@string.Join(" ", FieldProblems)</p>
+            }
+        </div>
+    </SectionContent>
+
+    <AsideRegion Place="video" Hideable="false" Title="Video settings">
+        <Fold Id="@VideoPanels.Quality" Title="@VideoPanels.Title(VideoPanels.Quality)" Summary="@VideoPanels.QualitySummary(Quality, Shape)" OpenByDefault="@VideoPanels.OpensByDefault(VideoPanels.Quality)" Level="4" Class="panel images-fold video-fold">
+            <div class="seg video-qualities" role="group" aria-label="Quality">
+                @foreach (var q in Enum.GetValues<VideoQuality>())
+                {
+                    var quality = q;
+                    var why = VideoMemory.CannotMake(_cardTotal, quality);
+                    <button type="button" id="@($"video-quality-{quality.ToString().ToLowerInvariant()}")" class="@(Quality == quality ? "active" : "")"
+                            aria-pressed="@(Quality == quality ? "true" : "false")" disabled="@(why is not null || Session.IsMaking)"
+                            title="@(why ?? VideoPanels.Blurb(quality, Shape))" @onclick="() => SetAsync(_controls with { Quality = quality })">@quality</button>
+                }
+            </div>
+            <p class="small" id="video-quality-about">@VideoPanels.Blurb(Quality, Shape)</p>
+            @if (VideoMemory.CannotMake(_cardTotal, VideoQuality.Better) is not null)
+            {
+                <p class="small" id="video-better-why">@VideoMemory.CannotMake(_cardTotal, VideoQuality.Better)</p>
+            }
+        </Fold>
+
+        <Fold Id="@VideoPanels.Shape" Title="@VideoPanels.Title(VideoPanels.Shape)" Summary="@Shape.ToString()" OpenByDefault="@VideoPanels.OpensByDefault(VideoPanels.Shape)" Level="4" Class="panel images-fold video-fold">
+            <div class="seg images-shapes" role="group" aria-label="Shape">
+                @foreach (var s in Enum.GetValues<PictureShape>())
+                {
+                    var shape = s;
+                    var size = VideoRequest.SizeOf(Quality, shape);
+                    <button type="button" id="@($"video-shape-{shape.ToString().ToLowerInvariant()}")" class="@(Shape == shape ? "active" : "")"
+                            aria-pressed="@(Shape == shape ? "true" : "false")" disabled="@(Session.Frame is not null || Session.IsMaking)"
+                            title="@($"{size.Width} × {size.Height}")" @onclick="() => SetAsync(_controls with { Shape = shape })">@shape</button>
+                }
+            </div>
+            @if (Session.Frame is not null)
+            {
+                <p class="small" id="video-shape-frame">The shape follows the first frame (@Session.Frame.Shape). Remove the picture to choose another.</p>
+            }
+            else
+            {
+                <p class="small">@VideoPanels.QualitySummary(Quality, Shape) pixels. DOG.ai’s own picture sizes, so a picture drawn here can start a clip without being cut.</p>
+            }
+        </Fold>
+
+        <Fold Id="@VideoPanels.Seed" Title="@VideoPanels.Title(VideoPanels.Seed)" Summary="@VideoPanels.SeedSummary(_controls.Seed)" OpenByDefault="@VideoPanels.OpensByDefault(VideoPanels.Seed)" Level="4" Class="panel images-fold video-fold">
+            <SeedRow Id="video-seed" Original="@SeedOriginal" Value="@_seed" ValueChanged="SeedChangedAsync" />
+            <p class="small">@(_controls.Seed is null ? "A new seed for every clip. Keep takes the seed of the clip shown." : "Every clip starts from this seed: the same sentence and settings give the same clip.")</p>
+        </Fold>
+
+        <section class="panel images-about" id="video-about">
+            <h4>About clips</h4>
+            <p class="small">Five seconds at 24 frames a second, without sound. The chat model is set aside while a clip is made and comes back with your next message. Clips stay in memory until you keep one; kept clips are inside DOG.ai, locked with the rest when the lock is on.</p>
+        </section>
+    </AsideRegion>
+}
+
+@code {
+    private bool _ready, _keeping, _picking, _starting;
+    private string? _root, _error, _note;
+    private VideoLook? _look;
+    private long? _cardTotal;
+    private VideoControls _controls = new();
+    private SeedChoice _seed = SeedChoice.New;
+    private ElementReference _player, _file;
+    private IJSObjectReference? _video, _attach;
+    private System.Threading.Timer? _ticker;
+
+    /// <summary>The clip the player holds now (by its result, which Keep and the still leave as it is), or null.</summary>
+    private VideoResult? _playing;
+
+    private bool CanMake => _look is { Ready: true } && _engine is not null && _root is not null;
+    private string? _engine;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Session.Changed += Refresh;
+        Engine.Changed += Refresh;
+        Downloads.Completed += OnDownloaded;
+        _controls = Choices.Controls;
+        _seed = _controls.Seed is null ? SeedChoice.New : SeedChoice.Keep;
+        await LookAsync();
+        _ready = true;
+        // The bar runs on the clock while the engine reports nothing (decoding, encoding).
+        _ticker = new System.Threading.Timer(_ => { if (Session.IsMaking) Refresh(); }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+        // Better is not offered on a card too small for it; measured once, in the background (it can take seconds).
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                _cardTotal = (await Meter.ReadAsync())?.TotalBytes;
+                Refresh();
+            }
+            catch (Exception)
+            {
+                // Unmeasured: both qualities are offered, and the card's own check decides.
+            }
+        });
+    }
+
+    private async Task LookAsync()
+    {
+        _engine = PictureLocator.Find();
+        _root = (await SettingsStore.LoadAsync()).VideoFolder();
+        var root = _root;
+        var arriving = VideoDownloadJobs.Arriving(Downloads.Jobs, root);
+        _look = await Task.Run(() => VideoLibrary.Look(root, arriving));
+    }
+
+    private void OnDownloaded(DownloadJob job)
+    {
+        if (job.UseCase == VideoDownloads.UseCase) _ = InvokeAsync(async () => { await LookAsync(); StateHasChanged(); });
+    }
+
+    private void Refresh() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>The quality used: Better only when this card can make it.</summary>
+    private VideoQuality Quality => VideoMemory.CardCanMake(_cardTotal, _controls.Quality) ? _controls.Quality : VideoQuality.Quick;
+
+    /// <summary>The shape used: the first frame's when there is one.</summary>
+    private PictureShape Shape => Session.Frame?.Shape ?? _controls.Shape;
+
+    private VideoRequest Build() => VideoRequest.For(Session.Sentence, Quality, Shape, _controls.Seed ?? -1, Session.Frame?.Bytes);
+
+    private VideoEstimate Estimate() =>
+        VideoEstimate.For(Build(), VideoEstimate.IsWarm(VideoProgram.LastMadeAt, DateTime.UtcNow, Engine.IsLoaded || Coordinator.IsRunning));
+
+    /// <summary>Everything that stops a clip, the empty sentence included.</summary>
+    private IReadOnlyList<string> Problems =>
+        [.. (_seed.Problem is { } seed ? [seed] : Array.Empty<string>()).Concat(Build().Problems()).Distinct()];
+
+    /// <summary>The problems worth saying under the box: not the empty sentence, which the empty box says by itself.</summary>
+    private IReadOnlyList<string> FieldProblems => [.. Problems.Where(p => !p.StartsWith("Say in a sentence", StringComparison.Ordinal))];
+
+    private string StatusText =>
+        Session.IsMaking ? VideoPanels.Doing(Session.Progress)
+        : $"{VideoPanels.EstimateLine(Estimate())} · {VideoPanels.QualitySummary(Quality, Shape)}";
+
+    // The preview is a full-size PNG (0.5 to 1.4 MB): its address is made once per preview, not on every render.
+    private byte[]? _previewOf;
+    private string? _previewSrc;
+
+    private string? PreviewSrc()
+    {
+        if (Session.Preview is not { } p) return null;
+        if (!ReferenceEquals(p, _previewOf)) (_previewOf, _previewSrc) = (p, "data:image/png;base64," + Convert.ToBase64String(p));
+        return _previewSrc;
+    }
+
+    private static string Text(ChangeEventArgs e) => e.Value?.ToString() ?? "";
+
+    private async Task SetAsync(VideoControls next)
+    {
+        _controls = next;
+        _error = null;
+        await Choices.SaveAsync(next);
+    }
+
+    // ── Seed ──
+
+    /// <summary>What Keep means in the seed row: the seed set, else the seed of the clip shown.</summary>
+    private long SeedOriginal => _controls.Seed ?? Session.Selected?.Result.Seed ?? -1;
+
+    private async Task SeedChangedAsync(SeedChoice choice)
+    {
+        _seed = choice;
+        if (choice.Problem is not null) return; // said under the row; Draw waits
+        var seed = choice.Mode == SeedMode.New ? null : (long?)choice.For(SeedOriginal);
+        await SetAsync(_controls with { Seed = seed });
+        _seed = seed is null ? SeedChoice.New : SeedChoice.Keep;
+    }
+
+    private async Task UseSeedAsync(VideoTry shown)
+    {
+        await SetAsync(_controls with { Seed = shown.Result.Seed });
+        _seed = SeedChoice.Keep;
+        _note = $"The next clip starts from seed {shown.Result.Seed.ToString(CultureInfo.InvariantCulture)}. Press New seed under Seed for new ones.";
+    }
+
+    // ── The first frame ──
+
+    private async Task<IJSObjectReference> AttachAsync() =>
+        _attach ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/attach.js");
+
+    /// <summary>
+    /// A file through Windows' Open dialog: the page opens it, C# chooses the nearest shape and the middle part
+    /// (<see cref="VideoFrames.Cut"/>), the page writes that part again as a JPEG. The file itself is never kept.
+    /// </summary>
+    private async Task ChooseFrameAsync()
+    {
+        _picking = true;
+        _error = null;
+        _note = null;
+        try
+        {
+            var attach = await AttachAsync();
+            var size = await attach.InvokeAsync<int[]?>("openFrame", TimeSpan.FromHours(1), [_file, ComposerPictures.MaxFileBytes]);
+            if (size is null) return;
+            if (size.Length < 2)
+            {
+                _error = $"That file is not a picture DOG.ai can open ({ComposerPictures.Kinds}).";
+                return;
+            }
+            var cut = VideoFrames.Cut(size[0], size[1]);
+            var jpeg = await attach.InvokeAsync<byte[]?>("cutFrame", cut.X, cut.Y, cut.Width, cut.Height, cut.OutWidth, cut.OutHeight, AttachedPictures.Quality);
+            var (frame, problem) = VideoFrame.Of(jpeg, "a file");
+            if (frame is null)
+            {
+                _error = "That picture cannot start a clip. " + problem;
+                return;
+            }
+            Session.Hold(frame);
+            if (cut.Width != size[0] || cut.Height != size[1])
+                _note = $"The picture was cut to {cut.Shape.ToString().ToLowerInvariant()} from its middle, so the clip has its shape.";
+        }
+        catch (JSException)
+        {
+            _error = "That picture could not be read.";
+        }
+        finally
+        {
+            _picking = false;
+        }
+    }
+
+    // ── Draw, Keep, Save ──
+
+    private async Task DrawAsync()
+    {
+        // A second click that arrives before Cancel has taken Draw's place starts nothing.
+        if (_root is null || Problems.Count > 0 || _starting || Session.IsMaking) return;
+        _starting = true;
+        _error = null;
+        _note = null;
+        var request = Build();
+        var estimate = Estimate();
+        var model = VideoFolders.ModelFor(_root, VideoFiles.Wan22);
+        var chatWasIn = Engine.IsLoaded;
+        try
+        {
+            await PauseAsync();
+            var made = await Task.Run(() => Session.MakeAsync(Video, model, request, estimate));
+            _note = VideoPanels.Done(made) + Afterwards(chatWasIn);
+            await StillAsync(made);
+        }
+        catch (OperationCanceledException)
+        {
+            _note = "Cancelled.";
+        }
+        catch (Exception e) when (e is VideoEngineException or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            _error = e.Message;
+        }
+        finally
+        {
+            _starting = false;
+        }
+    }
+
+    private string Afterwards(bool chatWasIn) =>
+        (chatWasIn && (Coordinator.LastDecision?.Choice == CardChoice.SetChatAside || Engine.State == EngineState.Resting)
+            ? " The chat model was set aside to make room; it loads again with your next message." : "") +
+        (Session.Dropped ? $" Only the last {VideoSession.Max} clips are held; the oldest was let go." : "");
+
+    /// <summary>The still for the strip and for Keep: the clip's first frame, made in the page, checked here. None when it cannot be made.</summary>
+    private async Task<VideoTry> StillAsync(VideoTry made)
+    {
+        if (made.Still is not null) return made;
+        try
+        {
+            _video ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/video.js");
+            var (w, h) = PicturePreview.SizeFor(made.Result.Width, made.Result.Height);
+            // The browser may add a colour profile beside the picture: only the picture part is kept.
+            var still = PicturePreview.Plain(await _video.InvokeAsync<byte[]>("still", made.Result.Webm, w, h));
+            return PicturePreview.Problem(still, made.Result.Width, made.Result.Height) is null ? Session.WithStill(made, still) : made;
+        }
+        catch (JSException)
+        {
+            return made;
+        }
+    }
+
+    private async Task KeepAsync(VideoTry shown)
+    {
+        _keeping = true;
+        _error = null;
+        try
+        {
+            var made = await StillAsync(shown);
+            var row = await Clips.AddAsync(made.ToKeep());
+            Session.Kept(made, row.Id);
+            _note = "Kept inside DOG.ai." + (made.Still is null ? " (No still was made for it; it is kept all the same.)" : "");
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = "The clip could not be kept: " + e.Message;
+        }
+        finally
+        {
+            _keeping = false;
+        }
+    }
+
+    private async Task SaveFileAsync(VideoTry shown)
+    {
+        _error = null;
+        try
+        {
+            var saved = await Desktop.SaveFileAsync($"video-{shown.Result.Seed.ToString(CultureInfo.InvariantCulture)}.webm", "WebM video (*.webm)|*.webm", shown.Result.Webm);
+            if (saved is not null) _note = "Saved as " + System.IO.Path.GetFileName(saved) + ".";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _error = "The file could not be saved: " + e.Message;
+        }
+    }
+
+    // ── The player ──
+
+    private async Task PauseAsync()
+    {
+        if (_playing is null || _video is null) return;
+        try
+        {
+            await _video.InvokeVoidAsync("pause", _player);
+        }
+        catch (JSException)
+        {
+        }
+    }
+
+    /// <summary>
+    /// The player gets a clip's bytes only when the clip shown changes (never per render: the page renders on every
+    /// progress report), and lets the old address go.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var shown = _ready && CanMake && !Session.IsMaking ? Session.Selected : null;
+        if (ReferenceEquals(shown?.Result, _playing)) return;
+        if (!CanMake)
+        {
+            // The player is gone with the stage: nothing is held for it any more.
+            _playing = null;
+            return;
+        }
+        try
+        {
+            _video ??= await JS.InvokeAsync<IJSObjectReference>("import", "./_content/DogAI.UI/js/video.js");
+            if (shown is null)
+            {
+                if (Session.IsMaking) return; // paused, kept for after
+                await _video.InvokeVoidAsync("release", _player);
+                _playing = null;
+            }
+            else
+            {
+                _playing = shown.Result;
+                await _video.InvokeVoidAsync("play", _player, shown.Result.Webm);
+                // A clip from before this page was opened has no still yet.
+                if (shown.Still is null) await StillAsync(shown);
+            }
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+        }
+    }
+
+    public void Dispose()
+    {
+        Session.Changed -= Refresh;
+        Engine.Changed -= Refresh;
+        Downloads.Completed -= OnDownloaded;
+        _ticker?.Dispose();
+        // A clip belongs to the page that started it: leaving stops it (as a Draw in Images).
+        Session.Cancel();
+        if (_video is not null) _ = ReleaseAsync(_video, _player);
+        if (_attach is not null) _ = DropAsync(_attach);
+    }
+
+    private static async Task ReleaseAsync(IJSObjectReference module, ElementReference player)
+    {
+        try
+        {
+            await module.InvokeVoidAsync("release", player);
+            await module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException or TaskCanceledException)
+        {
+        }
+    }
+
+    private static async Task DropAsync(IJSObjectReference module)
+    {
+        try
+        {
+            await module.InvokeVoidAsync("dropFrame");
+            await module.DisposeAsync();
+        }
+        catch (Exception e) when (e is JSException or JSDisconnectedException or ObjectDisposedException or TaskCanceledException)
+        {
+        }
+    }
+}

@@ -99,11 +99,8 @@ public static class VideoDownloads
         _ => "Turns a Quick clip into frames in a second or two, and shows the clip while it is made.",
     };
 
-    /// <summary>
-    /// What a graphics card reports for its size is a little under the size on the box (this PC's 24 GB card says
-    /// 24,564 MiB, so a 16 GB card says about 16,376): a card is taken as 16 GB when it is within this of it.
-    /// </summary>
-    public const long CardSizeSlack = 512L << 20;
+    /// <summary>A card is taken as 16 GB when it is within this of it (<see cref="VideoMemory.CardSizeSlack"/>).</summary>
+    public const long CardSizeSlack = VideoMemory.CardSizeSlack;
 
     /// <summary>
     /// Whether this PC is offered the video model: a graphics card of <see cref="VideoMemory.SmallestCard"/> (16 GB) or

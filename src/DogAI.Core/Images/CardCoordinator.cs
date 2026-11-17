@@ -437,7 +437,7 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
             await _turn.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                await ClearForVideoAsync(VideoMemory.Need(request), progress, ct).ConfigureAwait(false);
+                await ClearForVideoAsync(request, progress, ct).ConfigureAwait(false);
                 return await video.MakeAsync(model, request, progress, ct).ConfigureAwait(false);
             }
             finally
@@ -464,12 +464,14 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
     }
 
     /// <summary>Takes everything off the card for a clip, then checks that the card has the room. Called while holding a turn.</summary>
-    private async Task ClearForVideoAsync(long need, IProgress<VideoProgress>? progress, CancellationToken ct)
+    private async Task ClearForVideoAsync(VideoRequest request, IProgress<VideoProgress>? progress, CancellationToken ct)
     {
+        var need = VideoMemory.Need(request);
         var stopped = Interlocked.Exchange(ref _stoppedLoad, 0) == 1;
         var before = await _meter.ReadAsync(ct).ConfigureAwait(false);
         // A card that could never hold a clip is said so before anything is moved.
-        if (before is not null && before.TotalBytes < need)
+        // (The same rule the Video page uses to offer a quality: VideoMemory.CardCanMake.)
+        if (before is not null && !VideoMemory.CardCanMake(before.TotalBytes, request))
             throw new VideoEngineException($"A video needs about {Gb(need)} of graphics memory, and this PC’s graphics card has {Gb(before.TotalBytes)}.");
 
         var gone = new List<string>();
@@ -505,7 +507,7 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
 
         // What a program held is given back a moment after it ends: look again a few times before believing a full card.
         var now = gone.Count == 0 ? before : await _meter.ReadAsync(ct).ConfigureAwait(false);
-        for (var look = 0; look < 10 && gone.Count > 0 && now is not null && now.FreeBytes < need; look++)
+        for (var look = 0; look < 10 && gone.Count > 0 && now is not null && !VideoMemory.RoomEnough(now.FreeBytes, need); look++)
         {
             await Task.Delay(PollInterval, ct).ConfigureAwait(false);
             now = await _meter.ReadAsync(ct).ConfigureAwait(false);
@@ -514,7 +516,7 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         var setAside = _chat.IsResting && (stopped || gone.Count > 0 && gone[0].StartsWith(ChatName, StringComparison.Ordinal));
         LastDecision = new CardDecision(setAside ? CardChoice.SetChatAside : CardChoice.NothingLoaded, need, now?.FreeBytes ?? -1);
         var moved = gone.Count == 0 ? "nothing else was on the card" : CardCleared.List(gone);
-        if (now is not null && now.FreeBytes < need)
+        if (now is not null && !VideoMemory.RoomEnough(now.FreeBytes, need))
         {
             Noted?.Invoke($"a video needs about {Gb(need)}; {moved}, and only {Gb(now.FreeBytes)} is free, so the video was not made.");
             var why = stayed.Count > 0

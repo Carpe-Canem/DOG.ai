@@ -148,6 +148,7 @@ public partial class App : Application
             await _services.GetRequiredService<DogAI.Core.Images.ImageModelCatalog>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Images.ImagesMemory>().LoadAsync();
             await _services.GetRequiredService<DogAI.Core.Images.SavedPicturePrompts>().LoadAsync();
+            await _services.GetRequiredService<DogAI.Core.Video.VideoChoices>().LoadAsync();
             await _services.GetRequiredService<InterfaceMemory>().LoadAsync();
 
             var window = new MainWindow(_services);
@@ -291,6 +292,9 @@ public partial class App : Application
         services.AddSingleton(sp => new DogAI.Core.Images.SavedPicturePrompts(sp.GetRequiredService<IDocumentStore>()));
         // The Make tab's boxes and tries: memory only, never saved (M16 step 2).
         services.AddSingleton<DogAI.Core.Images.ImagesSession>();
+        // The Video section (M20 step 4): its three remembered controls, and its sentence, frame and tries in memory only.
+        services.AddSingleton(sp => new DogAI.Core.Video.VideoChoices(sp.GetRequiredService<IDocumentStore>()));
+        services.AddSingleton<DogAI.Core.Video.VideoSession>();
         services.AddSingleton(sp => new InterfaceMemory(sp.GetRequiredService<IDocumentStore>()));
         services.AddSingleton<SidePanelDrawer>();
         services.AddSingleton<ReturnPlace>();

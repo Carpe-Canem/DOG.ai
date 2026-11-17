@@ -174,3 +174,83 @@ export function pickPicture(input, maxSide, quality, maxBytes) {
     input.click();
   });
 }
+
+// A first frame for a video (M20 step 4). Two calls, so the cut is decided in C# (VideoFrames.Cut, one tested rule):
+// openFrame / openFrameBytes decode the picture and hold it here, in memory, and answer its size; cutFrame cuts the
+// part C# chose, writes it at the size given as a JPEG (white behind anything see-through) and lets the picture go.
+let heldFrame = null;
+
+function dropHeld() {
+  if (heldFrame) { try { heldFrame.close(); } catch { } }
+  heldFrame = null;
+}
+
+async function holdFrame(blob, maxBytes) {
+  dropHeld();
+  if (!(blob instanceof Blob) || blob.size < 12 || blob.size > maxBytes) return [];
+  const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+  if (!kindOf(head)) return [];
+  try {
+    heldFrame = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+  } catch {
+    heldFrame = null;
+    return [];
+  }
+  if (!heldFrame.width || !heldFrame.height) { dropHeld(); return []; }
+  return [heldFrame.width, heldFrame.height];
+}
+
+// A file chosen in Windows' Open dialog. Resolves with [width, height], [] for a file that is not a picture the page
+// takes, and null when nothing was chosen.
+export function openFrame(input, maxBytes) {
+  guardDrops();
+  return new Promise(resolve => {
+    if (!input) { resolve(null); return; }
+    const done = async () => {
+      input.removeEventListener('change', done);
+      input.removeEventListener('cancel', cancelled);
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file) { resolve(null); return; }
+      try { resolve(await holdFrame(file, maxBytes)); } catch { resolve([]); }
+    };
+    const cancelled = () => {
+      input.removeEventListener('change', done);
+      input.removeEventListener('cancel', cancelled);
+      resolve(null);
+    };
+    input.addEventListener('change', done);
+    input.addEventListener('cancel', cancelled);
+    input.click();
+  });
+}
+
+// A picture DOG.ai already holds, as its bytes from C#.
+export function openFrameBytes(bytes, maxBytes) {
+  return holdFrame(new Blob([bytes]), maxBytes);
+}
+
+export async function cutFrame(x, y, width, height, outWidth, outHeight, quality) {
+  const bitmap = heldFrame;
+  heldFrame = null;
+  if (!bitmap) return null;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = outWidth;
+    canvas.height = outHeight;
+    const g = canvas.getContext('2d', { alpha: false });
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, outWidth, outHeight);
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(bitmap, x, y, width, height, 0, 0, outWidth, outHeight);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality / 100));
+    return blob ? new Uint8Array(await blob.arrayBuffer()) : null;
+  } finally {
+    bitmap.close();
+  }
+}
+
+export function dropFrame() {
+  dropHeld();
+}
