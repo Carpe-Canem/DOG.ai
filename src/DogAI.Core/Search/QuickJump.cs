@@ -114,6 +114,8 @@ public static class QuickJump
                     ModelsPlaces.Library => "library installed default models context size load benchmark folders gguf",
                     ModelsPlaces.Pictures => "images installed sdxl settings test picture",
                     ModelsPlaces.Voice => "installed whisper kokoro piper speech",
+                    ModelsPlaces.GetVideo => "download wan clip clips movie animate",
+                    ModelsPlaces.Video => "installed wan clip clips movie text encoder decoder",
                     _ => "llama.cpp llama-server stable-diffusion.cpp update install version",
                 },
             });

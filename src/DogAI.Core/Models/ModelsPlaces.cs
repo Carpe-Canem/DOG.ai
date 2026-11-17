@@ -16,8 +16,8 @@ public static class ModelsPlaces
 {
     public const string Get = "get", OnThisPc = "pc", EnginesGroup = "engines";
 
-    public const string Recommended = "recommended", Browse = "browse", GetPictures = "get-pictures", GetVoice = "get-voice";
-    public const string Library = "library", Pictures = "pictures", Voice = "voice";
+    public const string Recommended = "recommended", Browse = "browse", GetPictures = "get-pictures", GetVideo = "get-video", GetVoice = "get-voice";
+    public const string Library = "library", Pictures = "pictures", Video = "video", Voice = "voice";
     public const string Engines = "engines";
 
     /// <summary>The address that used to be the Downloads tab; downloads are a button in the Models header now.</summary>
@@ -32,9 +32,11 @@ public static class ModelsPlaces
     // The places as messages write them, as constants (a message may be one itself). A test keeps each equal to Name(id).
     public const string RecommendedName = "Models › Get models › Recommended";
     public const string GetPicturesName = "Models › Get models › Pictures";
+    public const string GetVideoName = "Models › Get models › Video";
     public const string GetVoiceName = "Models › Get models › Voice";
     public const string LibraryName = "Models › On this PC › Chat models";
     public const string PicturesName = "Models › On this PC › Pictures";
+    public const string VideoName = "Models › On this PC › Video";
     public const string LorasName = "Models › On this PC › Pictures › LoRAs";
     public const string TagsName = "Models › On this PC › Pictures › Tags";
     public const string VoiceName = "Models › On this PC › Voice";
@@ -47,12 +49,14 @@ public static class ModelsPlaces
             new(Recommended, Get, "Recommended", "Chat models picked for your PC"),
             new(Browse, Get, "Browse Hugging Face", "Search Hugging Face for GGUF models"),
             new(GetPictures, Get, "Pictures", "Models that draw pictures"),
+            new(GetVideo, Get, "Video", "The model that makes short clips"),
             new(GetVoice, Get, "Voice", "Models for listening and speaking"),
         ]),
         new(OnThisPc, "On this PC",
         [
             new(Library, OnThisPc, "Chat models", "Chat and document search models on this PC"),
             new(Pictures, OnThisPc, "Pictures", "Checkpoints and LoRAs on this PC"),
+            new(Video, OnThisPc, "Video", "The video model on this PC"),
             new(Voice, OnThisPc, "Voice", "Voice models on this PC"),
         ]),
         new(EnginesGroup, "Engines",

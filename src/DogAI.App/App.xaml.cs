@@ -365,6 +365,8 @@ public partial class App : Application
             if (job.UseCase == DogAI.UI.Components.Models.VoiceTab.VoiceUse) voices.Refresh();
             // Image models are not chat models either; the Pictures tabs find them by looking in the image folder.
             else if (job.UseCase == DogAI.Core.Images.ImageDownloads.UseCase) { }
+            // Nor is the video model (M20 step 3): its tabs find its four files by looking in the video folder.
+            else if (job.UseCase == DogAI.Core.Video.VideoDownloads.UseCase) { }
             // The full tag list (Models › On this PC › Pictures › Tags), checked against its pinned SHA-256 by the download itself.
             else if (job.UseCase == DogAI.Engine.Images.ExtraTags.UseCase) _ = extraTags.LoadAsync(Path.GetDirectoryName(Path.GetDirectoryName(job.MainPath)));
             // A projector fetched on its own (Get picture input) is found beside its model by rule at the next load: no record.

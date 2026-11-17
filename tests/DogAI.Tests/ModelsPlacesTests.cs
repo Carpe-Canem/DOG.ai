@@ -45,6 +45,10 @@ public class ModelsPlacesTests
         Assert.Equal("models", ModelsPlaces.Address(ModelsPlaces.Recommended));
         Assert.Equal("models/engines", ModelsPlaces.Address(ModelsPlaces.Engines));
         Assert.Equal("models/pictures", ModelsPlaces.Address(ModelsPlaces.Pictures));
+        Assert.Equal("models/get-video", ModelsPlaces.Address(ModelsPlaces.GetVideo));
+        Assert.Equal("models/video", ModelsPlaces.Address(ModelsPlaces.Video));
+        Assert.Equal(ModelsPlaces.Get, ModelsPlaces.Find("get-video").Group);
+        Assert.Equal(ModelsPlaces.OnThisPc, ModelsPlaces.Find("video").Group);
         Assert.Equal("models/pictures", ModelsPlaces.Address(ModelsPlaces.Pictures, ModelsPlaces.Checkpoints));
         Assert.Equal("models/pictures/loras", ModelsPlaces.Address(ModelsPlaces.Pictures, ModelsPlaces.Loras));
         Assert.Equal("models/pictures/tags", ModelsPlaces.Address(ModelsPlaces.Pictures, "TAGS"));
@@ -70,7 +74,9 @@ public class ModelsPlacesTests
     {
         Assert.Equal(ModelsPlaces.RecommendedName, ModelsPlaces.Name(ModelsPlaces.Recommended));
         Assert.Equal(ModelsPlaces.GetPicturesName, ModelsPlaces.Name(ModelsPlaces.GetPictures));
+        Assert.Equal(ModelsPlaces.GetVideoName, ModelsPlaces.Name(ModelsPlaces.GetVideo));
         Assert.Equal(ModelsPlaces.GetVoiceName, ModelsPlaces.Name(ModelsPlaces.GetVoice));
+        Assert.Equal(ModelsPlaces.VideoName, ModelsPlaces.Name(ModelsPlaces.Video));
         Assert.Equal(ModelsPlaces.LibraryName, ModelsPlaces.Name(ModelsPlaces.Library));
         Assert.Equal(ModelsPlaces.PicturesName, ModelsPlaces.Name(ModelsPlaces.Pictures));
         Assert.Equal(ModelsPlaces.LorasName, ModelsPlaces.Name(ModelsPlaces.Pictures, ModelsPlaces.Loras));

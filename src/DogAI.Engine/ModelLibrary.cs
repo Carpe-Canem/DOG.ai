@@ -23,10 +23,18 @@ public static partial class ModelLibrary
     /// <summary>Lists the .gguf files under a folder, skipping add-ons (vision, draft heads) and joining split models.</summary>
     public static IReadOnlyList<ModelFile> Scan(string? directory) => ScanAll([directory]);
 
+    /// <remarks>
+    /// The video models folder (<c>&lt;folder&gt;\video</c> of every folder looked in) is skipped: the video model's text
+    /// encoder is a .gguf, and its header even counts as a document search model's (<see cref="GgufInfo.IsEmbedding"/>), so
+    /// it would be offered as a chat model and could be picked for document search (M20 step 3). Skipped for every folder
+    /// looked in, also when one of them holds another (an extra folder above the models folder).
+    /// </remarks>
     public static IReadOnlyList<ModelFile> ScanAll(IEnumerable<string?> directories)
     {
         var found = new Dictionary<string, ModelFile>(StringComparer.OrdinalIgnoreCase);
-        foreach (var directory in directories.Distinct(StringComparer.OrdinalIgnoreCase))
+        var roots = directories.Where(d => !string.IsNullOrWhiteSpace(d)).Select(d => d!).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var skipped = roots.Select(VideoFolderOf).OfType<string>().ToList();
+        foreach (var directory in roots)
         {
             if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) continue;
             try
@@ -35,6 +43,7 @@ public static partial class ModelLibrary
                 foreach (var path in Directory.EnumerateFiles(directory, "*.gguf", options))
                 {
                     if (found.ContainsKey(path)) continue;
+                    if (InVideoFolder(path, skipped)) continue;
                     var name = System.IO.Path.GetFileNameWithoutExtension(path);
                     if (Quantization.IsAddOn(name)) continue;
                     var part = SplitPart().Match(name);
@@ -49,6 +58,26 @@ public static partial class ModelLibrary
             }
         }
         return found.Values.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static bool InVideoFolder(string path, List<string> videoFolders)
+    {
+        if (videoFolders.Count == 0) return false;
+        var full = System.IO.Path.GetFullPath(path);
+        return videoFolders.Any(v => full.StartsWith(v, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>The video models folder inside a models folder, ending in a separator, or null for a folder that cannot be one.</summary>
+    private static string? VideoFolderOf(string directory)
+    {
+        try
+        {
+            return System.IO.Path.Combine(System.IO.Path.GetFullPath(directory), DogAI.Core.Video.VideoFolders.Name) + System.IO.Path.DirectorySeparatorChar;
+        }
+        catch (Exception e) when (e is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
     }
 
     private static List<string> SplitParts(string first, string stem, string total)

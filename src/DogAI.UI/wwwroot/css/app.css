@@ -930,6 +930,22 @@ div.math[data-math] { margin: .6em 0; text-align: center; }
 .model .settings-card.form-grid { display: grid; }
 .model .settings-card label { align-content: start; }
 .model.image-file.unusable .model-name { color: var(--muted); }
+
+/* Models › Get models › Video and On this PC › Video (M20 step 3) */
+.video-files { grid-column: 1 / -1; list-style: none; margin: 0; padding: 8px 0 0; border-top: 1px solid var(--line); display: grid; gap: 6px; }
+.video-files li { display: grid; gap: 1px; min-width: 0; }
+.video-file-name { overflow-wrap: anywhere; font-size: .92em; }
+.video-file-meta { color: var(--muted); font-size: .82em; overflow-wrap: anywhere; }
+.video-files li[data-status=ready] .video-file-meta, .video-files li[data-status=arriving] .video-file-meta { color: var(--text); opacity: .8; }
+.video-fit { margin-top: 4px; }
+.small.bad, .video-fit.bad { color: var(--bad); }
+.video-file-word { margin-left: 8px; font-size: .72em; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 1px 7px; border-radius: 999px; vertical-align: middle; border: 1px solid var(--line); color: var(--muted); }
+.video-file[data-status=ready] .video-file-word { border-color: var(--ok); color: var(--ok); }
+.video-file[data-status=wrong] .video-file-word { border-color: var(--bad); color: var(--bad); }
+.video-file[data-status=arriving] .video-file-word { border-color: var(--accent); color: var(--text); }
+.video-file:not([data-status=ready]) .model-name { color: var(--muted); }
+.video-path { font-family: var(--mono); font-size: .78em; }
+@media (max-width: 760px) { .model.video-set { grid-template-columns: 1fr; } }
 .test-picture { display: block; max-width: min(320px, 100%); border-radius: min(var(--r), 12px); border: 1px solid var(--line); margin-top: 8px; }
 .test-picture.kept-picture { max-width: 72px; margin: 0 12px 0 0; float: left; }
 /* The Looks box of a character or persona, and a checkpoint's style LoRAs. */

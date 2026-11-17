@@ -7,6 +7,9 @@ namespace DogAI.Engine;
 public sealed record GgufInfo
 {
     public string? Name { get; init; }
+
+    /// <summary>The model's base name (<c>general.basename</c>), e.g. "umt5".</summary>
+    public string? BaseName { get; init; }
     public string? Architecture { get; init; }
 
     /// <summary>The context window the model was trained for, in tokens.</summary>
@@ -121,6 +124,7 @@ public static class GgufReader
             return new GgufInfo
             {
                 Name = values.GetValueOrDefault("general.name") as string,
+                BaseName = values.GetValueOrDefault("general.basename") as string,
                 Architecture = arch,
                 SizeLabel = values.GetValueOrDefault("general.size_label") as string,
                 ContextLength = ToInt(values.GetValueOrDefault($"{arch}.context_length")),

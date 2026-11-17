@@ -1,0 +1,71 @@
+@* The line said wherever a clip would need the video model (M20 step 3; the Video section of step 4 shows it too):
+   what of the four files is missing, being downloaded or wrong, with a link to Get models › Video, and the picture
+   engine when it is not installed (clips are made by its program). Renders nothing when clips can be made. *@
+@implements IDisposable
+@inject ISettingsStore SettingsStore
+@inject DownloadManager Downloads
+@inject SdServerLocator PictureLocator
+
+@if (_look is not null && !_look.Ready)
+{
+    var line = VideoDownloads.Missing(_look.NotReady);
+    <div class="notice" id="video-model-missing" data-state="@_look.State">
+        <span>@(_look.State == "arriving" ? "The video model is being downloaded. Its progress is in" : line.Text) <a class="link-text" href="@line.Address">@line.PlaceName</a>.</span>
+    </div>
+}
+@if (_engineMissing)
+{
+    <div class="notice" id="video-engine-missing">
+        <span>Clips are made by the picture engine, which is not installed yet. Install it in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.Engines)">@ModelsPlaces.EnginesName</a>.</span>
+    </div>
+}
+
+@code {
+    /// <summary>What the caller already looked at, so the folder is not read twice; null reads it here.</summary>
+    [Parameter] public VideoLook? Look { get; set; }
+
+    private VideoLook? _look;
+    private bool _engineMissing;
+
+    protected override void OnInitialized()
+    {
+        Downloads.Completed += OnCompleted;
+        Downloads.Changed += OnChanged;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _engineMissing = PictureLocator.Find() is null;
+        _look = Look ?? await ReadAsync();
+    }
+
+    private async Task<VideoLook> ReadAsync()
+    {
+        var root = (await SettingsStore.LoadAsync()).VideoFolder();
+        var arriving = VideoDownloadJobs.Arriving(Downloads.Jobs, root);
+        return await Task.Run(() => VideoLibrary.Look(root, arriving));
+    }
+
+    private string? _arrivingShown;
+
+    private void OnChanged()
+    {
+        if (Look is not null) return;
+        // Only a download starting or ending changes what is said; the progress itself is in the tray.
+        var now = string.Join(",", VideoDownloadJobs.Arriving(Downloads.Jobs, _look?.Root));
+        if (now == _arrivingShown) return;
+        _arrivingShown = now;
+        _ = InvokeAsync(async () => { _look = await ReadAsync(); StateHasChanged(); });
+    }
+
+    private void OnCompleted(DownloadJob job)
+    {
+        if (Look is null && job.UseCase == VideoDownloads.UseCase) _ = InvokeAsync(async () => { _look = await ReadAsync(); StateHasChanged(); });
+    }
+
+    public void Dispose()
+    {
+        Downloads.Completed -= OnCompleted;
+        Downloads.Changed -= OnChanged;
+    }
+}

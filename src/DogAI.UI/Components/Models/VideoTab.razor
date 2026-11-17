@@ -1,0 +1,215 @@
+@* Models › On this PC › Video (M20 step 3): what of the video model's four files is in the video models folder, what
+   each is by its header, what is missing, other files found there, and deleting. Downloading is Get models › Video
+   (GetVideoTab). Deleting is refused while a clip is made or the model is being downloaded. *@
+@implements IDisposable
+@inject DownloadManager Downloads
+@inject ISettingsStore SettingsStore
+@inject CardCoordinator Card
+@inject IDesktopShell Desktop
+
+<VideoModelMissing Look="_look" />
+
+<section class="group">
+    <h3 class="group-title">@VideoDownloads.Title</h3>
+    @if (_look is null)
+    {
+        <p class="note" id="video-state" data-state="reading">Looking in the video models folder…</p>
+    }
+    else
+    {
+        <p class="note" id="video-state" data-state="@_look.State">@StateLine</p>
+        <div class="models" id="video-files">
+            @foreach (var f in _look.Files)
+            {
+                var file = f;
+                <div class="model video-file" data-role="@GetVideoTab.RoleId(file.Role)" data-status="@file.Status.ToString().ToLowerInvariant()">
+                    <div class="li-text">
+                        <div class="model-name">@file.Download.Title<span class="video-file-word">@Word(file)</span></div>
+                        <div class="model-meta">@VideoDownloads.AboutOf(file.Role)</div>
+                        <div class="model-meta video-path">@file.Download.Folder\@file.Download.FileName@(file.Size > 0 ? " · " + Sizes.Gb(file.Size) : "")</div>
+                        @if (file.Status == VideoFileStatus.Wrong || file.Unusual)
+                        {
+                            <div class="small @(file.Status == VideoFileStatus.Wrong ? "bad" : "")">@file.Note</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+        <div class="row">
+            @if (_look.AnyThere)
+            {
+                <button class="btn danger" id="video-delete" disabled="@(DeleteBlocked is not null || _busy)" @onclick="() => _confirm = Doomed.Model">Delete the video model…</button>
+            }
+            <button class="btn" id="open-video-folder" disabled="@(_root is null)" @onclick="OpenFolder">Open folder</button>
+        </div>
+        @if (_look.AnyThere && DeleteBlocked is { } why)
+        {
+            <p class="small" id="video-delete-why">@why</p>
+        }
+    }
+</section>
+
+@if (_look is { Others.Count: > 0 } look)
+{
+    <section class="group">
+        <h3 class="group-title">Other files in the video folder</h3>
+        <p class="note">DOG.ai uses only the four files above; these are not used.</p>
+        <div class="models" id="video-others">
+            @foreach (var o in look.Others)
+            {
+                var other = o;
+                <div class="model video-other" data-file="@other.RelativePath" data-kind="@other.Verdict.Kind.ToString().ToLowerInvariant()">
+                    <div class="li-text">
+                        <div class="model-name">@Path.GetFileName(other.RelativePath)</div>
+                        <div class="model-meta">@(other.Folder.Length == 0 ? "video" : other.Folder) · @Sizes.Gb(other.Size)</div>
+                        <div class="small">@other.Verdict.Note</div>
+                    </div>
+                    <div class="actions">
+                        <button class="btn danger" data-act="delete" disabled="@(DeleteBlocked is not null || _busy)" @onclick="() => _confirm = new Doomed(other.FullPath, Path.GetFileName(other.RelativePath), other.Size)">Delete</button>
+                    </div>
+                </div>
+            }
+        </div>
+    </section>
+}
+
+@if (_error is not null)
+{
+    <div class="notice bad" id="video-error"><span>@_error</span></div>
+}
+<p class="note">
+    Video models are in <b>@(_root ?? "the models folder")</b>, in the folders the picture engine expects (diffusion_models, text_encoders, vae).
+    Get them in <a href="@ModelsPlaces.Address(ModelsPlaces.GetVideo)">Get models › Video</a>.
+</p>
+
+@if (_confirm is { } doomed)
+{
+    <Modal Title="@(doomed.IsModel ? "Delete the video model?" : "Delete this file?")" OnClose="() => _confirm = null">
+        <div id="video-delete-confirm">
+            @if (doomed.IsModel)
+            {
+                <p>This permanently deletes the video model’s files (@Sizes.Gb(_look?.BytesThere ?? 0)) from <b>@_root</b>. They do not go to the Recycle Bin. Kept clips stay; making new ones needs the model again. You can download it again later.</p>
+            }
+            else
+            {
+                <p>This permanently deletes <b>@doomed.Name</b> (@Sizes.Gb(doomed.Size)) from the video models folder. It does not go to the Recycle Bin.</p>
+            }
+            <div class="row end">
+                <button class="btn" id="video-delete-no" @onclick="() => _confirm = null">Keep it</button>
+                <button class="btn danger" id="video-delete-yes" @onclick="DeleteAsync">Delete</button>
+            </div>
+        </div>
+    </Modal>
+}
+
+@code {
+    private sealed record Doomed(string? Path, string Name, long Size)
+    {
+        public static readonly Doomed Model = new(null, "", 0);
+        public bool IsModel => Path is null;
+    }
+
+    private string? _root, _error;
+    private VideoLook? _look;
+    private Doomed? _confirm;
+    private bool _busy;
+    private string? _arrivingShown;
+
+    /// <summary>Why nothing may be deleted now, in words, or null.</summary>
+    private string? DeleteBlocked =>
+        Card.IsMakingVideo ? "A video is being made. Delete when it has finished."
+        : VideoDownloadJobs.Unfinished(Downloads.Jobs, _root) is not null ? "The video model is in the download list. Cancel it there (the downloads button above) to delete."
+        : null;
+
+    private string StateLine => _look!.State switch
+    {
+        "ready" => "Ready: all four files are here and are the right ones.",
+        "arriving" => "Being downloaded. Its progress is in the downloads button above.",
+        "incomplete" => $"Not complete: {VideoDownloads.Join(_look.NotReady.Select(r => VideoDownloads.TitleOf(r).ToLowerInvariant()))} {(_look.NotReady.Count == 1 ? "is" : "are")} missing or not the right file.",
+        _ => "Not on this PC.",
+    };
+
+    private static string Word(VideoFileFound f) => f.Status switch
+    {
+        VideoFileStatus.Ready => "Installed",
+        VideoFileStatus.Arriving => "Downloading",
+        VideoFileStatus.Wrong => "Not the right file",
+        _ => "Missing",
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        Downloads.Changed += OnDownloadsChanged;
+        Downloads.Completed += OnCompleted;
+        Card.Changed += Refresh;
+        await ScanAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private void OnDownloadsChanged()
+    {
+        var now = string.Join(",", VideoDownloadJobs.Arriving(Downloads.Jobs, _root)) + (VideoDownloadJobs.Unfinished(Downloads.Jobs, _root) is null ? "" : "+");
+        if (now != _arrivingShown) _ = InvokeAsync(ScanAsync);
+    }
+
+    private void OnCompleted(DownloadJob job)
+    {
+        if (job.UseCase == VideoDownloads.UseCase) _ = InvokeAsync(ScanAsync);
+    }
+
+    private async Task ScanAsync()
+    {
+        _root = (await SettingsStore.LoadAsync()).VideoFolder();
+        var root = _root;
+        var arriving = VideoDownloadJobs.Arriving(Downloads.Jobs, root);
+        _arrivingShown = string.Join(",", arriving) + (VideoDownloadJobs.Unfinished(Downloads.Jobs, root) is null ? "" : "+");
+        _look = await Task.Run(() => VideoLibrary.Look(root, arriving));
+        StateHasChanged();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_confirm is not { } doomed || _root is null) return;
+        _confirm = null;
+        _error = null;
+        if (DeleteBlocked is { } why)
+        {
+            _error = why;
+            return;
+        }
+        _busy = true;
+        try
+        {
+            var root = _root;
+            _error = await Task.Run(() => doomed.IsModel ? VideoLibrary.DeleteModel(root) : VideoLibrary.DeleteOther(root, doomed.Path!));
+        }
+        finally
+        {
+            _busy = false;
+        }
+        await ScanAsync();
+    }
+
+    private void OpenFolder()
+    {
+        if (_root is null) return;
+        _error = null;
+        try
+        {
+            VideoLibrary.Ensure(_root);
+            Desktop.OpenFolder(_root);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            _error = "Could not create the video models folder: " + e.Message;
+        }
+    }
+
+    public void Dispose()
+    {
+        Downloads.Changed -= OnDownloadsChanged;
+        Downloads.Completed -= OnCompleted;
+        Card.Changed -= Refresh;
+    }
+}

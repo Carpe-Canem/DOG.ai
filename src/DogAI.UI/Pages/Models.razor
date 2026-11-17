@@ -85,6 +85,9 @@ else
         case ModelsPlaces.GetPictures:
             <PictureDownloads />
             break;
+        case ModelsPlaces.GetVideo:
+            <GetVideoTab />
+            break;
         case ModelsPlaces.GetVoice:
             <VoiceDownloads />
             break;
@@ -93,6 +96,9 @@ else
             break;
         case ModelsPlaces.Pictures:
             <ImagesTab Part="@PicturePart" />
+            break;
+        case ModelsPlaces.Video:
+            <VideoTab />
             break;
         case ModelsPlaces.Voice:
             <VoiceTab />
@@ -236,7 +242,7 @@ else
     // What the side panel shows on this tab: hardware and fit where chat models are judged, graphics memory where a
     // model is loaded or drawn with, the connection where something can be downloaded.
     private bool ShowsHardware => Place.Id is ModelsPlaces.Recommended or ModelsPlaces.Browse or ModelsPlaces.Library;
-    private bool ShowsCard => ShowsHardware || Place.Id == ModelsPlaces.GetPictures || (Place.Id == ModelsPlaces.Pictures && PicturePart != ModelsPlaces.Tags);
+    private bool ShowsCard => ShowsHardware || Place.Id is ModelsPlaces.GetPictures or ModelsPlaces.GetVideo or ModelsPlaces.Video || (Place.Id == ModelsPlaces.Pictures && PicturePart != ModelsPlaces.Tags);
     private bool ShowsConnection => Place.Group == ModelsPlaces.Get || Place.Id is ModelsPlaces.Engines or ModelsPlaces.Library || (Place.Id == ModelsPlaces.Pictures && PicturePart == ModelsPlaces.Tags);
 
     private bool HasAside => ShowsHardware || ShowsConnection || (ShowsCard && Ctx.Hardware.MainGpu is not null);
@@ -252,7 +258,7 @@ else
 
     private string GroupSub(ModelsGroup group) => group.Id switch
     {
-        ModelsPlaces.Get => "Recommended, Hugging Face, pictures, voice",
+        ModelsPlaces.Get => "Recommended, Hugging Face, pictures, video, voice",
         ModelsPlaces.OnThisPc => $"{_libraryCount} chat {(_libraryCount == 1 ? "model" : "models")} · {Sizes.Gb(_librarySize)}",
         _ => Updater.InstalledTag is { } tag ? $"llama.cpp {tag}" : "Chat engine, picture engine",
     };

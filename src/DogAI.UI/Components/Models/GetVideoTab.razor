@@ -1,0 +1,197 @@
+@* Models › Get models › Video (M20 step 3): the recommended video model, Wan 2.2 TI2V-5B, four files downloaded together
+   into the video models folder, each checked against its pinned checksum. Offered only on a card of 16 GB or more.
+   What is on this PC, and deleting, is On this PC › Video (VideoTab). Opening this reads file headers only. *@
+@implements IDisposable
+@inject DownloadManager Downloads
+@inject OnlineGate Gate
+@inject HuggingFaceClient Hf
+@inject ISettingsStore SettingsStore
+@inject SdServerLocator PictureLocator
+@inject ModelsContext Ctx
+
+@if (PictureLocator.Find() is null)
+{
+    <div class="notice" id="video-engine-missing"><span>Clips are made by the picture engine, which is not installed yet. Install it in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.Engines)">@ModelsPlaces.EnginesName</a>.</span></div>
+}
+
+<section class="group">
+    <h3 class="group-title">Recommended download</h3>
+    <p class="note">Four files downloaded together from Hugging Face and GitHub, each checked against its published checksum.</p>
+    <div class="models" id="video-downloads">
+        <div class="model video-set" id="video-set" data-state="@(_look?.State ?? "reading")" data-fit="@FitState">
+            <div class="li-text">
+                <div class="model-name">@VideoDownloads.Title</div>
+                <div class="model-meta">@VideoDownloads.Blurb</div>
+                <div class="model-meta">4 files · @Sizes.Gb(VideoDownloads.TotalBytes) · Apache 2.0 and MIT</div>
+                <div class="small video-fit @(FitState == "no" ? "bad" : "")" id="video-fit">@FitLine</div>
+            </div>
+            <div class="actions">
+                @if (Job is { } job)
+                {
+                    <div class="progress" title="@DownloadButton.StatusText(job)">
+                        <div class="meter"><i style="width:@((job.Fraction * 100).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%"></i></div>
+                        <span>@DownloadButton.StatusText(job)</span>
+                    </div>
+                }
+                else if (_look?.Ready == true)
+                {
+                    <span class="chip" id="video-installed">Installed</span>
+                }
+                else if (FitState == "yes")
+                {
+                    <button class="btn primary" id="video-download" disabled="@(!Gate.IsOnline || _starting || _look is null || _look.Wrong.Count > 0)"
+                            title="@(_look?.Wrong.Count > 0 ? "Delete the file that is not the right one first" : Gate.IsOnline ? "" : "Go online to download")" @onclick="DownloadAsync">
+                        @(_starting ? "Starting…" : DownloadLabel)
+                    </button>
+                }
+                else if (FitState == "no")
+                {
+                    <span class="chip" id="video-not-offered">Not offered on this PC</span>
+                }
+            </div>
+            <ul class="video-files" id="video-file-list">
+                @foreach (var d in VideoDownloads.Wan22)
+                {
+                    var found = _look?.Files.FirstOrDefault(f => f.Role == d.Role);
+                    <li data-role="@RoleId(d.Role)" data-status="@(found?.Status.ToString().ToLowerInvariant() ?? "reading")">
+                        <span class="video-file-name"><b>@d.Title</b> · @d.FileName</span>
+                        <span class="video-file-meta">@Sizes.Gb(d.Bytes) · @(d.FromGitHub ? "GitHub" : "Hugging Face") @d.Repo · @d.Licence@(found is null ? "" : " · " + StatusWord(found))</span>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+</section>
+
+@if (_look?.Wrong is { Count: > 0 } wrong)
+{
+    <div class="notice bad" id="video-wrong"><span>@WrongLine(wrong) Delete it in <a class="link-text" href="@ModelsPlaces.Address(ModelsPlaces.Video)">@ModelsPlaces.VideoName</a>, then download again.</span></div>
+}
+@if (_error is not null)
+{
+    <div class="notice bad" id="video-download-error"><span>@_error</span></div>
+}
+
+<p class="note">
+    Clips are made on this PC by the picture engine; while one is made, the chat model is set aside and the card is used for nothing else.
+    What is installed: <a href="@ModelsPlaces.Address(ModelsPlaces.Video)">On this PC › Video</a>.<InfoButton About="the video model">Wan 2.2 TI2V-5B is made by Alibaba’s Wan team (Apache 2.0); the fast decoder, taew2_2, by Ollin Boer Bohan (MIT). Wan claims no rights over what you make with it; you answer for how you use it. A clip takes about 2 minutes at Quick and 7 at Better on a 24 GB card.</InfoButton>
+</p>
+
+@code {
+    private string? _root, _error;
+    private VideoLook? _look;
+    private bool _starting;
+    private string? _arrivingShown;
+
+    private DownloadJob? Job => VideoDownloadJobs.Unfinished(Downloads.Jobs, _root);
+
+    private long? CardBytes => Ctx.Hardware.MainGpu?.TotalBytes;
+
+    /// <summary>Fit is judged only once this PC is measured: judged against nothing, the model would read "not offered".</summary>
+    private string FitState => !Ctx.Measured ? "measuring" : VideoDownloads.Offered(CardBytes) ? "yes" : "no";
+
+    private string FitLine => !Ctx.Measured ? "Measuring this PC…" : VideoDownloads.FitText(CardBytes);
+
+    private string DownloadLabel => _look is { AnyThere: true } look && look.ToDownload.Count is > 0 and var n && n < VideoDownloads.Wan22.Count
+        ? $"Download the missing {(n == 1 ? "file" : $"{n} files")}"
+        : "Download";
+
+    internal static string RoleId(VideoFileRole role) => role switch
+    {
+        VideoFileRole.Model => "model",
+        VideoFileRole.Vae => "vae",
+        VideoFileRole.TextEncoder => "text-encoder",
+        _ => "fast-decoder",
+    };
+
+    private static string StatusWord(VideoFileFound f) => f.Status switch
+    {
+        VideoFileStatus.Ready => "on this PC",
+        VideoFileStatus.Arriving => "downloading",
+        VideoFileStatus.Wrong => "a different file is in its place",
+        _ => "not on this PC",
+    };
+
+    private static string WrongLine(IReadOnlyList<VideoFileFound> wrong) => wrong.Count == 1
+        ? $"{wrong[0].Download.FileName} is in the video folder but is not the right file. {wrong[0].Note}"
+        : $"{VideoDownloads.Join(wrong.Select(w => w.Download.FileName))} are in the video folder but are not the right files.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Downloads.Changed += OnDownloadsChanged;
+        Downloads.Completed += OnCompleted;
+        Gate.Changed += Refresh;
+        Ctx.Changed += Refresh;
+        await ScanAsync();
+    }
+
+    private void Refresh() => InvokeAsync(StateHasChanged);
+
+    private void OnDownloadsChanged()
+    {
+        // Progress redraws the bar; a file starting or arriving changes the list below it.
+        var now = string.Join(",", VideoDownloadJobs.Arriving(Downloads.Jobs, _root));
+        if (now != _arrivingShown) _ = InvokeAsync(ScanAsync);
+        else Refresh();
+    }
+
+    private void OnCompleted(DownloadJob job)
+    {
+        if (job.UseCase == VideoDownloads.UseCase) _ = InvokeAsync(ScanAsync);
+    }
+
+    private async Task ScanAsync()
+    {
+        _root = (await SettingsStore.LoadAsync()).VideoFolder();
+        var root = _root;
+        var arriving = VideoDownloadJobs.Arriving(Downloads.Jobs, root);
+        _arrivingShown = string.Join(",", arriving);
+        _look = await Task.Run(() => VideoLibrary.Look(root, arriving));
+        StateHasChanged();
+    }
+
+    private async Task DownloadAsync()
+    {
+        _error = null;
+        if (_root is null || _look is null)
+        {
+            _error = "No models folder is set.";
+            return;
+        }
+        if (_look.Wrong.Count > 0)
+        {
+            _error = WrongLine(_look.Wrong) + " Delete it in " + ModelsPlaces.VideoName + " first.";
+            return;
+        }
+        _starting = true;
+        try
+        {
+            var roles = _look.ToDownload;
+            var listings = new Dictionary<string, IReadOnlyList<RemoteFile>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var repo in VideoDownloadJobs.ReposFor(roles)) listings[repo] = await Hf.FilesAsync(repo);
+            var job = VideoDownloadJobs.Build(_root, roles, listings);
+            // A finished or failed download of the set is cleared from the list, so it can be fetched again.
+            foreach (var old in Downloads.Jobs.Where(j => j.UseCase == VideoDownloads.UseCase && j.Status is DownloadStatus.Done or DownloadStatus.Failed).ToList())
+                await Downloads.RemoveAsync(old.Id);
+            VideoLibrary.Ensure(_root);
+            await Downloads.EnqueueAsync(job);
+            await ScanAsync();
+        }
+        catch (Exception e) when (e is DownloadRefusedException or HubException or HttpRequestException or OfflineException or IOException or UnauthorizedAccessException)
+        {
+            _error = e is HttpRequestException ? "Could not reach Hugging Face: " + e.Message : e.Message;
+        }
+        finally
+        {
+            _starting = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        Downloads.Changed -= OnDownloadsChanged;
+        Downloads.Completed -= OnCompleted;
+        Gate.Changed -= Refresh;
+        Ctx.Changed -= Refresh;
+    }
+}
