@@ -5,6 +5,7 @@ using DogAI.Core.Documents;
 using DogAI.Core.Images;
 using DogAI.Core.Models;
 using DogAI.Core.Stories;
+using DogAI.Core.Video;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Design;
@@ -31,6 +32,7 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
     public DbSet<MessageVector> MessageVectors => Set<MessageVector>();
     public DbSet<Picture> Pictures => Set<Picture>();
     public DbSet<AttachedPicture> AttachedPictures => Set<AttachedPicture>();
+    public DbSet<Clip> Clips => Set<Clip>();
 
     protected override void OnModelCreating(ModelBuilder model)
     {
@@ -141,6 +143,23 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
             e.HasIndex(p => p.ConversationId);
             e.Property(p => p.Image).IsRequired();
             e.HasOne<ChatMessage>().WithMany().HasForeignKey(p => p.MessageId).OnDelete(DeleteBehavior.Cascade);
+        });
+        // Kept clips (M20). The owner is a kind plus an id, as for kept pictures: no foreign key, and the migration's
+        // triggers remove the clips of a deleted message, character or persona. The still, the first frame and the
+        // video are the last columns, the video last of all (the migration says why). File names are paths inside
+        // their own folders.
+        model.Entity<Clip>(e =>
+        {
+            e.Property(c => c.OwnerKind).HasMaxLength(ClipOwners.MaxKindLength);
+            e.HasIndex(c => new { c.OwnerKind, c.OwnerId });
+            e.Property(c => c.Video).IsRequired();
+            e.Property(c => c.Sampler).HasMaxLength(40);
+            e.Property(c => c.Model).HasMaxLength(400);
+            e.Property(c => c.Vae).HasMaxLength(400);
+            e.Property(c => c.TextEncoder).HasMaxLength(400);
+            e.Property(c => c.FastDecoder).HasMaxLength(400);
+            e.Ignore(c => c.HasStartFrame);
+            e.Ignore(c => c.Files);
         });
         model.Entity<ModelRecord>(e =>
         {

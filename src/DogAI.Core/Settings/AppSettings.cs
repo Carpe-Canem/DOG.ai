@@ -123,6 +123,9 @@ public sealed record AppSettings
 
     /// <summary>Where image models are kept: an "image" folder inside the models folder, with checkpoints, loras, vae and upscalers in it.</summary>
     public string? ImageFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, DogAI.Core.Images.ImageFolders.Name);
+
+    /// <summary>The video models folder, <c>&lt;models&gt;\video</c> (M20); null until a models folder is set.</summary>
+    public string? VideoFolder() => ModelsDirectory is null ? null : Path.Combine(ModelsDirectory, DogAI.Core.Video.VideoFolders.Name);
 }
 
 /// <summary>The few things the UI needs from Windows itself. Implemented by the WPF host.</summary>

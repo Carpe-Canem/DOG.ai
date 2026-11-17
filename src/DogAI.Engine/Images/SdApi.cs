@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using DogAI.Core.Images;
+using DogAI.Core.Video;
 
 namespace DogAI.Engine.Images;
 
@@ -18,6 +19,16 @@ public sealed record SdJob(
     byte[]? Preview,
     IReadOnlyList<byte[]> Images,
     string? Error)
+{
+    public bool IsFinished => Status is "completed" or "failed" or "cancelled";
+}
+
+/// <summary>A finished clip as sd-server sends it: the file, and what the engine says about it.</summary>
+public sealed record SdVideo(byte[] File, int? Frames, int? Fps, string? Format);
+
+/// <summary>A clip's job as sd-server reports it.</summary>
+/// <param name="Status">queued, generating, completed, failed or cancelled.</param>
+public sealed record SdVideoJob(string Status, VideoProgress? Progress, int? PreviewStep, byte[]? Preview, SdVideo? Video, string? Error)
 {
     public bool IsFinished => Status is "completed" or "failed" or "cancelled";
 }
@@ -211,9 +222,157 @@ public sealed class SdApi(HttpClient http, int port)
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            await CancelAndWaitAsync(id).ConfigureAwait(false);
+            await CancelAndWaitAsync(id, CancelWait).ConfigureAwait(false);
             throw;
         }
+    }
+
+    // ---- Video (M20). The same program started with a video model; a clip is a job like a picture. ----
+
+    /// <summary>How often a clip being made is asked for its progress. A step takes five to ten seconds, and every answer repeats the newest preview.</summary>
+    public TimeSpan VideoPollInterval { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// How long a cancelled clip is given to stop by itself. While it is drawn it stops after the step in progress;
+    /// while the model's own decoder runs it cannot be interrupted at all (three minutes at Better's size), so the
+    /// caller ends the program when this has passed.
+    /// </summary>
+    public TimeSpan VideoCancelWait { get; init; } = TimeSpan.FromSeconds(3);
+
+    /// <summary>
+    /// The request body for one clip. <paramref name="seed"/> is the one actually used (never below zero). The video
+    /// route has no <c>batch_count</c> and no <c>embed_image_metadata</c>: that nothing is written into the file is
+    /// decided by the program's start switch alone, and checked on every result.
+    /// </summary>
+    public static JsonObject VideoBody(VideoRequest request, long seed)
+    {
+        var body = new JsonObject
+        {
+            ["prompt"] = request.Prompt,
+            ["negative_prompt"] = request.NegativePrompt,
+            ["width"] = request.Width,
+            ["height"] = request.Height,
+            ["seed"] = seed,
+            ["video_frames"] = request.Frames,
+            ["fps"] = request.Fps,
+            ["sample_params"] = new JsonObject
+            {
+                ["sample_method"] = request.Sampler,
+                ["sample_steps"] = request.Steps,
+                ["guidance"] = new JsonObject { ["txt_cfg"] = request.Guidance },
+                ["flow_shift"] = request.FlowShift,
+            },
+            ["output_format"] = "webm",
+            ["output_compression"] = request.Compression,
+            // "tae" is the newest frame at full size from the fast decoder, which the program is always started with.
+            ["preview"] = request.Preview ? "tae" : "none",
+            ["preview_interval"] = request.PreviewEvery,
+        };
+        // The first frame travels as bytes inside the request: never a path, never an address.
+        if (request.StartFrame is { } frame) body["init_image"] = Convert.ToBase64String(frame);
+        return body;
+    }
+
+    /// <summary>Starts a clip and returns its job id.</summary>
+    public async Task<string> StartVideoAsync(JsonObject body, CancellationToken ct = default)
+    {
+        using var response = await http.PostAsync(_base + "vid_gen", JsonContent.Create(body), ct).ConfigureAwait(false);
+        var node = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) throw new VideoEngineException(Refusal(response.StatusCode, node, "video"));
+        return Text(node?["id"]) ?? throw new VideoEngineException("The video engine did not say which job it started.");
+    }
+
+    public async Task<SdVideoJob> VideoJobAsync(string id, CancellationToken ct = default)
+    {
+        using var response = await http.GetAsync(_base + "jobs/" + Uri.EscapeDataString(id), ct).ConfigureAwait(false);
+        var node = await ReadJsonAsync(response, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+            throw new VideoEngineException(response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone
+                ? "The video engine no longer knows this video (it may have restarted)."
+                : Refusal(response.StatusCode, node, "video"));
+        return ParseVideoJob(node as JsonObject ?? []);
+    }
+
+    /// <summary>
+    /// Makes one clip from start to finish: starts the job, reports progress (and new previews) as it changes, and
+    /// returns the file. Cancelling <paramref name="ct"/> asks the engine to stop and waits <see cref="VideoCancelWait"/>
+    /// at most; the caller ends the program either way.
+    /// </summary>
+    public async Task<SdVideo> MakeVideoAsync(VideoRequest request, long seed, IProgress<VideoProgress>? progress, CancellationToken ct)
+    {
+        var id = await StartVideoAsync(VideoBody(request, seed), ct).ConfigureAwait(false);
+        VideoProgress? last = null;
+        (int? Step, int Length)? lastPreview = null;
+        try
+        {
+            while (true)
+            {
+                var job = await VideoJobAsync(id, ct).ConfigureAwait(false);
+                if (progress is not null && job.Progress is not null)
+                {
+                    var now = job.Progress;
+                    var preview = job.Preview is not null && lastPreview != (job.PreviewStep, job.Preview.Length) ? job.Preview : null;
+                    if (preview is not null) lastPreview = (job.PreviewStep, preview.Length);
+                    if (preview is not null || last is null || last.Stage != now.Stage || last.Step != now.Step || last.TotalSteps != now.TotalSteps)
+                    {
+                        last = now;
+                        progress.Report(now with { Preview = preview });
+                    }
+                }
+                switch (job.Status)
+                {
+                    case "completed":
+                        return job.Video ?? throw new VideoEngineException("The video engine finished but sent no video.");
+                    case "failed":
+                        throw new VideoEngineException("The video could not be made." + (job.Error is { Length: > 0 } said ? " The engine said: " + said : ""));
+                    case "cancelled":
+                        ct.ThrowIfCancellationRequested();
+                        throw new VideoEngineException("The video engine cancelled the video.");
+                }
+                await Task.Delay(VideoPollInterval, ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            await CancelAndWaitAsync(id, VideoCancelWait).ConfigureAwait(false);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Reads a clip's job. Only the named fields are taken: the engine's <c>generation_info</c>, which repeats the
+    /// prompt, the negative prompt and the model's file names, is never read, kept or passed on.
+    /// </summary>
+    internal static SdVideoJob ParseVideoJob(JsonObject node)
+    {
+        var status = Text(node["status"]) ?? "unknown";
+
+        VideoProgress? progress = null;
+        if (node["progress"] is JsonObject p)
+        {
+            var steps = Text(p["unit"]) == "steps";
+            progress = new VideoProgress(Text(p["stage"]) ?? "", steps ? Int(p["completed"]) : null, steps ? Int(p["total"]) : null);
+        }
+
+        byte[]? preview = null;
+        int? previewStep = null;
+        if (node["preview"] is JsonObject v && Text(v["b64_json"]) is { Length: > 0 } b64)
+        {
+            preview = Decode(b64);
+            previewStep = Int(v["step"]);
+        }
+
+        SdVideo? video = null;
+        if (node["result"] is JsonObject result && Text(result["b64_json"]) is { Length: > 0 } file && Decode(file) is { } webm)
+            video = new SdVideo(webm, Int(result["frame_count"]), Int(result["fps"]), Text(result["output_format"]));
+
+        var error = node["error"] switch
+        {
+            JsonObject o => Text(o["message"]) ?? Text(o["code"]),
+            JsonValue s => Text(s),
+            _ => null,
+        };
+        return new SdVideoJob(status, progress, previewStep, preview, video, error);
     }
 
     /// <summary>The upscaler files the engine found that can enlarge a picture (their names, without the extension).</summary>
@@ -301,18 +460,21 @@ public sealed class SdApi(HttpClient http, int port)
     private static bool SameSpot(ImageProgress a, ImageProgress b) =>
         a.Stage == b.Stage && a.Step == b.Step && a.TotalSteps == b.TotalSteps && a.Pass == b.Pass;
 
-    private async Task CancelAndWaitAsync(string id)
+    /// <summary>Asks the engine to stop a job and waits, at most <paramref name="wait"/>, until it has. True when it stopped in that time.</summary>
+    private async Task<bool> CancelAndWaitAsync(string id, TimeSpan wait)
     {
-        using var limit = new CancellationTokenSource(CancelWait);
+        using var limit = new CancellationTokenSource(wait);
         try
         {
             await CancelAsync(id, limit.Token).ConfigureAwait(false);
             while (!(await JobAsync(id, limit.Token).ConfigureAwait(false)).IsFinished)
                 await Task.Delay(PollInterval, limit.Token).ConfigureAwait(false);
+            return true;
         }
         catch (Exception e) when (e is OperationCanceledException or HttpRequestException or ImageEngineException)
         {
             // The caller is cancelling anyway; a server that stopped answering is dealt with on the next picture.
+            return false;
         }
     }
 
@@ -366,7 +528,7 @@ public sealed class SdApi(HttpClient http, int port)
         catch (FormatException) { return null; }
     }
 
-    private static string Refusal(HttpStatusCode status, JsonNode? node)
+    private static string Refusal(HttpStatusCode status, JsonNode? node, string engine = "picture")
     {
         // Two shapes seen: {"code": "...", "error": "text"} and {"error": {"code": "...", "message": "text"}}.
         // A third, from the upscale route: {"error": "text"} with no code (indexing a text value would throw).
@@ -379,9 +541,9 @@ public sealed class SdApi(HttpClient http, int port)
         };
         return code switch
         {
-            "model_not_loaded" => "The picture engine has no model loaded.",
-            "model_busy" => "The picture engine is busy with another picture.",
-            _ => $"The picture engine refused the request (HTTP {(int)status})" + (message is { Length: > 0 } ? ": " + message : "."),
+            "model_not_loaded" => $"The {engine} engine has no model loaded.",
+            "model_busy" => $"The {engine} engine is busy with another {engine}.",
+            _ => $"The {engine} engine refused the request (HTTP {(int)status})" + (message is { Length: > 0 } ? ": " + message : "."),
         };
     }
 

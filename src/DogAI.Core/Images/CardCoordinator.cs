@@ -1,3 +1,5 @@
+using DogAI.Core.Video;
+
 namespace DogAI.Core.Images;
 
 /// <summary>The main graphics card's memory, measured now, in bytes.</summary>
@@ -183,8 +185,13 @@ public static class PictureMemory
 /// when a picture or a returning chat model would not fit, the idle ones are let go before anything larger is moved.
 /// "Unload everything" (<see cref="ClearAsync"/>) is the owner emptying the card.
 /// </para>
+/// <para>
+/// A video (M20) takes the whole card (<see cref="MakeAsync"/>): under one turn the chat model is set aside and the
+/// picture model and every idle guest are let go, the clip is made, and the video program is gone again before the
+/// turn is given back. The chat model comes back as after a picture: when it is next asked for.
+/// </para>
 /// </summary>
-public sealed class CardCoordinator : IImageEngine
+public sealed class CardCoordinator : IImageEngine, IVideoEngine
 {
     /// <summary>Progress stage while a picture waits for another picture, a loading chat model, or a reply being written.</summary>
     public const string Waiting = "waiting";
@@ -198,6 +205,7 @@ public sealed class CardCoordinator : IImageEngine
     /// <summary>The names used on the screen and in <see cref="CardCleared"/>.</summary>
     public const string ChatName = "the chat model";
     public const string PictureName = "the picture model";
+    public const string VideoName = "the video model";
 
     private const string NoModel = "No picture model is loaded. Choose a checkpoint first.";
 
@@ -206,21 +214,26 @@ public sealed class CardCoordinator : IImageEngine
     private readonly ICardMeter _meter;
     private readonly Func<string, long> _fileSize;
     private readonly IReadOnlyList<ICardGuest> _guests;
+    private readonly IVideoEngine? _video;
     private readonly SemaphoreSlim _turn = new(1, 1);
     private int _pictures;
+    private int _clips;
     private long _restedBytes;
 
     /// <param name="fileSize">The size of a file in bytes, 0 when it is missing (tests pass their own).</param>
     /// <param name="guests">What else can hold graphics memory (see <see cref="ICardGuest"/>).</param>
+    /// <param name="video">The video engine itself, or null where no video is made (most tests).</param>
     public CardCoordinator(IImageEngine images, IChatModelSlot chat, ICardMeter meter, Func<string, long>? fileSize = null,
-        IEnumerable<ICardGuest>? guests = null)
+        IEnumerable<ICardGuest>? guests = null, IVideoEngine? video = null)
     {
         _images = images;
         _chat = chat;
         _meter = meter;
         _fileSize = fileSize ?? SizeOf;
         _guests = guests?.ToList() ?? [];
+        _video = video;
         _images.Changed += () => Changed?.Invoke();
+        if (_video is not null) _video.Changed += () => Changed?.Invoke();
         _chat.CardTurn = TakeChatTurnAsync;
     }
 
@@ -230,10 +243,19 @@ public sealed class CardCoordinator : IImageEngine
     public ImageModel? Model => _images.Model;
 
     /// <summary>
-    /// True from the moment a picture is asked for until it is finished or has failed: waiting, making room and drawing.
-    /// The idle lock counts it as busy.
+    /// True from the moment a picture or a video is asked for until it is finished or has failed: waiting, making room
+    /// and drawing. The idle lock counts it as busy.
     /// </summary>
     public bool IsBusy => Volatile.Read(ref _pictures) > 0 || _images.IsBusy;
+
+    /// <summary>True from the moment a video is asked for until it is finished, cancelled or has failed.</summary>
+    public bool IsMakingVideo => Volatile.Read(ref _clips) > 0;
+
+    bool IVideoEngine.IsBusy => IsMakingVideo;
+
+    bool IVideoEngine.IsRunning => _video is { IsRunning: true };
+
+    Task IVideoEngine.StopAsync() => _video?.StopAsync() ?? Task.CompletedTask;
 
     public bool IsRunning => _images.IsRunning;
 
@@ -255,6 +277,7 @@ public sealed class CardCoordinator : IImageEngine
             var names = new List<string>();
             if (_chat.IsLoaded) names.Add(ChatName);
             if (_images.IsRunning) names.Add(PictureName);
+            if (_video is { IsRunning: true }) names.Add(VideoName);
             names.AddRange(_guests.Where(g => g.HoldsMemory).Select(g => g.Name));
             return names;
         }
@@ -263,6 +286,7 @@ public sealed class CardCoordinator : IImageEngine
     /// <summary>Why "Unload everything" must wait, in words for the owner, or null when it may run.</summary>
     public string? BusyReason =>
         _chat.IsBusy ? "A reply is being written. Unload when it has finished."
+        : IsMakingVideo ? "A video is being made. Unload when it has finished."
         : IsBusy ? "A picture is being drawn. Unload when it has finished."
         : null;
 
@@ -387,6 +411,120 @@ public sealed class CardCoordinator : IImageEngine
             Interlocked.Decrement(ref _pictures);
             Changed?.Invoke();
         }
+    }
+
+    /// <summary>
+    /// Makes a video. A clip takes the whole card, so under one turn everything else leaves it first: the chat model
+    /// is set aside (a reply being written is waited for, never cut off), the picture model and every guest that is
+    /// not being used are let go. When the cleared card still has less than the clip needs it is refused in words and
+    /// nothing is made. The video program runs only while the clip is made (the engine ends it), so when the turn is
+    /// given back the card is free again, and the chat model comes back the next time it is asked for.
+    /// </summary>
+    public async Task<VideoResult> MakeAsync(VideoModel model, VideoRequest request, IProgress<VideoProgress>? progress = null, CancellationToken ct = default)
+    {
+        var video = _video ?? throw new VideoEngineException("This DOG.ai has no video engine.");
+        // Checked before anything is moved: a clip that cannot be made must not cost the chat model its place.
+        if (request.Problems() is { Count: > 0 } problems) throw new VideoEngineException(string.Join(" ", problems));
+        if (model.Problem() is { } missing) throw new VideoEngineException(missing);
+
+        Interlocked.Increment(ref _pictures);
+        Interlocked.Increment(ref _clips);
+        Changed?.Invoke();
+        try
+        {
+            await SetAsidePageLoadAsync().ConfigureAwait(false);
+            if (_turn.CurrentCount == 0) progress?.Report(new VideoProgress(VideoStages.Waiting));
+            await _turn.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await ClearForVideoAsync(VideoMemory.Need(request), progress, ct).ConfigureAwait(false);
+                return await video.MakeAsync(model, request, progress, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                // The engine ends its program with the clip; this only makes sure of it before anything else gets the card.
+                await EndVideoAsync().ConfigureAwait(false);
+                _turn.Release();
+            }
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _clips);
+            Interlocked.Decrement(ref _pictures);
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>Ends the video program if one is still there. Call it only while holding a turn.</summary>
+    private async Task EndVideoAsync()
+    {
+        if (_video is not { IsRunning: true } video) return;
+        await video.StopAsync().ConfigureAwait(false);
+        Noted?.Invoke("the video program was still running and was ended.");
+    }
+
+    /// <summary>Takes everything off the card for a clip, then checks that the card has the room. Called while holding a turn.</summary>
+    private async Task ClearForVideoAsync(long need, IProgress<VideoProgress>? progress, CancellationToken ct)
+    {
+        var stopped = Interlocked.Exchange(ref _stoppedLoad, 0) == 1;
+        var before = await _meter.ReadAsync(ct).ConfigureAwait(false);
+        // A card that could never hold a clip is said so before anything is moved.
+        if (before is not null && before.TotalBytes < need)
+            throw new VideoEngineException($"A video needs about {Gb(need)} of graphics memory, and this PC’s graphics card has {Gb(before.TotalBytes)}.");
+
+        var gone = new List<string>();
+        var stayed = new List<string>();
+        if (_chat.IsLoaded || _images.IsRunning || _guests.Any(g => g.HoldsMemory)) progress?.Report(new VideoProgress(VideoStages.MakingRoom));
+        var waited = false;
+        while (_chat.IsLoaded)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (await _chat.RestAsync().ConfigureAwait(false))
+            {
+                Interlocked.Exchange(ref _restedBytes, before?.ChatBytes ?? 0);
+                gone.Add($"{ChatName} ({Gb(before?.ChatBytes ?? -1)}) was set aside");
+                break;
+            }
+            // A reply is being written. It is never cut off; the video waits for it.
+            if (!waited) progress?.Report(new VideoProgress(VideoStages.Waiting));
+            waited = true;
+            await Task.Delay(PollInterval, ct).ConfigureAwait(false);
+        }
+        if (waited) progress?.Report(new VideoProgress(VideoStages.MakingRoom));
+        if (_images.IsRunning)
+        {
+            await _images.ReleaseAsync(ct).ConfigureAwait(false);
+            gone.Add($"{PictureName} was let go");
+        }
+        foreach (var guest in _guests)
+        {
+            if (!guest.HoldsMemory) continue;
+            if (!guest.IsBusy && await guest.LetGoAsync().ConfigureAwait(false)) gone.Add($"{guest.Name} was let go");
+            else stayed.Add(guest.Name);
+        }
+
+        // What a program held is given back a moment after it ends: look again a few times before believing a full card.
+        var now = gone.Count == 0 ? before : await _meter.ReadAsync(ct).ConfigureAwait(false);
+        for (var look = 0; look < 10 && gone.Count > 0 && now is not null && now.FreeBytes < need; look++)
+        {
+            await Task.Delay(PollInterval, ct).ConfigureAwait(false);
+            now = await _meter.ReadAsync(ct).ConfigureAwait(false);
+        }
+
+        var setAside = _chat.IsResting && (stopped || gone.Count > 0 && gone[0].StartsWith(ChatName, StringComparison.Ordinal));
+        LastDecision = new CardDecision(setAside ? CardChoice.SetChatAside : CardChoice.NothingLoaded, need, now?.FreeBytes ?? -1);
+        var moved = gone.Count == 0 ? "nothing else was on the card" : CardCleared.List(gone);
+        if (now is not null && now.FreeBytes < need)
+        {
+            Noted?.Invoke($"a video needs about {Gb(need)}; {moved}, and only {Gb(now.FreeBytes)} is free, so the video was not made.");
+            var why = stayed.Count > 0
+                ? $" {char.ToUpperInvariant(stayed[0][0])}{CardCleared.List(stayed)[1..]} {(stayed.Count == 1 ? "is" : "are")} being used and {(stayed.Count == 1 ? "stays" : "stay")} in graphics memory: try again when {(stayed.Count == 1 ? "it has" : "they have")} finished."
+                : " Close other programs that use the graphics card, then try again.";
+            throw new VideoEngineException($"A video needs about {Gb(need)} of graphics memory and only {Gb(now.FreeBytes)} is free after DOG.ai made room.{why}");
+        }
+        Noted?.Invoke(now is null
+            ? $"a video needs the whole card (about {Gb(need)}); {moved}. The card could not be measured."
+            : $"a video needs the whole card (about {Gb(need)}); {moved}. {Gb(now.FreeBytes)} is free.");
     }
 
     /// <summary>

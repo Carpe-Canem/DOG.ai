@@ -123,6 +123,16 @@ public partial class App : Application
                 if (pictures.Error is { } error && error != lastPictureError) log.LogWarning("Picture engine problem: {Error}", error);
                 lastPictureError = pictures.Error;
             };
+            // The video engine's lines go through the same kind of filter: status lines only, none sharing a word with
+            // a sentence that was sent.
+            var video = _services.GetRequiredService<DogAI.Engine.Video.VideoServer>();
+            video.Logged += line => log.LogInformation("video engine: {Line}", line);
+            var lastVideoError = (string?)null;
+            video.Changed += () =>
+            {
+                if (video.Error is { } error && error != lastVideoError) log.LogWarning("Video engine problem: {Error}", error);
+                lastVideoError = video.Error;
+            };
             // Made now, not when the first picture is asked for: it is what makes chat model loads wait for a picture.
             // Its notes say what was moved and the memory numbers, never a prompt.
             _services.GetRequiredService<DogAI.Core.Images.CardCoordinator>().Noted += note => log.LogInformation("Graphics card: {Note}", note);
@@ -264,8 +274,13 @@ public partial class App : Application
         services.AddSingleton(sp => new DogAI.Core.Images.CardCoordinator(sp.GetRequiredService<DogAI.Engine.Images.ImageServer>(),
             sp.GetRequiredService<EngineManager>(), sp.GetRequiredService<DogAI.Core.Images.ICardMeter>(),
             guests: new DogAI.Core.Images.ICardGuest[] { sp.GetRequiredService<EmbeddingServer>() }
-                .Concat(sp.GetRequiredService<DogAI.Core.Voice.ISpeechRecognizer>() is DogAI.Core.Images.ICardGuest speech ? [speech] : [])));
+                .Concat(sp.GetRequiredService<DogAI.Core.Voice.ISpeechRecognizer>() is DogAI.Core.Images.ICardGuest speech ? [speech] : []),
+            video: sp.GetRequiredService<DogAI.Engine.Video.VideoServer>()));
         services.AddSingleton<DogAI.Core.Images.IImageEngine>(sp => sp.GetRequiredService<DogAI.Core.Images.CardCoordinator>());
+        // Video (M20): the picture engine's program started with a video model. A clip takes the whole card, so
+        // everything that makes one gets the coordinator, never the server itself.
+        services.AddSingleton<DogAI.Engine.Video.VideoServer>();
+        services.AddSingleton<DogAI.Core.Video.IVideoEngine>(sp => sp.GetRequiredService<DogAI.Core.Images.CardCoordinator>());
         services.AddSingleton<DogAI.Core.Documents.DocumentLibrary>();
         services.AddSingleton<WindowsIntegration>();
         services.AddSingleton<IWindowsIntegration>(sp => sp.GetRequiredService<WindowsIntegration>());

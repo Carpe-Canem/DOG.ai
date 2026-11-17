@@ -756,6 +756,109 @@ namespace DogAI.Data.Migrations
                     b.ToTable("Stories");
                 });
 
+            modelBuilder.Entity("DogAI.Core.Video.Clip", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Compression")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Decoder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FastDecoder")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("FlowShift")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Fps")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Frames")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("Guidance")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NegativePrompt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("OwnerId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OwnerKind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Prompt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Sampler")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Seed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("StartFrame")
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("StartFrameBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Steps")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("Still")
+                        .HasColumnType("BLOB");
+
+                    b.Property<string>("TextEncoder")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Vae")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Video")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<int>("VideoBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OwnerKind", "OwnerId");
+
+                    b.ToTable("Clips");
+                });
+
             modelBuilder.Entity("DogAI.Data.SettingEntry", b =>
                 {
                     b.Property<string>("Key")

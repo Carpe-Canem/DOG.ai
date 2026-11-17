@@ -30,6 +30,7 @@ public static class DataServices
         services.AddSingleton<IModelRecordStore, SqliteModelRecordStore>();
         services.AddSingleton<DogAI.Core.Documents.ICollectionStore, SqliteCollectionStore>();
         services.AddSingleton<DogAI.Core.Images.IPictureStore, SqlitePictureStore>();
+        services.AddSingleton<DogAI.Core.Video.IClipStore, SqliteClipStore>();
         services.AddSingleton<IDocumentStore>(sp => (SqliteSettingsStore)sp.GetRequiredService<ISettingsStore>());
         return services;
     }

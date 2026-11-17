@@ -405,9 +405,12 @@ public sealed class ImageServer : IImageEngine, IDisposable
     }
 
     /// <summary>A blank page for the engine to serve at its root in place of its own web page.</summary>
-    private string BlankPage()
+    private string BlankPage() => BlankPageIn(_paths);
+
+    /// <summary>The same for any program that is sd-server (the video engine is the same program).</summary>
+    internal static string BlankPageIn(AppPaths paths)
     {
-        var folder = _paths.ImageEngineDirectory;
+        var folder = paths.ImageEngineDirectory;
         Directory.CreateDirectory(folder);
         var file = Path.Combine(folder, "dogai-blank.html");
         const string Page = "<!doctype html><meta charset=\"utf-8\"><title>DOG.ai</title>";
