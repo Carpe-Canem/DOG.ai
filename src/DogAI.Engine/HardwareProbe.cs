@@ -16,7 +16,7 @@ public sealed class HardwareProbe
 
     public async Task<HardwareProfile> ProbeAsync(CancellationToken ct = default)
     {
-        var gpus = NvidiaSmi.ParseGpus(await RunSmiAsync(NvidiaSmi.GpuQuery, ct).ConfigureAwait(false) ?? "");
+        var gpus = AsTested(NvidiaSmi.ParseGpus(await RunSmiAsync(NvidiaSmi.GpuQuery, ct).ConfigureAwait(false) ?? ""), Environment.GetEnvironmentVariable(TestCardVariable));
         var banner = gpus.Count > 0 ? await RunSmiAsync("", ct).ConfigureAwait(false) : null;
         var (ramTotal, ramFree) = Memory();
         return new HardwareProfile
@@ -65,7 +65,30 @@ public sealed class HardwareProbe
     public async Task<GpuInfo?> MainGpuAsync(CancellationToken ct = default)
     {
         var output = await RunSmiAsync(NvidiaSmi.GpuQuery, ct).ConfigureAwait(false);
-        return output is null ? null : NvidiaSmi.ParseGpus(output).OrderByDescending(g => g.TotalBytes).FirstOrDefault();
+        return output is null ? null : AsTested(NvidiaSmi.ParseGpus(output), Environment.GetEnvironmentVariable(TestCardVariable)).OrderByDescending(g => g.TotalBytes).FirstOrDefault();
+    }
+
+    /// <summary>
+    /// For checks only (as DOGAI_TEST_MIC is for the microphone): the size in MiB DOG.ai is to take its main graphics
+    /// card for, e.g. 8188 for an 8 GB card. Everything that judges by the card's size (what Models offers, the Video
+    /// page, the card coordinator) then behaves as on such a card. The card itself is not made smaller: for a real
+    /// check another program must hold the rest of it.
+    /// </summary>
+    public const string TestCardVariable = "DOGAI_TEST_CARD_MIB";
+
+    /// <summary>
+    /// The cards as measured, with the main one taken for a smaller one when <paramref name="pretendMiB"/> says so:
+    /// its free memory is what the real card has free, and never more than the smaller card has once Windows has
+    /// taken a gigabyte. Anything that is not a smaller size changes nothing.
+    /// </summary>
+    internal static IReadOnlyList<GpuInfo> AsTested(IReadOnlyList<GpuInfo> gpus, string? pretendMiB)
+    {
+        if (gpus.Count == 0 || !long.TryParse(pretendMiB, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var mib) || mib <= 0) return gpus;
+        var main = gpus.MaxBy(g => g.TotalBytes)!;
+        var total = mib << 20;
+        if (total >= main.TotalBytes) return gpus;
+        var free = Math.Clamp(Math.Min(main.FreeBytes, total - (1L << 30)), 0, total);
+        return gpus.Select(g => ReferenceEquals(g, main) ? g with { TotalBytes = total, FreeBytes = free, UsedBytes = total - free } : g).ToList();
     }
 
     private async Task<string?> RunSmiAsync(string arguments, CancellationToken ct)
@@ -161,6 +184,9 @@ public sealed class HardwareProbe
             return null;
         }
     }
+
+    /// <summary>The PC's free memory (RAM) now, in bytes: what Windows could hand out, its file cache included. Null when it cannot be read.</summary>
+    public static long? FreeRam() => Memory() is { Total: > 0 } memory ? memory.Free : null;
 
     private static (long Total, long Free) Memory()
     {

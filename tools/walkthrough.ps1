@@ -21,7 +21,8 @@
 #                                                (after a restore's restart: there is no lock screen to drive)
 #               @{ tray = 'Lock now' }           open the tray icon's menu, print its items, and click the named one
 #                                                (tray = '' only prints them)
-#               @{ globalkey = 1500 }            hold Ctrl+Alt+Space this many ms in Notepad (started for it, closed after)
+#               @{ globalkey = 1500 }            hold Ctrl+Alt+Space this many ms in a small window of the script's own (never Notepad,
+#                                                which restores unsaved text), then print what was typed there
 #               @{ close = 1 }                   close the main window (it hides in the tray when that is chosen in Settings)
 #               @{ wait = 1500 }                 wait this many milliseconds
 #               @{ log = 'text' }                print the app log lines containing this text
@@ -191,19 +192,41 @@ function Open-Tray($click) {
 }
 
 function Hold-GlobalKey($ms) {
-    # Ctrl+Alt+Space is for other programs (inside DOG.ai it is ignored), so hold it in a Notepad started for this.
-    $pad = Start-Process notepad -PassThru
-    Start-Sleep -Milliseconds 1500
-    $padWindow = $A::RootElement.FindAll('Children', [Windows.Automation.Condition]::TrueCondition) | Where-Object { $_.Current.ClassName -eq 'Notepad' } | Select-Object -First 1
-    if ($padWindow) { [DogWalk.Win]::SetForegroundWindow([IntPtr]$padWindow.Current.NativeWindowHandle) | Out-Null }
-    Start-Sleep -Milliseconds 400
+    # Ctrl+Alt+Space is for other programs (inside DOG.ai it is ignored), so it is held in a small window of this
+    # script's own with one text box. Not Notepad: Windows 11's Notepad restores unsaved text, so whatever was
+    # typed there by a check would be added to a note the owner may have left open in it.
+    Add-Type -AssemblyName System.Windows.Forms
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = 'DOG.ai walkthrough: dictation'; $form.Width = 640; $form.Height = 200; $form.TopMost = $true
+    $form.StartPosition = 'Manual'; $form.Left = 40; $form.Top = 40
+    $box = New-Object System.Windows.Forms.TextBox
+    $box.Multiline = $true; $box.Dock = 'Fill'
+    $form.Controls.Add($box)
+    $form.Show()
+    $pump = { param($for) $until = (Get-Date).AddMilliseconds($for); while ((Get-Date) -lt $until) { [System.Windows.Forms.Application]::DoEvents(); Start-Sleep -Milliseconds 30 } }
+    & $pump 400
     $k = [DogWalk.Win]
+    # Windows lets a program come to the front only just after a key press; a lone Alt counts. Only when it is not
+    # in front already: a lone Alt in the window itself puts it in menu mode, and it then answers nothing more.
+    if ($k::GetForegroundWindow() -ne $form.Handle) {
+        $k::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); $k::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+        $k::SetForegroundWindow($form.Handle) | Out-Null
+    }
+    $form.Activate(); $box.Focus() | Out-Null
+    & $pump 600
     $k::keybd_event(0x11, 0, 0, [UIntPtr]::Zero); $k::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); $k::keybd_event(0x20, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds $ms
+    & $pump $ms
     $k::keybd_event(0x20, 0, 2, [UIntPtr]::Zero); $k::keybd_event(0x12, 0, 2, [UIntPtr]::Zero); $k::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 1500
-    Get-Process notepad -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -ge $pad.StartTime.AddSeconds(-1) } | Stop-Process -Force -ErrorAction SilentlyContinue
-    "held Ctrl+Alt+Space for $ms ms"
+    # What was said is typed a moment later (longer while a video is made: the speech model is on the processor then).
+    $atRelease = $box.Text.Length; $arrived = $null; $until = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $until) {
+        & $pump 250
+        if (-not $arrived -and $box.Text.Length -gt $atRelease) { $arrived = Get-Date }
+        if ($arrived -and ((Get-Date) - $arrived).TotalMilliseconds -gt 1500) { break }
+    }
+    $typed = $box.Text.Trim()
+    $form.Close()
+    "held Ctrl+Alt+Space for $ms ms; typed there: [$typed]"
 }
 
 function Front-Window {

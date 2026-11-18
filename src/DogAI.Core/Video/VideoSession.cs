@@ -695,9 +695,14 @@ public static class VideoPanels
     /// The same, with one more line while the clip is made on a card that something else holds part of
     /// (<see cref="CardCoordinator.IsVideoCrowded"/>): the estimate was for the whole card.
     /// </summary>
-    public static string Doing(VideoProgress? p, bool crowded) => crowded ? $"{Doing(p)} {Crowded}" : Doing(p);
+    /// <param name="alwaysPlanned">The card is one where every clip is made so (<see cref="VideoMemory.AlwaysPlanned"/>): nothing else need be on it.</param>
+    public static string Doing(VideoProgress? p, bool crowded, bool alwaysPlanned = false) =>
+        crowded ? $"{Doing(p)} {(alwaysPlanned ? SmallCard : Crowded)}" : Doing(p);
 
     public const string Crowded = "Part of the graphics card is in use, so nothing of the clip shows until it is done, and it may take longer than was said.";
+
+    /// <summary>The same line on a card under 24 GB, where it is the card's size and not another program.</summary>
+    public const string SmallCard = "On a graphics card of this size nothing of the clip shows until it is done.";
 
     /// <summary>
     /// What the stage says while a clip is made and no picture of it has come yet. With the fast decoder the engine

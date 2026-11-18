@@ -48,6 +48,12 @@ public interface ISpeechRecognizer
     /// <summary>"graphics card" or "processor" once the model has been loaded; null before.</summary>
     string? RunsOn { get; }
 
+    /// <summary>
+    /// Words for the owner while speech is written down more slowly than usual (a video is being made, so the model
+    /// keeps off the graphics card), or null.
+    /// </summary>
+    string? Slower => null;
+
     /// <summary>Loads the model ahead of use, so the first thing said is written down quickly.</summary>
     Task WarmUpAsync(CancellationToken ct = default);
 

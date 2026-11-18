@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject EmbeddingServer Search
 @inject DocumentLibrary Library
+@inject CardDoor Door
 
 <div class="panel" id="search-model">
     <h4>Document search model</h4>
@@ -14,6 +15,10 @@
     {
         <div class="kv"><span>Model</span><span>@Path.GetFileNameWithoutExtension(_path)</span></div>
         <div class="kv"><span>State</span><span id="search-model-state" data-state="@StateId">@State</span></div>
+        @if (StateId == "processor")
+        {
+            <p class="small" id="search-model-processor">@CardGuestWords.SearchAbout</p>
+        }
         <p class="small">It loads when a search or a new document needs it, and leaves memory after two minutes unused.<InfoButton About="the document search model">It runs beside the chat model and takes some graphics memory while it is in. It also leaves at once when a chat model or a picture needs the room, but never while documents are being indexed or searched. To use another, pick it in <a href="@ModelsPlaces.Address(ModelsPlaces.Library)">@ModelsPlaces.LibraryName › Default models</a>; documents are then indexed again.</InfoButton></p>
     }
     @if (Search.Error is { } error)
@@ -29,11 +34,12 @@
 @code {
     private string? _path;
 
-    private string StateId => Search.IsStarting ? "loading" : !Search.IsRunning ? "out" : Library.IsIndexing ? "indexing" : "in";
+    private string StateId => Search.IsStarting ? "loading" : !Search.IsRunning ? "out" : Search.OnProcessor ? "processor" : Library.IsIndexing ? "indexing" : "in";
 
     private string State => StateId switch
     {
         "loading" => "Loading…",
+        "processor" => (Door.IsClosed ? CardGuestWords.SearchOnProcessor : CardGuestWords.SearchStillOnProcessor) + (Library.IsIndexing ? ", indexing documents" : ""),
         "indexing" => "In memory, indexing documents",
         "in" => "In memory",
         _ => "Not in memory (loads when needed)",

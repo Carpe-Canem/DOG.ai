@@ -121,10 +121,73 @@ public static class VideoMemory
         (long)request.Width * request.Height > LargeAbovePixels ? 16 * Gb : 15 * Gb;
 
     /// <summary>
-    /// The smallest card a video is made on. Under it the engine keeps the whole model in RAM (15 GB of it), which was
-    /// asked of the engine in the trial but never tried on such a card.
+    /// The least free graphics memory a Quick clip is made with (M21 step 5). On a card that has less than the whole
+    /// model needs, the engine is given a plan (<see cref="EnginePlan"/>), keeps the model itself in RAM
+    /// (<see cref="PlannedRamNeed"/>) and brings it to the card piece by piece. Measured with another program holding
+    /// the rest of a 24 GB card. The engine alone: with 14.9, 11.1, 9.1, 7.2 and 6.8 GB free a Quick clip took 142 to
+    /// 146 seconds (139 on the whole card), with Faster 107 and 106 at 7.2 and 6.8 GB; the engine took the plan and
+    /// 2.7 to 2.8 GB, and the other program's memory was never touched. With 6.2 GB free (a plan of 3.2) every step
+    /// ran short of its working memory and the clip took 171 seconds; with Faster at 6.1 GB, and plain at 5.1 GB,
+    /// the engine made nothing ("returned no results"). In the app: 2 min 26 s, 2 min 26 s, 2 min 28 s and 2 min 28 s
+    /// with 14.9, 11.1, 9.1 and 7.0 GB free (the estimate said 2 min 26 s), Faster 1 min 49 s at 7.0 GB (1 min 48 s).
+    /// Better is not made this way: its decoder needs the model kept on the card (<see cref="PlanCapOwnDecoder"/>).
     /// </summary>
-    public const long SmallestCard = 16 * Gb;
+    public const long QuickPlannedNeed = 7 * Gb;
+
+    /// <summary>
+    /// What must be free on the cleared card for the clip to be made at all: Better's whole need, and for Quick the
+    /// least a planned clip was made with. <see cref="Need(VideoRequest)"/> stays what the clip takes when it can.
+    /// </summary>
+    public static long LeastNeed(VideoRequest request) => IsLarge(request) ? Need(request) : QuickPlannedNeed;
+
+    public static long LeastNeed(VideoQuality quality) => LeastNeed(VideoRequest.For("-", quality, PictureShape.Wide));
+
+    private static bool IsLarge(VideoRequest request) => (long)request.Width * request.Height > LargeAbovePixels;
+
+    /// <summary>
+    /// The smallest card a video is made on: 8 GB, which has about 7 GB once Windows has its part
+    /// (<see cref="QuickPlannedNeed"/>). Not tried on a real card of that size: see <see cref="SmallCardNote"/>.
+    /// </summary>
+    public const long SmallestCard = 8 * Gb;
+
+    /// <summary>
+    /// True for a card that makes clips, but only Quick ones and always by a plan: 8 GB up to and including 16 GB.
+    /// None of that size was tried for real (<see cref="SmallCardNote"/>).
+    /// </summary>
+    public static bool IsSmallCard(long? cardTotal) =>
+        cardTotal is { } total && CardCanMake(total, VideoQuality.Quick) && !CardCanMake(total, VideoQuality.Better);
+
+    /// <summary>
+    /// True for a card that never has the whole model's room (<see cref="WholeModelFree"/>) whatever is on it, so
+    /// every clip on it is made by a plan: every card under 24 GB.
+    /// </summary>
+    public static bool AlwaysPlanned(long? cardTotal) => cardTotal is { } total && total - WindowsHolds < WholeModelFree;
+
+    /// <summary>What the page says on such a card, so nobody takes the numbers for more than they are.</summary>
+    public const string SmallCardNote =
+        "DOG.ai has not been tried on a graphics card of this size. It was measured on a 24 GB card with another program holding the rest: " +
+        "a Quick clip then took about 2½ minutes. Most of the video model is kept in the PC’s own memory meanwhile, " +
+        "which takes about 12 GB of free memory (RAM), and nothing of the clip shows until it is done.";
+
+    /// <summary>
+    /// The free RAM a clip made by a plan needs (M21 step 5). The engine then keeps the model itself (9.5 GB) in
+    /// RAM: its own memory there was 11.0 GB in the planned clips measured (plans of 3.8 to 10 GB, plain and Faster),
+    /// and free RAM fell by 11 GB while the clip was made, where a clip on the whole card takes 1.6 GB. The engine
+    /// decides by the free RAM it finds, less 2 GB: with 12.5 GB free the clip took its usual 144 seconds and 1.7 GB
+    /// was left; with 9.8 GB free the engine kept the text encoder in RAM and the model on a card that had no room
+    /// for it, and the clip took 401 seconds. And with 17 GB or more free it keeps the text encoder (5.8 GB) in
+    /// RAM as well: 16.6 GB of its own, at normal speed, with about 1 GB of RAM left (what M21 step 1 saw).
+    /// A Better clip by a plan (13 GB, the model kept on the card) had the text encoder and its decoder in RAM:
+    /// 9.6 GB of its own, in 7 min 16 s. One need for both, with a gigabyte to spare over the larger.
+    /// </summary>
+    public const long PlannedRamNeed = 12 * Gb;
+
+    /// <summary>
+    /// Whether the PC has the free RAM for this clip: only a clip that gets a plan needs it. Unknown free RAM, and a
+    /// clip on the whole card (started and judged exactly as in M20), always pass.
+    /// </summary>
+    public static bool RamEnough(long? freeRamBytes, long? cardFreeBytes) =>
+        !Crowded(cardFreeBytes) || freeRamBytes is not { } ram || ram >= PlannedRamNeed;
 
     /// <summary>
     /// What a graphics card reports for its size is a little under the size on the box (this PC's 24 GB card says
@@ -146,13 +209,27 @@ public static class VideoMemory
     /// for <see cref="CardCoordinator"/>, which refuses before anything is moved.
     /// </summary>
     public static bool CardCanMake(long? cardTotal, VideoRequest request) =>
-        cardTotal is not { } total || total - WindowsHolds + CardSizeSlack >= Need(request);
+        cardTotal is not { } total || total - WindowsHolds + CardSizeSlack >= LeastNeed(request);
 
     public static bool CardCanMake(long? cardTotal, VideoQuality quality) =>
         CardCanMake(cardTotal, VideoRequest.For("-", quality, PictureShape.Wide));
 
     /// <summary>Whether this much free memory on a cleared card is room enough for a clip that needs <paramref name="need"/>.</summary>
     public static bool RoomEnough(long freeBytes, long need) => freeBytes + CardSizeSlack >= need;
+
+    /// <summary>
+    /// A planned Quick clip's need has little margin in it, so the room counts within a quarter of a gigabyte only:
+    /// the least free memory a clip was made with at normal speed was 6.8 GB (a plan of 3.8), plain and Faster.
+    /// </summary>
+    public const long PlannedSlack = 256L << 20;
+
+    /// <summary>
+    /// Whether the cleared card has the room for this clip at all: Better's whole need (within
+    /// <see cref="CardSizeSlack"/>, as in M20), or for Quick the least a planned clip is made with
+    /// (<see cref="QuickPlannedNeed"/>, within <see cref="PlannedSlack"/>).
+    /// </summary>
+    public static bool RoomFor(long freeBytes, VideoRequest request) =>
+        IsLarge(request) ? RoomEnough(freeBytes, Need(request)) : freeBytes + PlannedSlack >= QuickPlannedNeed;
 
     /// <summary>
     /// With this much free on the cleared card the whole model and its working memory fit: the engine then takes up
@@ -213,11 +290,17 @@ public static class VideoMemory
     /// <summary>The value for a card with nothing else on it: the engine keeps 3 GB of what it measures itself.</summary>
     public const string WholeCardPlan = "-3";
 
+    /// <summary>What the owner is told when a clip that would be made by a plan finds too little free RAM.</summary>
+    /// <param name="alwaysPlanned">The card is one that always gets a plan; else something holds part of a larger card.</param>
+    public static string TooLittleRam(long freeRamBytes, bool alwaysPlanned) =>
+        (alwaysPlanned ? "On a graphics card of this size" : "With part of the graphics card in use") +
+        $" the video model is kept in the PC’s own memory while a clip is made. That takes about {Sizes.Gb(PlannedRamNeed)} of free memory (RAM), and only {Sizes.Gb(freeRamBytes)} is free. Close other programs, then try again.";
+
     /// <summary>Why a card of this size cannot make clips at this quality, in words, or null when it can.</summary>
     public static string? CannotMake(long? cardTotal, VideoQuality quality)
     {
         if (CardCanMake(cardTotal, quality)) return null;
-        var need = Need(quality);
+        var need = LeastNeed(quality);
         return $"{quality} needs about {Sizes.Gb(need)} of free graphics memory, more than this card ({Sizes.Gb(cardTotal ?? 0)}) has once Windows has its part." +
             (quality == VideoQuality.Better && CardCanMake(cardTotal, VideoQuality.Quick) ? " Quick works on it." : "");
     }

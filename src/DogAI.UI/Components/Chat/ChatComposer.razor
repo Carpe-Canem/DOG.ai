@@ -105,6 +105,10 @@
             <div class="meter level"><i style="width:@((int)(Dict.Level * 100))%"></i></div>
         }
         <span>@line.Text</span>
+        @if (!line.Problem && Dict.IsOn && Dict.Slower is not null)
+        {
+            <span id="composer-voice-slower">@Dict.Slower</span>
+        }
     </div>
 }
 @if (Usage is { } usage)

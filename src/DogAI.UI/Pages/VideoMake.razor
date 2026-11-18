@@ -16,6 +16,9 @@
 @inject IDesktopShell Desktop
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject EmbeddingServer Search
+@inject DocumentLibrary Library
+@inject Dictation Dict
 
 @* The Video section (M20 step 4), modelled on the Images section's Make tab: the clip fills the page with the strip of
    tries beside it, the sentence and the first frame sit where the chat box is, and the three controls are folds in the
@@ -44,7 +47,7 @@
 
 @if (_kept)
 {
-    <KeptVideos Like="LikeFromKeptAsync" ContinueClip="ContinueFromKeptAsync" LikeBlocked="@LikeBlocked" Making="@(Session.IsMaking ? StatusText : null)" />
+    <KeptVideos Like="LikeFromKeptAsync" ContinueClip="ContinueFromKeptAsync" LikeBlocked="@LikeBlocked" Making="@(Session.IsMaking ? (GuestsLine is null ? StatusText : StatusText + " " + GuestsLine) : null)" />
     <AsideRegion Place="video" Hideable="false" Title="Video">
         <section class="panel images-about" id="video-kept-about">
             <h4>Kept videos</h4>
@@ -200,6 +203,12 @@ else
                             @onclick="DrawAsync">Draw</button>
                 }
             </div>
+            @if (Session.IsMaking && GuestsLine is not null)
+            {
+                @* The document search model and the speech model keep off the card while a clip is made (M21 step 5):
+                   said here, the one screen the owner is on meanwhile. *@
+                <p class="small" id="video-guests" role="status">@GuestsLine</p>
+            }
             @if (!Session.IsMaking && FieldProblems.Count > 0)
             {
                 <p class="small bad-text" id="video-problems" role="alert">@string.Join(" ", FieldProblems)</p>
@@ -223,6 +232,10 @@ else
             @if (VideoMemory.CannotMake(_cardTotal, VideoQuality.Better) is not null)
             {
                 <p class="small" id="video-better-why">@VideoMemory.CannotMake(_cardTotal, VideoQuality.Better)</p>
+            }
+            @if (VideoMemory.IsSmallCard(_cardTotal))
+            {
+                <p class="small" id="video-small-card">@VideoMemory.SmallCardNote</p>
             }
         </Fold>
 
@@ -275,6 +288,9 @@ else
     private string? _root, _error, _note;
     private VideoLook? _look;
     private long? _cardTotal;
+
+    /// <summary>What a guest of the card does on the processor while this clip is made, in words, or null.</summary>
+    private string? GuestsLine => CardGuestWords.Meanwhile(Search.OnProcessor, Library.IsIndexing, Dict.IsOn && Dict.Slower is not null);
     private VideoControls _controls = new();
     private SeedChoice _seed = SeedChoice.New;
     private ElementReference _player, _file;
@@ -393,7 +409,7 @@ else
     private IReadOnlyList<string> FieldProblems => [.. Problems.Where(p => !p.StartsWith("Say in a sentence", StringComparison.Ordinal))];
 
     private string StatusText =>
-        Session.IsMaking ? VideoPanels.Doing(Session.Progress, Coordinator.IsVideoCrowded)
+        Session.IsMaking ? VideoPanels.Doing(Session.Progress, Coordinator.IsVideoCrowded, VideoMemory.AlwaysPlanned(_cardTotal))
         : VideoPanels.Ready(Estimate(), Quality, Shape, _controls.Faster);
 
     // The preview is a full-size PNG (0.5 to 1.4 MB): its address is made once per preview, not on every render.

@@ -57,6 +57,12 @@ public sealed class Dictation : IDisposable
     /// <summary>The last problem in plain words (no microphone, no speech model…). Cleared when listening starts.</summary>
     public string? Problem { get; private set; }
 
+    /// <summary>
+    /// Words for the owner while writing down takes longer than usual (a video is being made, so the speech model
+    /// runs on the processor), or null. Never a silent wait: the chat box shows it with its dictation line.
+    /// </summary>
+    public string? Slower => _recognizer.Slower;
+
     /// <summary>Hands-free stops listening while this returns true. Set by the screen that owns the message box.</summary>
     public Func<bool>? Paused { get; set; }
 

@@ -1325,13 +1325,14 @@ public class VideoCardTests : IDisposable
     [Fact]
     public async Task When_the_cleared_card_still_has_too_little_it_is_refused_in_words_and_nothing_is_made()
     {
-        // Another program holds 10 GB of the card: with everything of DOG.ai's gone, 14 GB is free and a clip needs 15.
+        // Another program holds 18 GB of the card: with everything of DOG.ai's gone, 6 GB is free, and the least a
+        // Quick clip is made with is 7 (M21 step 5; in M20 it was 15, with 10 GB held).
         var rig = new Rig();
-        rig.Card.Other = 10 * Gb;
+        rig.Card.Other = 18 * Gb;
 
         var e = await Assert.ThrowsAsync<VideoEngineException>(() => rig.Engine.MakeAsync(_model, Quick));
 
-        Assert.Equal("A video needs about 15.0 GB of graphics memory and only 14.0 GB is free after DOG.ai made room. Close other programs that use the graphics card, then try again.", e.Message);
+        Assert.Equal("A video needs about 7.0 GB of graphics memory and only 6.0 GB is free after DOG.ai made room. Close other programs that use the graphics card, then try again.", e.Message);
         Assert.Equal("rest", rig.Order());
         Assert.Empty(rig.Video.Made);
         Assert.False(rig.Coordinator.IsBusy);
@@ -1342,9 +1343,9 @@ public class VideoCardTests : IDisposable
         // The document search model is indexing: it is never let go while it is used, and the refusal names it.
         var busy = new Rig(searchLoaded: true);
         busy.Search.IsBusy = true;
-        busy.Card.Other = 10 * Gb;
+        busy.Card.Other = 18 * Gb;
         e = await Assert.ThrowsAsync<VideoEngineException>(() => busy.Engine.MakeAsync(_model, Quick));
-        Assert.Equal("A video needs about 15.0 GB of graphics memory and only 14.0 GB is free after DOG.ai made room. The document search model is being used and stays in graphics memory: try again when it has finished.", e.Message);
+        Assert.Equal("A video needs about 7.0 GB of graphics memory and only 6.0 GB is free after DOG.ai made room. The document search model is being used and stays in graphics memory: try again when it has finished.", e.Message);
         Assert.True(busy.Search.HoldsMemory);
 
         // With room enough the clip is made beside a guest that is being used.
@@ -1361,10 +1362,10 @@ public class VideoCardTests : IDisposable
         var rig = new Rig(searchLoaded: true);
         await rig.Coordinator.LoadAsync(Checkpoint);
 
-        // A card too small for any clip.
-        rig.Card.Total = 12 * Gb;
+        // A card too small for any clip (under 8 GB since M21 step 5).
+        rig.Card.Total = 6 * Gb;
         var e = await Assert.ThrowsAsync<VideoEngineException>(() => rig.Engine.MakeAsync(_model, Quick));
-        Assert.Equal("A video needs about 15.0 GB of graphics memory, and this PC’s graphics card has 12.0 GB.", e.Message);
+        Assert.Equal("A video needs about 7.0 GB of graphics memory, and this PC’s graphics card has 6.0 GB.", e.Message);
         rig.Card.Total = 24 * Gb;
 
         // A request that cannot be made, a first frame of another shape, a missing or refused file.

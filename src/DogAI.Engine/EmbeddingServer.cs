@@ -11,6 +11,9 @@ namespace DogAI.Engine;
 /// chat model is loaded. It starts the first time something needs a vector and stops after two idle minutes
 /// (<see cref="IdleStop"/>), or at once when the graphics card needs the room (it is a <see cref="ICardGuest"/>), but
 /// never while it is being used: a request in progress, or documents being indexed (<see cref="KeepWhile"/>).
+/// While a video is being made it never comes onto the card (M21): it asks at the <see cref="CardDoor"/> before it
+/// starts, and with the door closed it starts on the processor (<see cref="OnProcessor"/>), slower but at once; the
+/// first request after the video starts it again on the card.
 /// The model is the one chosen as "Default for Document search" in the library; without a choice, the first embedding
 /// model found in the model folders.
 /// </summary>
@@ -29,6 +32,7 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
     private readonly LlamaServerLocator _locator;
     private readonly ISettingsStore _settings;
     private readonly IModelRecordStore _records;
+    private readonly CardDoor? _door;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly ProcessJob _job = new();
     private readonly Queue<string> _recentOutput = new();
@@ -39,9 +43,14 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
     private (string? Path, DateTime At)? _choice;
     private DateTime _lastUse = DateTime.UtcNow;
     private int _busy;
+    private int _answering;
+    private volatile bool _onProcessor;
 
-    public EmbeddingServer(LoopbackHttp http, LlamaServerLocator locator, ISettingsStore settings, IModelRecordStore records)
+    /// <param name="door">Asked before the model starts on the graphics card; null where nothing shares the card (tests).</param>
+    public EmbeddingServer(LoopbackHttp http, LlamaServerLocator locator, ISettingsStore settings, IModelRecordStore records, CardDoor? door = null)
     {
+        _door = door;
+        if (door is not null) door.Changed += () => Changed?.Invoke();
         _http = http;
         _locator = locator;
         _settings = settings;
@@ -65,13 +74,32 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
     /// <summary>True while the search model is running.</summary>
     public bool IsRunning => _api is not null && _process is { HasExited: false };
 
+    /// <summary>Process id of the running program, for measuring its graphics memory.</summary>
+    public int? ProcessId
+    {
+        get
+        {
+            try { return _process is { HasExited: false } p ? p.Id : null; }
+            catch (InvalidOperationException) { return null; }
+        }
+    }
+
     /// <summary>True while a request is being answered or documents are being indexed: it must not be stopped.</summary>
     public bool IsBusy => Volatile.Read(ref _busy) > 0 || KeepWhile?.Invoke() == true;
 
     string ICardGuest.Name => "the document search model";
 
-    /// <summary>In graphics memory, or on its way in.</summary>
-    bool ICardGuest.HoldsMemory => _process is { } p && Alive(p);
+    /// <summary>In graphics memory, or on its way in. One that runs on the processor holds none of it.</summary>
+    bool ICardGuest.HoldsMemory => _process is { } p && Alive(p) && !_onProcessor;
+
+    /// <summary>
+    /// True while the model runs on the processor, because a video was being made when it was needed. It is slower
+    /// there. The first request after the video starts it again on the graphics card.
+    /// </summary>
+    public bool OnProcessor => _onProcessor && _process is { } p && Alive(p);
+
+    /// <summary>Running where it should be: on the card, or on the processor while a video is still being made.</summary>
+    private bool InPlace => !_onProcessor || _door is { IsClosed: true };
 
     private static bool Alive(Process process)
     {
@@ -137,7 +165,16 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
                 var api = await EnsureStartedAsync(ct).ConfigureAwait(false);
                 try
                 {
-                    var result = await api.EmbedAsync(texts, ct).ConfigureAwait(false);
+                    Interlocked.Increment(ref _answering);
+                    IReadOnlyList<float[]> result;
+                    try
+                    {
+                        result = await api.EmbedAsync(texts, ct).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref _answering);
+                    }
                     _lastUse = DateTime.UtcNow;
                     return result;
                 }
@@ -166,13 +203,22 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
     {
         var path = await ModelPathAsync(ct).ConfigureAwait(false)
                    ?? throw new EmbedderUnavailableException("There is no document search model yet. Get one in " + DogAI.Core.Models.ModelsPlaces.RecommendedName + ", under Document search.");
-        if (_api is { } ready && _process is { HasExited: false } && _runningPath == path) return ready;
+        if (_api is { } ready && _process is { HasExited: false } && _runningPath == path && InPlace) return ready;
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_api is { } api && _process is { HasExited: false } && _runningPath == path) return api;
+            if (_api is { } api && _process is { HasExited: false } && _runningPath == path && InPlace) return api;
+            // Moving between the card and the processor (or to another model): what is being answered by the
+            // program that is to go is waited for, not cut off.
+            while (_process is not null && Volatile.Read(ref _answering) > 0) await Task.Delay(20, ct).ConfigureAwait(false);
             StopProcess();
+            // While a video is being made nothing new comes onto the card: the door answers null and the model starts
+            // on the processor. Otherwise the entry is kept until the model is in, so a video asked for meanwhile
+            // measures the card with it there.
+            using var entry = _door?.Enter();
+            var onProcessor = _door is not null && entry is null;
+            _onProcessor = onProcessor;
             IsStarting = true;
             Changed?.Invoke();
             var exe = _locator.Find() ?? throw new EmbedderUnavailableException(
@@ -188,14 +234,7 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
                 RedirectStandardError = true,
                 WorkingDirectory = Path.GetDirectoryName(exe)!,
             };
-            // Each of the four slots gets 2,048 tokens, and a whole passage must fit in one batch (embedding models
-            // read their input at once). Passages are at most 1,500 characters, so they always fit.
-            foreach (var arg in new[]
-            {
-                "--model", path, "--host", "127.0.0.1", "--port", port.ToString(), "--embedding",
-                "--ctx-size", "8192", "--parallel", "4", "--batch-size", "2048", "--ubatch-size", "2048",
-                "--gpu-layers", "999", "--no-webui",
-            })
+            foreach (var arg in Arguments(path, port, onProcessor))
                 start.ArgumentList.Add(arg);
             EngineEnvironment.Clean(start);
             start.Environment["LLAMA_API_KEY"] = key;
@@ -246,6 +285,26 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
         }
     }
 
+    /// <summary>
+    /// The program's start arguments. Public for tests, which pin both lists: on the card it is started exactly as
+    /// before M21. For the processor it gets no layers on the card and, with <c>--device none</c>, no card at all:
+    /// with <c>--gpu-layers 0</c> alone the program still took 454 MiB of the card (the installed CUDA engine; 128 MiB
+    /// with the Vulkan one), and with both it took none on either.
+    /// </summary>
+    public static IReadOnlyList<string> Arguments(string modelPath, int port, bool onProcessor)
+    {
+        // Each of the four slots gets 2,048 tokens, and a whole passage must fit in one batch (embedding models
+        // read their input at once). Passages are at most 1,500 characters, so they always fit.
+        var args = new List<string>
+        {
+            "--model", modelPath, "--host", "127.0.0.1", "--port", port.ToString(System.Globalization.CultureInfo.InvariantCulture), "--embedding",
+            "--ctx-size", "8192", "--parallel", "4", "--batch-size", "2048", "--ubatch-size", "2048",
+            "--gpu-layers", onProcessor ? "0" : "999", "--no-webui",
+        };
+        if (onProcessor) args.AddRange(["--device", "none"]);
+        return args;
+    }
+
     public async Task StopAsync()
     {
         await _gate.WaitAsync().ConfigureAwait(false);
@@ -272,6 +331,29 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
         {
             // Looked at again with the start lock held: a request counts as busy before it takes the lock.
             if (IsBusy) return false;
+            StopProcess();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+        Changed?.Invoke();
+        return true;
+    }
+
+    /// <summary>
+    /// Leaves the card for a video, also while documents are being indexed: the batch being answered right now is
+    /// waited for (never cut off), then the program is stopped. The next batch finds the door closed and starts the
+    /// model on the processor; a batch that reaches the program just as it stops starts it again once, as after any
+    /// program that died between two requests. True when the model is off the card.
+    /// </summary>
+    public async Task<bool> StepOffAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_process is null || _onProcessor) return true;
+            while (Volatile.Read(ref _answering) > 0) await Task.Delay(20, ct).ConfigureAwait(false);
             StopProcess();
         }
         finally
@@ -310,6 +392,7 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
         _process = null;
         _api = null;
         _runningPath = null;
+        _onProcessor = false;
         if (process is null) return;
         try
         {

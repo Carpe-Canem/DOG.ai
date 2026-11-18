@@ -331,10 +331,13 @@ public class VideoMakeTests : IDisposable
             VideoMemory.CannotMake(sixteen, VideoQuality.Better));
         // Models offers the model to the 16 GB card, so it can make at least Quick.
         Assert.True(VideoDownloads.Offered(sixteen));
-        // A card that could not be measured is not held back; a 12 GB card makes neither.
+        // A card that could not be measured is not held back. A 12 GB card makes Quick by a plan since M21 step 5
+        // (CardGuestsAndSizesTests has every size); a 6 GB card makes neither.
         Assert.True(VideoMemory.CardCanMake(null, VideoQuality.Better));
-        Assert.False(VideoMemory.CardCanMake(12 * Gb, VideoQuality.Quick));
-        Assert.DoesNotContain("Quick works", VideoMemory.CannotMake(12 * Gb, VideoQuality.Better));
+        Assert.True(VideoMemory.CardCanMake(12 * Gb, VideoQuality.Quick));
+        Assert.Contains("Quick works", VideoMemory.CannotMake(12 * Gb, VideoQuality.Better));
+        Assert.False(VideoMemory.CardCanMake(6 * Gb, VideoQuality.Quick));
+        Assert.DoesNotContain("Quick works", VideoMemory.CannotMake(6 * Gb, VideoQuality.Better));
         // Room on a cleared card counts within the same slack.
         Assert.True(VideoMemory.RoomEnough(15 * Gb - 400 * MiB, 15 * Gb));
         Assert.False(VideoMemory.RoomEnough(14 * Gb, 15 * Gb));

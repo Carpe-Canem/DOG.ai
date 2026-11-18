@@ -5,7 +5,8 @@ namespace DogAI.Core.Images;
 /// <summary>The main graphics card's memory, measured now, in bytes.</summary>
 /// <param name="PictureBytes">What the picture engine holds (0 when it is not running or cannot be measured).</param>
 /// <param name="ChatBytes">What the chat model holds (0 when none is loaded or it cannot be measured).</param>
-public sealed record CardMemory(long TotalBytes, long FreeBytes, long PictureBytes = 0, long ChatBytes = 0);
+/// <param name="FreeRamBytes">The PC's own free memory (RAM), or null when it was not measured. Only a video made by a plan asks for it.</param>
+public sealed record CardMemory(long TotalBytes, long FreeBytes, long PictureBytes = 0, long ChatBytes = 0, long? FreeRamBytes = null);
 
 /// <summary>Measures the graphics card. Null when it cannot be measured (no NVIDIA card or driver tool).</summary>
 public interface ICardMeter
@@ -67,6 +68,153 @@ public interface ICardGuest
 
     /// <summary>Gives its graphics memory back. False, with nothing changed, when it is being used.</summary>
     Task<bool> LetGoAsync();
+
+    /// <summary>
+    /// Leaves the card for a video (M21): a video takes the whole card, and a guest working beside it slowed the clip
+    /// by half (the document search model indexing on the card: 3 min 40 s where the estimate said 2 min 26 s). So a
+    /// guest that is being used is not cut off and does not stay either: it finishes what it is doing right now (one
+    /// batch of passages, one thing said), gives its graphics memory back, and carries on on the processor, because
+    /// the door is closed by then (<see cref="CardDoor"/>). True when it is off the card. A guest that knows no
+    /// better is let go only when idle, as for a picture.
+    /// </summary>
+    Task<bool> StepOffAsync(CancellationToken ct = default) => LetGoAsync();
+}
+
+/// <summary>
+/// Whether a guest may come onto the graphics card now (M21). A video takes the whole card, and a guest loads without a
+/// card turn, so one could come onto the card while a clip was at its peak. The coordinator closes the door from the
+/// moment a clip is asked for until it has ended; a guest asks at the door before it loads into graphics memory, and
+/// with the door closed it runs on the processor meanwhile. Nothing else closes it: beside pictures and chat models a
+/// guest comes and goes as it did before.
+/// </summary>
+public sealed class CardDoor
+{
+    private readonly object _lock = new();
+    private int _closed;
+    private int _entering;
+    private TaskCompletionSource? _empty;
+
+    /// <summary>True while a video is being made: nothing new comes onto the card.</summary>
+    public bool IsClosed
+    {
+        get
+        {
+            lock (_lock) return _closed > 0;
+        }
+    }
+
+    /// <summary>Raised when the door closes or opens. May come from a background thread.</summary>
+    public event Action? Changed;
+
+    /// <summary>
+    /// Asked by a guest before it loads into graphics memory, or uses the card. Null while the door is closed: the
+    /// guest stays off the card. Otherwise something to dispose when the load (or the use) has ended; a video that is
+    /// asked for meanwhile waits for it before it measures the card.
+    /// </summary>
+    public IDisposable? Enter()
+    {
+        lock (_lock)
+        {
+            if (_closed > 0) return null;
+            _entering++;
+            return new Entry(this);
+        }
+    }
+
+    /// <summary>Closes the door for a video. Every call is answered by one <see cref="Open"/>.</summary>
+    public void Close()
+    {
+        lock (_lock) _closed++;
+        Changed?.Invoke();
+    }
+
+    public void Open()
+    {
+        lock (_lock) _closed = Math.Max(0, _closed - 1);
+        Changed?.Invoke();
+    }
+
+    /// <summary>Returns once no guest is on its way onto the card any more. Call it after <see cref="Close"/>.</summary>
+    public async Task EmptyAsync(CancellationToken ct = default)
+    {
+        while (true)
+        {
+            Task wait;
+            lock (_lock)
+            {
+                if (_entering == 0) return;
+                _empty ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                wait = _empty.Task;
+            }
+            await wait.WaitAsync(ct).ConfigureAwait(false);
+        }
+    }
+
+    private void Leave()
+    {
+        TaskCompletionSource? done = null;
+        lock (_lock)
+        {
+            if (--_entering > 0) return;
+            _entering = 0;
+            done = _empty;
+            _empty = null;
+        }
+        done?.TrySetResult();
+    }
+
+    private sealed class Entry(CardDoor door) : IDisposable
+    {
+        private int _left;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _left, 1) == 0) door.Leave();
+        }
+    }
+}
+
+/// <summary>
+/// What the owner is told while a guest runs on the processor because a video is being made (M21). Measured in the
+/// app while a Quick clip was made: the document search model indexed 6 to 9 passages a second on the processor
+/// (100 to 108 on the card) and answered a question in under a tenth of a second; the speech model wrote down 8.5
+/// seconds of talk in 10 seconds (0.6 on the card); neither took any of the card, and the clip took 2 min 18 s to
+/// 2 min 31 s against an estimate of 2 min 26 s.
+/// </summary>
+public static class CardGuestWords
+{
+    /// <summary>The document search model's state on the Documents screen while it runs on the processor and a video is being made.</summary>
+    public const string SearchOnProcessor = "On the processor while a video is made";
+
+    /// <summary>The same once the video is done: it moves by itself, at its next use.</summary>
+    public const string SearchStillOnProcessor = "On the processor until it is next used";
+
+    /// <summary>The line under that state.</summary>
+    public const string SearchAbout = "A video is being made and has the whole graphics card, so documents are indexed and searched on the processor meanwhile. That is slower: about 8 passages a second in place of 100. The model moves back to the graphics card by itself the first time it is used after the video.";
+
+    /// <summary>Added to the chat box's dictation line, and said on the Video page while something is dictated.</summary>
+    public const string SpeechOnProcessor = "A video is being made, so what you say is written down on the processor meanwhile: that takes about as long as you spoke.";
+
+    /// <summary>On the Video page while a clip is made and documents are indexed meanwhile.</summary>
+    public const string IndexingMeanwhile = "Documents are being indexed on the processor while the clip is made, which is slower. Indexing goes back to the graphics card by itself when the clip is done.";
+
+    /// <summary>On the Video page while a clip is made and the document search model was needed meanwhile.</summary>
+    public const string SearchMeanwhile = "The document search model runs on the processor while the clip is made.";
+
+    /// <summary>
+    /// The line on the Video page, the screen the owner is on while a clip is made, when a guest works on the
+    /// processor meanwhile; null when none does. Leaving that page stops the clip, so no other screen shows it for long.
+    /// </summary>
+    /// <param name="searchOnProcessor">The document search model runs on the processor now.</param>
+    /// <param name="indexing">Documents are being indexed.</param>
+    /// <param name="dictating">Something is being dictated, and the speech model keeps off the card.</param>
+    public static string? Meanwhile(bool searchOnProcessor, bool indexing, bool dictating)
+    {
+        var parts = new List<string>();
+        if (searchOnProcessor) parts.Add(indexing ? IndexingMeanwhile : SearchMeanwhile);
+        if (dictating) parts.Add(SpeechOnProcessor);
+        return parts.Count == 0 ? null : string.Join(" ", parts);
+    }
 }
 
 /// <summary>What "Unload everything" did.</summary>
@@ -215,6 +363,7 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
     private readonly Func<string, long> _fileSize;
     private readonly IReadOnlyList<ICardGuest> _guests;
     private readonly IVideoEngine? _video;
+    private readonly CardDoor _door;
     private readonly SemaphoreSlim _turn = new(1, 1);
     private int _pictures;
     private int _clips;
@@ -223,9 +372,11 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
     /// <param name="fileSize">The size of a file in bytes, 0 when it is missing (tests pass their own).</param>
     /// <param name="guests">What else can hold graphics memory (see <see cref="ICardGuest"/>).</param>
     /// <param name="video">The video engine itself, or null where no video is made (most tests).</param>
+    /// <param name="door">The door the guests ask at before they come onto the card (the app gives them the same one).</param>
     public CardCoordinator(IImageEngine images, IChatModelSlot chat, ICardMeter meter, Func<string, long>? fileSize = null,
-        IEnumerable<ICardGuest>? guests = null, IVideoEngine? video = null)
+        IEnumerable<ICardGuest>? guests = null, IVideoEngine? video = null, CardDoor? door = null)
     {
+        _door = door ?? new CardDoor();
         _images = images;
         _chat = chat;
         _meter = meter;
@@ -252,8 +403,8 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
     public bool IsMakingVideo => Volatile.Read(ref _clips) > 0;
 
     /// <summary>
-    /// True while a video is made on a card that something else holds part of (another program, or a guest that is
-    /// being used): the engine is then given a plan, keeps part of the model in RAM, and is asked for no previews.
+    /// True while a video is made by a plan: on a card that another program holds part of, or one under 24 GB.
+    /// The engine then keeps the model itself in RAM and is asked for no previews.
     /// </summary>
     public bool IsVideoCrowded
     {
@@ -428,8 +579,9 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
 
     /// <summary>
     /// Makes a video. A clip takes the whole card, so under one turn everything else leaves it first: the chat model
-    /// is set aside (a reply being written is waited for, never cut off), the picture model and every guest that is
-    /// not being used are let go. When the cleared card still has less than the clip needs it is refused in words and
+    /// is set aside (a reply being written is waited for, never cut off), the picture model is let go, and
+    /// every guest leaves (one that is being used finishes what it is doing first, then carries on on the processor:
+    /// <see cref="ICardGuest.StepOffAsync"/>). When the cleared card still has less than the clip needs it is refused in words and
     /// nothing is made. The video program runs only while the clip is made (the engine ends it), so when the turn is
     /// given back the card is free again, and the chat model comes back the next time it is asked for.
     /// </summary>
@@ -442,14 +594,21 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
 
         Interlocked.Increment(ref _pictures);
         Interlocked.Increment(ref _clips);
-        Changed?.Invoke();
+        // From here until the clip has ended no guest comes onto the card (M21): one that is needed meanwhile runs
+        // on the processor. A guest loads without a card turn, so only the door keeps it off. (Closed here and
+        // opened in the last "finally" below: nothing that can fail stands between the two.)
+        _door.Close();
         try
         {
+            Changed?.Invoke();
             await SetAsidePageLoadAsync().ConfigureAwait(false);
             if (_turn.CurrentCount == 0) progress?.Report(new VideoProgress(VideoStages.Waiting));
             await _turn.WaitAsync(ct).ConfigureAwait(false);
             try
             {
+                // A guest that was on its way onto the card when the clip was asked for is let in first (seconds),
+                // so the card is measured with it there and not a moment before it arrives.
+                await _door.EmptyAsync(ct).ConfigureAwait(false);
                 var free = await ClearForVideoAsync(request, progress, ct).ConfigureAwait(false);
                 // The engine is told what is free: it does not see what other programs hold (VideoMemory.EnginePlan).
                 IsVideoCrowded = VideoMemory.Crowded(free);
@@ -469,6 +628,7 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         }
         finally
         {
+            _door.Open();
             Interlocked.Decrement(ref _clips);
             Interlocked.Decrement(ref _pictures);
             Changed?.Invoke();
@@ -489,13 +649,19 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
     /// </summary>
     private async Task<long?> ClearForVideoAsync(VideoRequest request, IProgress<VideoProgress>? progress, CancellationToken ct)
     {
+        // What the clip takes when the card has it, and the least it is made with at all (a Quick clip by a plan, M21).
         var need = VideoMemory.Need(request);
+        var least = VideoMemory.LeastNeed(request);
         var stopped = Interlocked.Exchange(ref _stoppedLoad, 0) == 1;
         var before = await _meter.ReadAsync(ct).ConfigureAwait(false);
         // A card that could never hold a clip is said so before anything is moved.
         // (The same rule the Video page uses to offer a quality: VideoMemory.CardCanMake.)
         if (before is not null && !VideoMemory.CardCanMake(before.TotalBytes, request))
-            throw new VideoEngineException($"A video needs about {Gb(need)} of graphics memory, and this PC’s graphics card has {Gb(before.TotalBytes)}.");
+            throw new VideoEngineException($"A video needs about {Gb(least)} of graphics memory, and this PC’s graphics card has {Gb(before.TotalBytes)}.");
+        // A card under 24 GB never has the whole model's room: there a partly used card is no sign of another program,
+        // and what is waited for after clearing it is what such a card can have.
+        var planned = VideoMemory.AlwaysPlanned(before?.TotalBytes);
+        var hoped = before is null ? need : Math.Max(least, Math.Min(need, before.TotalBytes - VideoMemory.WindowsHolds));
 
         var gone = new List<string>();
         var stayed = new List<string>();
@@ -524,13 +690,17 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         foreach (var guest in _guests)
         {
             if (!guest.HoldsMemory) continue;
-            if (!guest.IsBusy && await guest.LetGoAsync().ConfigureAwait(false)) gone.Add($"{guest.Name} was let go");
+            // An idle guest goes at once. One that is being used finishes what it is doing right now, then leaves
+            // and carries on on the processor (the door is closed): beside a working guest the clip was half slower.
+            var working = guest.IsBusy;
+            if (await guest.StepOffAsync(ct).ConfigureAwait(false))
+                gone.Add(working ? $"{guest.Name} left the card and carries on on the processor" : $"{guest.Name} was let go");
             else stayed.Add(guest.Name);
         }
 
         // What a program held is given back a moment after it ends: look again a few times before believing a full card.
         var now = gone.Count == 0 ? before : await _meter.ReadAsync(ct).ConfigureAwait(false);
-        for (var look = 0; look < 10 && gone.Count > 0 && now is not null && !VideoMemory.RoomEnough(now.FreeBytes, need); look++)
+        for (var look = 0; look < 10 && gone.Count > 0 && now is not null && !VideoMemory.RoomEnough(now.FreeBytes, hoped); look++)
         {
             await Task.Delay(PollInterval, ct).ConfigureAwait(false);
             now = await _meter.ReadAsync(ct).ConfigureAwait(false);
@@ -539,7 +709,7 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         // A card that still looks partly used may only be slow to give back what a program held that ended a moment
         // ago (the video program of the clip before, with nothing of DOG.ai's to move this time): look a little
         // longer before refusing the clip or planning it for a crowded card.
-        for (var look = 0; look < 4 && now is not null && VideoMemory.Crowded(now.FreeBytes); look++)
+        for (var look = 0; look < 4 && !planned && now is not null && VideoMemory.Crowded(now.FreeBytes); look++)
         {
             await Task.Delay(PollInterval, ct).ConfigureAwait(false);
             now = await _meter.ReadAsync(ct).ConfigureAwait(false);
@@ -548,18 +718,24 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         var setAside = _chat.IsResting && (stopped || gone.Count > 0 && gone[0].StartsWith(ChatName, StringComparison.Ordinal));
         LastDecision = new CardDecision(setAside ? CardChoice.SetChatAside : CardChoice.NothingLoaded, need, now?.FreeBytes ?? -1);
         var moved = gone.Count == 0 ? "nothing else was on the card" : CardCleared.List(gone);
-        if (now is not null && !VideoMemory.RoomEnough(now.FreeBytes, need))
+        if (now is not null && !VideoMemory.RoomFor(now.FreeBytes, request))
         {
-            Noted?.Invoke($"a video needs about {Gb(need)}; {moved}, and only {Gb(now.FreeBytes)} is free, so the video was not made.");
+            Noted?.Invoke($"a video needs about {Gb(least)}; {moved}, and only {Gb(now.FreeBytes)} is free, so the video was not made.");
             var why = stayed.Count > 0
                 ? $" {char.ToUpperInvariant(stayed[0][0])}{CardCleared.List(stayed)[1..]} {(stayed.Count == 1 ? "is" : "are")} being used and {(stayed.Count == 1 ? "stays" : "stay")} in graphics memory: try again when {(stayed.Count == 1 ? "it has" : "they have")} finished."
                 : " Close other programs that use the graphics card, then try again.";
-            throw new VideoEngineException($"A video needs about {Gb(need)} of graphics memory and only {Gb(now.FreeBytes)} is free after DOG.ai made room.{why}");
+            throw new VideoEngineException($"A video needs about {Gb(least)} of graphics memory and only {Gb(now.FreeBytes)} is free after DOG.ai made room.{why}");
+        }
+        // A clip made by a plan keeps the model itself in RAM: without the room there the PC would page and crawl.
+        if (now is not null && !VideoMemory.RamEnough(now.FreeRamBytes, now.FreeBytes))
+        {
+            Noted?.Invoke($"a video made with part of the card needs about {Gb(VideoMemory.PlannedRamNeed)} of free RAM; {moved}, and only {Gb(now.FreeRamBytes ?? 0)} of RAM is free, so the video was not made.");
+            throw new VideoEngineException(VideoMemory.TooLittleRam(now.FreeRamBytes ?? 0, planned));
         }
         Noted?.Invoke(now is null
             ? $"a video needs the whole card (about {Gb(need)}); {moved}. The card could not be measured."
             : VideoMemory.Crowded(now.FreeBytes)
-                ? $"a video needs the whole card (about {Gb(need)}); {moved}. Only {Gb(now.FreeBytes)} is free (something else holds part of the card), so the video engine was told to plan with {VideoMemory.EnginePlan(now.FreeBytes, request.Decoder)} GB and to send no previews."
+                ? $"a video needs the whole card (about {Gb(need)}); {moved}. Only {Gb(now.FreeBytes)} is free ({(planned ? "the card is smaller than that" : "something else holds part of the card")}), so the video engine was told to plan with {VideoMemory.EnginePlan(now.FreeBytes, request.Decoder)} GB and to send no previews."
                 : $"a video needs the whole card (about {Gb(need)}); {moved}. {Gb(now.FreeBytes)} is free.");
         return now?.FreeBytes;
     }

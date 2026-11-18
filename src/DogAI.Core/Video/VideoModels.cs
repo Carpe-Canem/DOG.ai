@@ -103,18 +103,21 @@ public static class VideoDownloads
     public const long CardSizeSlack = VideoMemory.CardSizeSlack;
 
     /// <summary>
-    /// Whether this PC is offered the video model: a graphics card of <see cref="VideoMemory.SmallestCard"/> (16 GB) or
-    /// more. Smaller cards are not offered in the first version: the engine could keep the model in RAM, but that was
-    /// only asked of it, never tried on such a card (M20 trial).
+    /// Whether this PC is offered the video model: a graphics card that can make a Quick clip, which is one of
+    /// <see cref="VideoMemory.SmallestCard"/> (8 GB) or more since M21 (the page's own rule,
+    /// <see cref="VideoMemory.CardCanMake(long?, VideoQuality)"/>, asked of a card that was found). Cards up to 16 GB
+    /// get Quick only and are told they were not tried for real (<see cref="VideoMemory.SmallCardNote"/>).
     /// </summary>
-    public static bool Offered(long? cardBytes) => cardBytes is { } total && total >= VideoMemory.SmallestCard - CardSizeSlack;
+    public static bool Offered(long? cardBytes) => cardBytes is { } total && VideoMemory.CardCanMake(total, VideoQuality.Quick);
 
     /// <summary>The line beside the download that says whether it fits, in words.</summary>
     public static string FitText(long? cardBytes) => cardBytes is not { } total
-        ? "Needs an NVIDIA graphics card with 16 GB or more. No graphics card was found on this PC, so it is not offered."
-        : Offered(total)
-            ? $"Fits this PC: a clip needs about {Sizes.Gb(NeedAt(VideoQuality.Quick))} of graphics memory ({Sizes.Gb(NeedAt(VideoQuality.Better))} for Better), and this card has {Sizes.Gb(total)}. The chat model is set aside while a clip is made."
-            : $"Needs a graphics card with 16 GB or more; this one has {Sizes.Gb(total)}. DOG.ai does not offer video on smaller cards yet: it has not been tried on one.";
+        ? $"Needs an NVIDIA graphics card with {VideoMemory.SmallestCard >> 30} GB or more. No graphics card was found on this PC, so it is not offered."
+        : !Offered(total)
+            ? $"Needs a graphics card with {VideoMemory.SmallestCard >> 30} GB or more; this one has {Sizes.Gb(total)}."
+            : VideoMemory.IsSmallCard(total)
+                ? $"Fits this PC for Quick clips: this card has {Sizes.Gb(total)}, and a Quick clip can be made with {Sizes.Gb(VideoMemory.QuickPlannedNeed)} of it free. Better needs {Sizes.Gb(NeedAt(VideoQuality.Better))} free and is not offered here. {VideoMemory.SmallCardNote}"
+                : $"Fits this PC: a clip needs about {Sizes.Gb(NeedAt(VideoQuality.Quick))} of graphics memory ({Sizes.Gb(NeedAt(VideoQuality.Better))} for Better), and this card has {Sizes.Gb(total)}. The chat model is set aside while a clip is made.";
 
     private static long NeedAt(VideoQuality quality) => VideoMemory.Need(VideoRequest.For("-", quality, PictureShape.Wide));
 

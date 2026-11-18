@@ -119,12 +119,15 @@ internal sealed class FakeCard(FakeChatModel chat, FakeImageEngine images) : ICa
     public long PictureBytes { get; set; } = 8 * Gb;
     public bool Unmeasurable { get; set; }
 
+    /// <summary>The PC's free RAM; null (not measured) unless a test sets it.</summary>
+    public long? FreeRam { get; set; }
+
     public Task<CardMemory?> ReadAsync(CancellationToken ct = default)
     {
         if (Unmeasurable) return Task.FromResult<CardMemory?>(null);
         var c = chat.IsLoaded ? ChatBytes : 0;
         var p = images.IsRunning ? PictureBytes : 0;
-        return Task.FromResult<CardMemory?>(new CardMemory(Total, Total - Other - c - p, p, c));
+        return Task.FromResult<CardMemory?>(new CardMemory(Total, Total - Other - c - p, p, c, FreeRam));
     }
 }
 

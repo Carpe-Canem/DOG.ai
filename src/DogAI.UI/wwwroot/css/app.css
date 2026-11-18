@@ -784,6 +784,8 @@ button.cite:hover { border-color: var(--accent); }
 .video-qualities { display: flex; }
 .video-qualities button { flex: 1; }
 .video-fold .seg + .small { margin-top: 6px; }
+/* Two notes in a row (what Better needs, what a smaller card is told) are told apart. */
+.video-fold .small + .small { margin-top: 6px; }
 .video-missing { max-width: 760px; margin: 24px auto; display: grid; gap: 8px; }
 @media (max-width: 520px) { .video-tries .video-try-n { width: auto; height: 88px; } }
 /* Video › Kept videos (M20 step 5): the Kept pictures grid with stills, a small mark saying each is a video, and a

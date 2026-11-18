@@ -11,6 +11,11 @@ namespace DogAI.Engine.Voice;
 /// and 13 s on the processor. The very first run on a graphics card also prepares its shaders (about 15 s, once;
 /// the driver keeps them), so the model is loaded and tried as soon as the microphone turns on.
 /// The model is let go after ten idle minutes.
+/// <para>
+/// While a video is being made it never comes onto the card (M21): it asks at the <see cref="DogAI.Core.Images.CardDoor"/>
+/// before every use, and with the door closed it loads and runs on the processor, slower but at once. The first
+/// thing said after the video loads it on the card again.
+/// </para>
 /// </summary>
 public sealed class WhisperRecognizer : ISpeechRecognizer, DogAI.Core.Images.ICardGuest, IDisposable
 {
@@ -24,10 +29,15 @@ public sealed class WhisperRecognizer : ISpeechRecognizer, DogAI.Core.Images.ICa
     private WhisperFactory? _factory;
     private string? _loadedPath;
     private DateTime _lastUse = DateTime.UtcNow;
+    private readonly DogAI.Core.Images.CardDoor? _door;
+    private bool _onProcessor;
+    private bool _cardSeen;
 
-    public WhisperRecognizer(ISettingsStore settings)
+    /// <param name="door">Asked before the model uses the graphics card; null where nothing shares the card (tests).</param>
+    public WhisperRecognizer(ISettingsStore settings, DogAI.Core.Images.CardDoor? door = null)
     {
         _settings = settings;
+        _door = door;
         _idleTimer = new Timer(_ => UnloadIdle(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
     }
 
@@ -66,7 +76,11 @@ public sealed class WhisperRecognizer : ISpeechRecognizer, DogAI.Core.Images.ICa
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var factory = Load(path);
+            // While a video is being made nothing new comes onto the card: the door answers null, and the model is
+            // loaded (or loaded again) for the processor. Otherwise the entry is kept for the whole use: every use
+            // takes working memory on the card, and a video asked for meanwhile waits for it.
+            using var entry = _door?.Enter();
+            var factory = Load(path, processor: _door is not null && entry is null);
             _lastUse = DateTime.UtcNow;
             await using var processor = factory.CreateBuilder()
                 .WithLanguage(language)
@@ -97,9 +111,10 @@ public sealed class WhisperRecognizer : ISpeechRecognizer, DogAI.Core.Images.ICa
     }
 
     /// <summary>Called under the gate.</summary>
-    private WhisperFactory Load(string path)
+    /// <param name="processor">Keep off the graphics card whatever library was loaded (a video is being made).</param>
+    private WhisperFactory Load(string path, bool processor)
     {
-        if (_factory is not null && _loadedPath == path) return _factory;
+        if (_factory is not null && _loadedPath == path && _onProcessor == processor) return _factory;
         Unload();
         lock (RuntimeLock)
         {
@@ -110,14 +125,12 @@ public sealed class WhisperRecognizer : ISpeechRecognizer, DogAI.Core.Images.ICa
                 _runtimeChosen = true;
             }
         }
-        _factory = WhisperFactory.FromPath(path);
+        _factory = processor ? WhisperFactory.FromPath(path, new WhisperFactoryOptions { UseGpu = false }) : WhisperFactory.FromPath(path);
         _loadedPath = path;
-        RunsOn = RuntimeOptions.LoadedLibrary switch
-        {
-            RuntimeLibrary.Vulkan or RuntimeLibrary.Cuda or RuntimeLibrary.Cuda12 => "graphics card",
-            null => null,
-            _ => "processor",
-        };
+        _onProcessor = processor;
+        var onCard = RuntimeOptions.LoadedLibrary is RuntimeLibrary.Vulkan or RuntimeLibrary.Cuda or RuntimeLibrary.Cuda12;
+        if (onCard) _cardSeen = true;
+        RunsOn = RuntimeOptions.LoadedLibrary is null ? null : onCard && !processor ? "graphics card" : "processor";
         return _factory;
     }
 
@@ -126,7 +139,15 @@ public sealed class WhisperRecognizer : ISpeechRecognizer, DogAI.Core.Images.ICa
         _factory?.Dispose();
         _factory = null;
         _loadedPath = null;
+        _onProcessor = false;
     }
+
+    /// <summary>
+    /// Words for the owner while speech is written down more slowly than usual: a video is being made, so the model
+    /// runs on the processor. Null otherwise, and on a PC where it runs on the processor anyway.
+    /// </summary>
+    public string? Slower =>
+        _door is { IsClosed: true } && (_cardSeen || RuntimeOptions.LoadedLibrary is null) ? DogAI.Core.Images.CardGuestWords.SpeechOnProcessor : null;
 
     string DogAI.Core.Images.ICardGuest.Name => "the speech recognition model";
 
@@ -146,6 +167,18 @@ public sealed class WhisperRecognizer : ISpeechRecognizer, DogAI.Core.Images.ICa
         try { Unload(); }
         finally { _gate.Release(); }
         return Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// Leaves the card for a video: what is being recognised right now is waited for (never cut off), then the model
+    /// is let go. The next thing said finds the door closed and is written down on the processor.
+    /// </summary>
+    public async Task<bool> StepOffAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try { Unload(); }
+        finally { _gate.Release(); }
+        return true;
     }
 
     private void UnloadIdle()

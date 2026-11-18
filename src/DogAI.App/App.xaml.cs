@@ -262,6 +262,9 @@ public partial class App : Application
         services.AddSingleton<LlamaServerLocator>();
         services.AddSingleton<EngineManager>();
         services.AddSingleton<IChatEngine>(sp => sp.GetRequiredService<EngineManager>());
+        // The door the card's guests ask at (M21): closed while a video is made, so the document search model and the
+        // speech model then run on the processor. The guests and the coordinator share this one.
+        services.AddSingleton<DogAI.Core.Images.CardDoor>();
         services.AddSingleton<EmbeddingServer>();
         services.AddSingleton<DogAI.Core.Documents.IEmbedder>(sp => sp.GetRequiredService<EmbeddingServer>());
         services.AddSingleton<DogAI.Engine.Images.SdServerLocator>();
@@ -276,7 +279,8 @@ public partial class App : Application
             sp.GetRequiredService<EngineManager>(), sp.GetRequiredService<DogAI.Core.Images.ICardMeter>(),
             guests: new DogAI.Core.Images.ICardGuest[] { sp.GetRequiredService<EmbeddingServer>() }
                 .Concat(sp.GetRequiredService<DogAI.Core.Voice.ISpeechRecognizer>() is DogAI.Core.Images.ICardGuest speech ? [speech] : []),
-            video: sp.GetRequiredService<DogAI.Engine.Video.VideoServer>()));
+            video: sp.GetRequiredService<DogAI.Engine.Video.VideoServer>(),
+            door: sp.GetRequiredService<DogAI.Core.Images.CardDoor>()));
         services.AddSingleton<DogAI.Core.Images.IImageEngine>(sp => sp.GetRequiredService<DogAI.Core.Images.CardCoordinator>());
         // Video (M20): the picture engine's program started with a video model. A clip takes the whole card, so
         // everything that makes one gets the coordinator, never the server itself.

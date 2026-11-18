@@ -423,21 +423,26 @@ public sealed class VideoModelsTests : IDisposable
     // ---- Fit ----
 
     [Fact]
-    public void A_card_of_16_gb_or_more_is_offered_the_model_and_a_smaller_one_is_not()
+    public void A_card_of_8_gb_or_more_is_offered_the_model_and_a_smaller_one_is_not()
     {
+        // M20 offered it from 16 GB; M21 step 5 from 8 GB, Quick only up to 16 GB (CardGuestsAndSizesTests has every size).
         const long MiB = 1L << 20;
         Assert.True(VideoDownloads.Offered(24_564 * MiB)); // this PC's 24 GB card, as it reports itself
         Assert.True(VideoDownloads.Offered(16_376 * MiB)); // a 16 GB card
         Assert.True(VideoDownloads.Offered(16_384 * MiB));
-        Assert.False(VideoDownloads.Offered(12_282 * MiB)); // a 12 GB card
-        Assert.False(VideoDownloads.Offered(15 * 1024 * MiB));
+        Assert.True(VideoDownloads.Offered(12_282 * MiB)); // a 12 GB card
+        Assert.True(VideoDownloads.Offered(15 * 1024 * MiB));
+        Assert.True(VideoDownloads.Offered(8_188 * MiB)); // an 8 GB card
+        Assert.False(VideoDownloads.Offered(6_144 * MiB)); // a 6 GB card
         Assert.False(VideoDownloads.Offered(null));
 
         Assert.StartsWith("Fits this PC", VideoDownloads.FitText(24_564 * MiB));
         Assert.Contains("24.0 GB", VideoDownloads.FitText(24_564 * MiB));
         Assert.Contains("15.0 GB", VideoDownloads.FitText(24_564 * MiB));
         Assert.Contains("16.0 GB", VideoDownloads.FitText(24_564 * MiB));
-        Assert.Contains("16 GB or more", VideoDownloads.FitText(12_282 * MiB));
+        Assert.StartsWith("Fits this PC for Quick clips", VideoDownloads.FitText(12_282 * MiB));
+        Assert.Contains("not been tried", VideoDownloads.FitText(12_282 * MiB));
+        Assert.Contains("8 GB or more", VideoDownloads.FitText(6_144 * MiB));
         Assert.Contains("No graphics card", VideoDownloads.FitText(null));
     }
 
