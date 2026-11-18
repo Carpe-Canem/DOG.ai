@@ -942,3 +942,70 @@ public class VideoSessionJoinTests : IDisposable
         Assert.Empty(typeof(VideoSession).GetConstructors().Single().GetParameters());
     }
 }
+
+/// <summary>M22 step 2: what the Make tab and Kept videos show and do with a joined clip.</summary>
+public class JoinedClipScreenTests
+{
+    private static string Root()
+    {
+        var root = AppContext.BaseDirectory;
+        while (!File.Exists(Path.Combine(root, "DogAI.sln"))) root = Path.GetDirectoryName(root) ?? throw new InvalidOperationException("DogAI.sln not found");
+        return root;
+    }
+
+    private static string Ui(params string[] parts) => File.ReadAllText(Path.Combine([Root(), "src", "DogAI.UI", .. parts]));
+
+    [Fact]
+    public void A_joined_clip_is_saved_under_a_name_of_its_own_and_its_tile_says_its_length()
+    {
+        Assert.Equal("video-123.webm", VideoPanels.FileName(123, 1));
+        Assert.Equal("video-123-joined.webm", VideoPanels.FileName(123, 2));
+        Assert.Equal("video-4294967295-joined.webm", VideoPanels.FileName(4294967295, 3));
+
+        // A clip of one part is always five seconds: its tile says nothing; a joined one says how long it plays.
+        Assert.Null(VideoPanels.TileLength(1, 5.0));
+        Assert.Equal("10 s", VideoPanels.TileLength(2, 241 / 24.0));
+        Assert.Equal("15 s", VideoPanels.TileLength(3, 361 / 24.0));
+
+        Assert.Equal("First frame", VideoPanels.KeptFrameLabel(1));
+        Assert.Equal("First frame of its last clip", VideoPanels.KeptFrameLabel(2));
+        Assert.Contains("Draw makes the same clip", VideoPanels.LikeTitle(1));
+        Assert.Contains("2 clips joined", VideoPanels.LikeTitle(2));
+        Assert.Contains("Draw makes the last five seconds again", VideoPanels.LikeTitle(2));
+        Assert.DoesNotContain("the same clip", VideoPanels.LikeTitle(3));
+    }
+
+    [Fact]
+    public void Join_is_on_the_Make_tab_only_and_both_tabs_use_the_shared_words()
+    {
+        var make = Ui("Pages", "VideoMake.razor");
+        var kept = Ui("Components", "Video", "KeptVideos.razor");
+
+        // Make: the button on a clip that continues another, the line when it cannot, the line about the join.
+        foreach (var id in new[] { "id=\"video-join\"", "id=\"video-join-why\"", "id=\"video-join-line\"" })
+            Assert.Contains(id, make);
+        Assert.Contains("@VideoPanels.JoinName", make);
+        Assert.Contains("shown.Continues is not null", make);
+        Assert.Contains("Session.JoinProblem(shown", make);
+        Assert.Contains("Session.Join(shown, kept)", make);
+        // A continuation of a kept clip reads that clip by id on the press (its video), its facts for the line.
+        Assert.Contains("Clips.GetAsync(id)", make);
+        Assert.Contains("Clips.FactsAsync(id)", make);
+        Assert.Contains("VideoPanels.JoinedNote(joined)", make);
+        Assert.Contains("VideoPanels.FileName(shown.Result.Seed, shown.Parts)", make);
+
+        // Kept videos: no Join (only the Make tab knows which clips belong together), the length, what a joined clip holds.
+        Assert.DoesNotContain("JoinName", kept);
+        Assert.DoesNotContain("Session.Join", kept);
+        Assert.Contains("VideoPanels.TileLength(item.Parts, item.Seconds)", kept);
+        Assert.Contains("id=\"kept-clip-joined\"", kept);
+        Assert.Contains("VideoPanels.JoinedAbout(viewed.Parts)", kept);
+        Assert.Contains("VideoPanels.KeptFrameLabel(viewed.Parts)", kept);
+        Assert.Contains("VideoPanels.LikeTitle(viewed.Parts)", kept);
+        Assert.Contains("VideoPanels.FileName(clip.Seed, clip.Parts)", kept);
+
+        // No screen writes a video's file name by hand.
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(Root(), "src", "DogAI.UI"), "*.razor", SearchOption.AllDirectories))
+            Assert.DoesNotMatch(@"\$""video-\{", File.ReadAllText(file));
+    }
+}

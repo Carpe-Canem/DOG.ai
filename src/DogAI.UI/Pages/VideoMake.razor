@@ -116,6 +116,10 @@ else
                             {
                                 <span class="video-try-n" style="@($"aspect-ratio:{item.Result.Width}/{item.Result.Height}")">@item.Number</span>
                             }
+                            @if (VideoPanels.TileLength(item.Parts, item.Seconds) is { } length)
+                            {
+                                <span class="kept-clip-len" data-parts="@item.Parts">@length</span>
+                            }
                         </button>
                     }
                 </div>
@@ -129,7 +133,12 @@ else
         }
         @if (shown is not null && !making)
         {
+            var joinWhy = JoinWhy(shown);
             <p class="images-meta small" id="video-meta">@VideoPanels.Meta(shown)</p>
+            @if (shown.Joined && _note?.Contains(VideoPanels.JoinLine, StringComparison.Ordinal) != true)
+            {
+                <p class="small images-note" id="video-join-line">@VideoPanels.JoinLine</p>
+            }
             <div class="images-acts">
                 @if (shown.KeptId is null)
                 {
@@ -142,10 +151,20 @@ else
                 <button class="btn" id="video-continue" disabled="@(_continuing || LikeBlocked is not null)"
                         title="@(LikeBlocked ?? "Start the next clip from this clip’s last frame, with the same sentence for you to change")"
                         @onclick="() => ContinueAsync(shown)">Continue the clip</button>
+                @if (shown.Continues is not null)
+                {
+                    @* Only on a clip made from the last frame of another in this run (M22): the one pair DOG.ai knows belongs together. *@
+                    <button class="btn" id="video-join" disabled="@(joinWhy is not null || _joining)" title="@(joinWhy ?? VideoPanels.JoinTitle)"
+                            @onclick="() => JoinAsync(shown)">@VideoPanels.JoinName</button>
+                }
                 <button class="btn" id="video-use-seed" title="Make the next clip from this clip’s seed: with the same sentence and settings, the same clip"
                         @onclick="() => UseSeedAsync(shown)">Use this seed</button>
-                <button class="btn" id="video-save" title="Save this clip as a WebM file" @onclick="() => SaveFileAsync(shown)">Save as a file…</button>
+                <button class="btn" id="video-save" title="@(shown.Joined ? "Save this joined video as one WebM file" : "Save this clip as a WebM file")" @onclick="() => SaveFileAsync(shown)">Save as a file…</button>
             </div>
+            @if (shown.Continues is not null && joinWhy is not null && joinWhy != JoinReading)
+            {
+                <p class="small images-note" id="video-join-why">@joinWhy</p>
+            }
         }
         @if (_error is not null)
         {
@@ -321,6 +340,8 @@ else
         _ = InvokeAsync(async () =>
         {
             if (kept) await ReleasePlayerAsync();
+            // The kept clip a continuation would be joined with may have been removed there: read it again.
+            else _beforeId = null;
             _kept = kept;
             StateHasChanged();
         });
@@ -624,12 +645,97 @@ else
         _error = null;
         try
         {
-            var saved = await Desktop.SaveFileAsync($"video-{shown.Result.Seed.ToString(CultureInfo.InvariantCulture)}.webm", "WebM video (*.webm)|*.webm", shown.Result.Webm);
+            var saved = await Desktop.SaveFileAsync(VideoPanels.FileName(shown.Result.Seed, shown.Parts), "WebM video (*.webm)|*.webm", shown.Result.Webm);
             if (saved is not null) _note = "Saved as " + System.IO.Path.GetFileName(saved) + ".";
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             _error = "The file could not be saved: " + e.Message;
+        }
+    }
+
+    // ── Join with the clip before (M22) ──
+
+    private bool _joining;
+
+    /// <summary>
+    /// The kept clip a continuation of a kept video continues, as the store has it now (its facts, never its video),
+    /// for the line under Join: read once per kept id after the try is shown (never in a render), and again whenever
+    /// the page comes back from Kept videos, where it may have been removed. <see cref="_beforeRead"/> is false while
+    /// it is read: until then nothing is said (null would read "removed").
+    /// </summary>
+    private long? _beforeId;
+    private Clip? _beforeFacts;
+    private bool _beforeRead;
+
+    /// <summary>Said by <see cref="JoinWhy"/> while the kept clip is read: Join waits, and no line is shown.</summary>
+    private const string JoinReading = "Reading the kept video this clip continues…";
+
+    /// <summary>Why the shown clip cannot be joined now, or null when Join can be pressed.</summary>
+    private string? JoinWhy(VideoTry shown)
+    {
+        if (shown.Continues?.Kept is { } id)
+            return _beforeId != id || !_beforeRead ? JoinReading : Session.JoinProblem(shown, _beforeFacts);
+        return Session.JoinProblem(shown);
+    }
+
+    /// <summary>Reads the kept clip the shown try continues, when it is not read yet (after a render).</summary>
+    private async Task ReadBeforeAsync()
+    {
+        if (_kept || Session.Shown?.Continues?.Kept is not { } id || _beforeId == id) return;
+        (_beforeId, _beforeFacts, _beforeRead) = (id, null, false);
+        Clip? facts = null;
+        try
+        {
+            facts = await Clips.FactsAsync(id);
+        }
+        catch (Exception e) when (e is InvalidOperationException or IOException)
+        {
+            // Said as removed; the press reads it again.
+        }
+        if (_beforeId != id) return;
+        (_beforeFacts, _beforeRead) = (facts, true);
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// "Join with the clip before": the two clips in one file, a new try beside them (<see cref="VideoSession.Join"/>:
+    /// nothing is decoded and nothing is sent anywhere). A continuation of a kept video reads that video by id now; it
+    /// is not held afterwards.
+    /// </summary>
+    private async Task JoinAsync(VideoTry shown)
+    {
+        if (_joining || Session.IsMaking) return;
+        _joining = true;
+        _error = null;
+        _note = null;
+        try
+        {
+            Clip? kept = null;
+            if (shown.Continues?.Kept is { } id)
+            {
+                kept = await Clips.GetAsync(id);
+                // What the line says follows what was found; the video read here is not kept in it.
+                (_beforeId, _beforeFacts, _beforeRead) = (id, kept is null ? null : await Clips.FactsAsync(id), true);
+            }
+            var joined = await Task.Run(() => Session.Join(shown, kept));
+            kept = null;
+            _note = VideoPanels.JoinedNote(joined) + (Session.Dropped ? $" Only the last {VideoSession.Max} clips are held; the oldest was let go." : "");
+            await StillAsync(joined);
+        }
+        catch (InvalidOperationException e)
+        {
+            _error = e.Message;
+        }
+        catch (IOException e)
+        {
+            _error = "The kept video could not be read: " + e.Message;
+        }
+        finally
+        {
+            _joining = false;
+            // The joined file goes to the page's player as one large value, as a finished clip does.
+            GiveBackSoon();
         }
     }
 
@@ -772,6 +878,7 @@ else
     /// </summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        await ReadBeforeAsync();
         var shown = !_kept && _ready && CanMake && !Session.IsMaking ? Session.Shown : null;
         if (ReferenceEquals(shown?.Result, _playing)) return;
         if (_kept || !CanMake)

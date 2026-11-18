@@ -53,6 +53,10 @@
                         <span class="kept-noprev small">@(_failed.Contains(item.Id) ? "No still" : "…")</span>
                     }
                     <span class="kept-clip-mark" aria-hidden="true"><Icon Name="video" Size="14" /></span>
+                    @if (VideoPanels.TileLength(item.Parts, item.Seconds) is { } length)
+                    {
+                        <span class="kept-clip-len" data-parts="@item.Parts" title="@VideoPanels.ClipsJoined(item.Parts)">@length</span>
+                    }
                 </button>
             }
         </div>
@@ -78,12 +82,16 @@
         <video class="picture-large kept-clip-player" id="kept-clip-player" @ref="_player" loop playsinline controls muted
                style="@($"aspect-ratio:{viewed.Width}/{viewed.Height}")" aria-label="@($"Kept video {viewed.Id}")"></video>
         <p class="small kept-meta" id="kept-clip-meta">@VideoPanels.KeptMeta(viewed, Local(viewed.CreatedAt))</p>
+        @if (viewed.Joined)
+        {
+            <p class="small" id="kept-clip-joined">@VideoPanels.JoinedAbout(viewed.Parts) @VideoPanels.JoinLine</p>
+        }
         <div class="kept-prompts">
-            <div><span class="field-label">Sentence</span><p class="kept-text" id="kept-clip-sentence">@viewed.Prompt</p></div>
+            <div><span class="field-label">@(viewed.Joined ? "Sentence of its last clip" : "Sentence")</span><p class="kept-text" id="kept-clip-sentence">@viewed.Prompt</p></div>
             @if (_frameSrc is { } frame)
             {
-                <div class="kept-clip-frame-row"><span class="field-label">First frame</span>
-                    <img class="kept-clip-frame" id="kept-clip-frame" src="@frame" alt="The picture the video started from" /></div>
+                <div class="kept-clip-frame-row"><span class="field-label">@VideoPanels.KeptFrameLabel(viewed.Parts)</span>
+                    <img class="kept-clip-frame" id="kept-clip-frame" src="@frame" alt="@(viewed.Joined ? "The picture its last clip started from: the end of the clip before" : "The picture the video started from")" /></div>
             }
         </div>
         @if (_viewError is { } viewError)
@@ -91,7 +99,7 @@
             <div class="notice bad" id="kept-clip-error"><span>@viewError</span></div>
         }
         <div class="row kept-acts">
-            <button class="btn primary" id="kept-clip-like" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? "Its sentence, first frame, quality, shape, Faster and seed go to the Make tab: Draw makes the same clip")"
+            <button class="btn primary" id="kept-clip-like" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? VideoPanels.LikeTitle(viewed.Parts))"
                     @onclick="() => HandOverAsync(viewed, Like)">Make one like this</button>
             <button class="btn" id="kept-clip-continue" disabled="@(LikeBlocked is not null || _busy)" title="@(LikeBlocked ?? "Start a new clip from this video’s last frame, with its sentence for you to change")"
                     @onclick="() => HandOverAsync(viewed, ContinueClip)">Continue the clip</button>
@@ -343,7 +351,7 @@
         _viewError = null;
         try
         {
-            var saved = await Desktop.SaveFileAsync($"video-{clip.Seed.ToString(CultureInfo.InvariantCulture)}.webm", "WebM video (*.webm)|*.webm", webm);
+            var saved = await Desktop.SaveFileAsync(VideoPanels.FileName(clip.Seed, clip.Parts),"WebM video (*.webm)|*.webm", webm);
             if (saved is not null)
             {
                 await CloseAsync();

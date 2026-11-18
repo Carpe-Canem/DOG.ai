@@ -707,6 +707,27 @@ public static class VideoPanels
     /// <summary>"2 clips joined", as a joined clip's facts say it.</summary>
     public static string ClipsJoined(int parts) => $"{parts} clips joined";
 
+    /// <summary>
+    /// The name Save as a file… offers: "video-123.webm", and "video-123-joined.webm" for a joined clip, so the joined
+    /// file does not take the name of its last part saved by itself (both carry the last part's seed).
+    /// </summary>
+    public static string FileName(long seed, int parts) =>
+        "video-" + seed.ToString(CultureInfo.InvariantCulture) + (parts > 1 ? "-joined" : "") + ".webm";
+
+    /// <summary>What a tile in the strip or in Kept videos says on a joined clip ("10 s"); null on a clip of one part, which is always 5 s.</summary>
+    public static string? TileLength(int parts, double seconds) => parts > 1 ? Length(seconds) : null;
+
+    /// <summary>The label of the first frame in a kept clip's large view: a joined clip's is its last part's, the end of the clip before.</summary>
+    public static string KeptFrameLabel(int parts) => parts > 1 ? "First frame of its last clip" : "First frame";
+
+    /// <summary>The title of Make one like this in a kept clip's large view.</summary>
+    public static string LikeTitle(int parts) => parts > 1
+        ? $"This video is {ClipsJoined(parts)}: its last clip’s sentence, first frame, quality, shape, Faster and seed go to the Make tab, and Draw makes the last five seconds again"
+        : "Its sentence, first frame, quality, shape, Faster and seed go to the Make tab: Draw makes the same clip";
+
+    /// <summary>The title of the Join button when it can be pressed.</summary>
+    public const string JoinTitle = "Put this clip and the clip before into one video, as a new clip beside them; the two stay as they are";
+
     /// <summary>The button on a clip that continues another.</summary>
     public const string JoinName = "Join with the clip before";
 
