@@ -103,6 +103,9 @@ static class Content
         "3. **13:00** Follow the river path inland and loop back to town.\n\nThe whole loop is flat apart from one short climb.";
 
     /// <summary>Biscuit's lore: facts the model is given only when a chat mentions them.</summary>
+    /// <summary>Biscuit's Looks: the words of his portrait's prompt (assets\pictures\biscuit-portrait.json).</summary>
+    public const string BiscuitLooks = "anthro, golden retriever, male, blue apron";
+
     public static readonly (string Name, string[] Keys, string Text)[] BiscuitLore =
     [
         ("The Crumb & Collar", ["bakery", "shop", "crumb"],

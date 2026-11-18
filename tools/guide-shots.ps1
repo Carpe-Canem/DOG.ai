@@ -9,6 +9,7 @@
 #   pwsh tools/guide-shots.ps1 -Show                print the list and stop
 #   pwsh tools/guide-shots.ps1 -Prepare made-up     only set up -GuideHome with that folder (to look around in it, or to
 #                                                   draw new pictures for tools/GuideData/assets), then stop
+#   pwsh tools/guide-shots.ps1 -Prepare made-up -Links voice   the same, with the list's "extraModels" set "voice" linked in
 #
 # How it works. The published portable build (publish\win-x64, so `dotnet publish src/DogAI.App -p:PublishProfile=win-x64`
 # first) is copied to -GuideHome, a folder with a neutral name on the drive that holds the models (hard links need the same
@@ -17,7 +18,10 @@
 #   made-up  data\ filled by tools/GuideData (characters, chats, a story, kept pictures and a clip: all made up), the
 #            engines and the models in the list's "models" hard-linked from -ModelSource and -EngineSource
 #   none     the folder of the shot before it, as it is (a shot that follows from the one before)
-# One run of DOG.ai per folder and page size; between shots the address is opened again.
+# One run of DOG.ai per folder, page size, "links" and "env"; between shots the address is opened again.
+# A shot's "links" names sets in the list's "extraModels" (files or whole folders from -ModelSource), linked in only for
+# the shots that name them: the voice models would otherwise put the microphone buttons into every chat picture. Its
+# "env" sets environment variables for its run (DOGAI_TEST_CARD_MIB: what a smaller graphics card is told).
 #
 # Before each picture the page is made still (no animation, no caret, no focus), the numbered marks are drawn on the
 # controls the shot names, and the page's text and every box's value are searched for words that must never be in a
@@ -37,6 +41,7 @@ param(
     [switch]$Show,
     [switch]$Force,
     [ValidateSet('', 'empty', 'made-up')][string]$Prepare = '',
+    [string[]]$Links = @(),
     [string]$GuideHome = 'D:\Apps\DOG.ai',
     [string]$ModelSource = 'D:\DOG.ai\Models',
     [string]$EngineSource = 'D:\DOG.ai\data\engine',
@@ -46,6 +51,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $list = Get-Content (Join-Path $PSScriptRoot 'guide-shots.json') -Raw | ConvertFrom-Json
+# "a,b" given through pwsh -File arrives as one string.
+$Only = @($Only | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 $shots = @($list.shots | Where-Object {
     ($Only.Count -eq 0 -or $_.name -in $Only) -and (-not $Page -or $_.page -eq $Page) -and $_.kind -ne 'kept' -and
     ($_.name -in $Only -or (($_.kind -ne 'online' -or $Online) -and ($_.kind -ne 'live' -or $Live)))
@@ -56,7 +63,12 @@ $unknown = $Only | Where-Object { $_ -notin $list.shots.name }
 if ($unknown) { throw "Not in the list: $($unknown -join ', ')" }
 
 # --- Words that must not be in a picture --------------------------------------------------------------------------
-$linked = @($list.models | ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_.name) })
+$linked = [Collections.Generic.List[string]]::new()
+foreach ($m in @($list.models) + @($list.extraModels.PSObject.Properties | ForEach-Object { $_.Value })) {
+    $linked.Add([IO.Path]::GetFileNameWithoutExtension($m.name))
+    $source = if ([IO.Path]::IsPathRooted($m.from)) { $m.from } else { Join-Path $ModelSource $m.from }
+    if (Test-Path $source -PathType Container) { Get-ChildItem $source -Recurse -File | ForEach-Object { $linked.Add([IO.Path]::GetFileNameWithoutExtension($_.Name)) } }
+}
 $forbidden = [Collections.Generic.List[string]]::new()
 $forbidden.Add($env:USERNAME)
 foreach ($w in 'D:\DOG.ai', 'dogai-b', $ModelSource, $EngineSource) { $forbidden.Add($w) }
@@ -66,6 +78,10 @@ if (Test-Path $ModelSource) {
     Get-ChildItem $ModelSource -Recurse -FollowSymlink -File -Include *.gguf, *.safetensors, *.bin, *.onnx |
         ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) } |
         Where-Object { $_.Length -ge 8 -and $_ -match '[-_.]' -and $_ -notin $linked } | Sort-Object -Unique | ForEach-Object { $forbidden.Add($_) }
+    # The folders the owner's models sit in are named after their Hugging Face repositories, which Browse can list.
+    $linkedFolders = @(@($list.models) + @($list.extraModels.PSObject.Properties | ForEach-Object { $_.Value }) | ForEach-Object { ($_.from -split '\\')[0] })
+    Get-ChildItem $ModelSource -Directory | Where-Object { $_.Name.Length -ge 8 -and $_.Name -match '[-_.]' -and $_.Name -notin $linkedFolders } |
+        ForEach-Object { $forbidden.Add($_.Name) }
 }
 $forbiddenJson = ConvertTo-Json @($forbidden | Where-Object { $_ } | Sort-Object -Unique) -Compress
 
@@ -74,7 +90,34 @@ $publish = Join-Path $repo 'publish\win-x64'
 if (-not (Test-Path "$publish\app\DOG.ai.exe")) { throw "Publish first: dotnet publish src/DogAI.App -p:PublishProfile=win-x64" }
 if ($GuideHome -match [regex]::Escape($env:USERNAME)) { throw "-GuideHome must not hold the Windows user name: it shows in the pictures." }
 
-function Prepare-Home($folder) {
+function Link-Model($name, $from) {
+    $to = Join-Path "$GuideHome\models" $name
+    $from = if ([IO.Path]::IsPathRooted($from)) { $from } else { Join-Path $ModelSource $from }
+    # A whole folder (a voice model) is linked file by file.
+    if (Test-Path $from -PathType Container) {
+        $top = (Get-Item $from).FullName
+        Get-ChildItem $from -Recurse -File | ForEach-Object { Link-Model (Join-Path $name $_.FullName.Substring($top.Length + 1)) $_.FullName }
+        return
+    }
+    New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
+    # A file on another drive (behind a folder link, say) cannot be hard-linked: it is copied once into -Cache, on
+    # the guide's drive, and linked from there.
+    $resolved = [IO.Path]::GetFullPath($from)
+    $dir = Get-Item (Split-Path $resolved)
+    if ($dir.LinkType) { $resolved = Join-Path $dir.Target (Split-Path $resolved -Leaf) }
+    if ([IO.Path]::GetPathRoot($resolved) -ne [IO.Path]::GetPathRoot($GuideHome)) {
+        $cached = Join-Path $Cache (Split-Path $resolved -Leaf)
+        if (-not (Test-Path $cached) -or (Get-Item $cached).Length -ne (Get-Item $resolved).Length) {
+            New-Item -ItemType Directory -Force $Cache | Out-Null
+            "copying $(Split-Path $resolved -Leaf) once into $Cache"
+            Copy-Item $resolved $cached -Force
+        }
+        $resolved = $cached
+    }
+    New-Item -ItemType HardLink -Path $to -Target $resolved | Out-Null
+}
+
+function Prepare-Home($folder, $links = @()) {
     New-Item -ItemType Directory -Force $GuideHome | Out-Null
     # Only the program: publish\win-x64 also keeps files of older publishes.
     robocopy "$publish\app" "$GuideHome\app" /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
@@ -82,26 +125,8 @@ function Prepare-Home($folder) {
     foreach ($sub in 'data', 'models') { if (Test-Path "$GuideHome\$sub") { Remove-Item "$GuideHome\$sub" -Recurse -Force } }
     if ($folder -eq 'empty') { return }
     New-Item -ItemType Directory -Force "$GuideHome\data\engine", "$GuideHome\models" | Out-Null
-    foreach ($m in $list.models) {
-        $to = Join-Path "$GuideHome\models" $m.name
-        New-Item -ItemType Directory -Force (Split-Path $to) | Out-Null
-        $from = if ([IO.Path]::IsPathRooted($m.from)) { $m.from } else { Join-Path $ModelSource $m.from }
-        # A file on another drive (behind a folder link, say) cannot be hard-linked: it is copied once into -Cache, on
-        # the guide's drive, and linked from there.
-        $resolved = [IO.Path]::GetFullPath($from)
-        $dir = Get-Item (Split-Path $resolved)
-        if ($dir.LinkType) { $resolved = Join-Path $dir.Target (Split-Path $resolved -Leaf) }
-        if ([IO.Path]::GetPathRoot($resolved) -ne [IO.Path]::GetPathRoot($GuideHome)) {
-            $cached = Join-Path $Cache (Split-Path $resolved -Leaf)
-            if (-not (Test-Path $cached) -or (Get-Item $cached).Length -ne (Get-Item $resolved).Length) {
-                New-Item -ItemType Directory -Force $Cache | Out-Null
-                "copying $(Split-Path $resolved -Leaf) once into $Cache"
-                Copy-Item $resolved $cached -Force
-            }
-            $resolved = $cached
-        }
-        New-Item -ItemType HardLink -Path $to -Target $resolved | Out-Null
-    }
+    foreach ($m in $list.models) { Link-Model $m.name $m.from }
+    foreach ($set in $links) { foreach ($m in $list.extraModels.$set) { Link-Model $m.name $m.from } }
     foreach ($d in $list.emptyFolders) { New-Item -ItemType Directory -Force (Join-Path "$GuideHome\models" $d) | Out-Null }
     Get-ChildItem $EngineSource -Recurse -File | ForEach-Object {
         $to = Join-Path "$GuideHome\data\engine" $_.FullName.Substring($EngineSource.Length + 1)
@@ -115,7 +140,7 @@ function Prepare-Home($folder) {
     if ($LASTEXITCODE) { throw "GuideData could not fill $GuideHome" }
 }
 
-if ($Prepare) { Prepare-Home $Prepare; "Ready: $GuideHome ($Prepare). Run it with: pwsh tools/walkthrough.ps1 -Exe $GuideHome\app\DOG.ai.exe -Portable"; return }
+if ($Prepare) { Prepare-Home $Prepare $Links; "Ready: $GuideHome ($Prepare). Run it with: pwsh tools/walkthrough.ps1 -Exe $GuideHome\app\DOG.ai.exe -Portable"; return }
 
 # --- The page script run before every picture -------------------------------------------------------------------------
 # Stills the page, draws the marks, finds the volatile parts and looks for forbidden words. Returns one line of JSON.
@@ -168,12 +193,14 @@ $work = Join-Path ([IO.Path]::GetTempPath()) ('dogai-guide-' + [Guid]::NewGuid()
 New-Item -ItemType Directory $work | Out-Null
 foreach ($v in 'DOGAI_MODELS_DIR', 'DOGAI_LLAMA_SERVER', 'DOGAI_SD_SERVER', 'DOGAI_DATA_DIR', 'DOGAI_TEST_CARD_MIB') { Remove-Item "Env:$v" -ErrorAction SilentlyContinue }
 $results = @{}
-$groups = $shots | Group-Object { "$($_.folder)|$($_.width)x$($_.height)" }
+$groups = $shots | Group-Object { "$($_.folder)|$($_.width)x$($_.height)|$(@($_.links) -join '+')|$(($_.env | ConvertTo-Json -Compress) ?? '')" }
 $lastFolder = $null
 foreach ($group in $groups) {
-    $folder, $size = $group.Name -split '\|'
+    $folder, $size, $linkNames = $group.Name -split '\|'
     $w, $h = $size -split 'x'
-    if ($folder -ne 'none') { Prepare-Home $folder; $lastFolder = $folder }
+    $runEnv = $group.Group[0].env
+    if ($folder -ne 'none') { Prepare-Home $folder @($linkNames -split '\+' | Where-Object { $_ }); $lastFolder = $folder }
+    if ($runEnv) { foreach ($p in $runEnv.PSObject.Properties) { Set-Item "Env:$($p.Name)" "$($p.Value)" } }
     $steps = [Collections.Generic.List[object]]::new()
     $steps.Add(@{ wait = 3000 })
     # Opening DOG.ai loads the General default by itself: wait until the status bar says it is in.
@@ -202,9 +229,15 @@ foreach ($group in $groups) {
             $steps.Add($step)
         }
         $steps.Add(@{ wait = [int]($shot.settle ?? 500) })
+        # Nothing hovered: the real cursor, if it is over the window, highlighted whatever it was on (a picture's frame, a
+        # tab), and a picture came out different from one run to the next.
+        # Transitions go off first, or a highlight that is let go is caught half faded.
+        $steps.Add(@{ eval = "(() => { let s = document.getElementById('guide-still'); if (!s) { s = document.createElement('style'); s.id = 'guide-still'; document.head.appendChild(s); } s.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}'; const n = document.createElement('style'); n.id = 'guide-nohover'; n.textContent = '*,*::before,*::after{pointer-events:none!important}'; document.head.appendChild(n); return 'no hover'; })()" })
+        $steps.Add(@{ hover = '1,1' })
+        $steps.Add(@{ wait = 300 })
         $steps.Add(@{ eval = (Before-Shot $shot) })
         $steps.Add(@{ shot = $shot.name })
-        $steps.Add(@{ eval = "document.getElementById('guide-marks')?.remove(); 'unmarked'" })
+        $steps.Add(@{ eval = "document.getElementById('guide-marks')?.remove(); document.getElementById('guide-nohover')?.remove(); 'unmarked'" })
         # A shot that changes the look puts back the one a new folder starts with (Workbench, Match Windows), or every shot after it in the
         # same run would show the look it left.
         if (($shot.steps | ConvertTo-Json -Depth 5 -Compress) -match 'name=(skin|theme)') {
@@ -217,6 +250,7 @@ foreach ($group in $groups) {
         }
     }
     $log = & (Join-Path $PSScriptRoot 'walkthrough.ps1') -Exe "$GuideHome\app\DOG.ai.exe" -Portable -OutDir $work -Width $w -Height $h -Port $Port -Steps $steps.ToArray() *>&1 | Out-String -Width 100000
+    if ($runEnv) { foreach ($p in $runEnv.PSObject.Properties) { Remove-Item "Env:$($p.Name)" -ErrorAction SilentlyContinue } }
     $log -split "`r?`n" | Where-Object { $_ -match 'GUIDE-TIMEOUT|GUIDE-STILL-OPEN|EVAL ERROR|TARGET NOT FOUND|not loaded' } | ForEach-Object { "  $_" }
     # The page script prints one line per shot, naming it: a shot whose script failed gets no result, never another's.
     foreach ($line in $log -split "`r?`n") {

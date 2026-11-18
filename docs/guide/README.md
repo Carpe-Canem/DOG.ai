@@ -13,10 +13,13 @@ switch that on in the Models section, and then only to Hugging Face and GitHub t
    chats.
 5. [Stories](stories.md): adventures with choices and a branch map, written stories along an outline.
 6. [Documents](documents.md): chats that answer from your own files, and cite them.
-7. [Images](images.md)
-8. [Video](video.md)
-9. [Voice](voice.md)
-10. [Models](models.md)
+7. [Images](images.md): pictures from a prompt, the helpers that write and check prompts, kept pictures, upscaling, and
+   pictures in chats and stories.
+8. [Video](video.md): five-second clips from a sentence or a picture, continued and joined into longer videos, and
+   kept videos.
+9. [Voice](voice.md): talking instead of typing, hands-free chats, replies read aloud, and a voice for each character.
+10. [Models](models.md): getting chat, picture, video and voice models, how DOG.ai judges what fits this PC, the
+    defaults, and the engines.
 11. [Privacy and backups](privacy-and-backups.md)
 12. [Settings, keys and when something goes wrong](settings-and-help.md)
 

@@ -122,6 +122,11 @@ static class Fill
         var first = await FirstNewAsync(services);
         await ChatPagesAsync(services, assets, chats, characters, biscuit, mara, pictures);
 
+        // The picture, video, voice and models pages (M23 step 3): Biscuit's Looks, the words of his portrait, so his
+        // Looks and voice tab shows his own words. Nothing else is added: those pages use what is already here.
+        new Looks(Content.BiscuitLooks).SaveTo(biscuit);
+        await characters.SaveAsync(biscuit);
+
         await SettleTimesAsync(services, first);
     }
 

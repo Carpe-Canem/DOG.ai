@@ -40,6 +40,7 @@
 #               @{ mouse = '120,400' }           a real mouse click at these page coordinates (CSS pixels): it hits what
 #                                                is on top there and moves the focus, unlike a script .click();
 #                                                or mouse = '<css selector>' to click the middle of that element
+#               @{ hover = '0,0' }               move the browser control's pointer there without clicking
 #               @{ osclick = '<css selector>' }  the same, but through Windows: DOG.ai is brought to the front and the
 #                                                real cursor clicks there (or osclick = 'x,y' in page coordinates)
 #               @{ osdrop = '<file path>'; on = '<css selector>' }  a real drag from File Explorer: the file's folder is
@@ -547,6 +548,13 @@ try {
             }
             Start-Sleep -Milliseconds 500
             "clicked at $x,$y"
+        }
+        if ($step.hover) {
+            # Moves the browser control's pointer to page coordinates without clicking (what is under it gets :hover).
+            $x, $y = $step.hover -split ','
+            Send 'Input.dispatchMouseEvent' @{ type = 'mouseMoved'; x = [double]$x; y = [double]$y; button = 'none' } | Out-Null
+            Start-Sleep -Milliseconds 200
+            "pointer at $x,$y"
         }
         if ($step.osclick) {
             # A click through Windows itself: the real cursor moves there and the mouse button goes down and up, as a
