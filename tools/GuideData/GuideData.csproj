@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Fills a portable DOG.ai folder with the user guide's made-up content (see Program.cs and docs/guide). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\DogAI.Core\DogAI.Core.csproj" />
+    <ProjectReference Include="..\..\src\DogAI.Data\DogAI.Data.csproj" />
+  </ItemGroup>
+
+</Project>

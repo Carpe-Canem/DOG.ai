@@ -1,0 +1,45 @@
+{
+  "about": "The user guide's pictures. Read by tools/guide-shots.ps1 (makes them) and GuideTests (checks them). Each shot: name (the file name), page (docs/guide/<page>.md, picture in docs/guide/img/<page>/), folder (empty | made-up | none), kind (plain | online | live | kept), address, waitFor (a selector), steps (walkthrough steps), marks (selectors numbered 1, 2, 3 in the picture), volatile (selectors whose pixels change from run to run), width and height. kind kept = taken by hand and kept (Windows' own windows, the first start's downloads); the script leaves those alone.",
+  "models": [
+    { "name": "Qwen3.5-9B\\Qwen3.5-9B-Q8_0.gguf", "from": "Qwen3.5-9B\\Qwen3.5-9B-Q8_0.gguf" },
+    { "name": "Qwen3.5-9B\\mmproj-F16.gguf", "from": "Qwen3.5-9B\\mmproj-F16.gguf" },
+    { "name": "Qwen3-Embedding-0.6B-Q8_0.gguf", "from": "Qwen3-Embedding-0.6B-Q8_0.gguf" },
+    { "name": "image\\checkpoints\\illustrious_novaCartoonXL_v60.safetensors", "from": "image\\checkpoints\\shared\\illustrious_novaCartoonXL_v60.safetensors" },
+    { "name": "video\\diffusion_models\\wan2.2_ti2v_5B_fp16.safetensors", "from": "D:\\dogai-b\\models\\video\\diffusion_models\\wan2.2_ti2v_5B_fp16.safetensors" },
+    { "name": "video\\text_encoders\\umt5-xxl-encoder-Q8_0.gguf", "from": "D:\\dogai-b\\models\\video\\text_encoders\\umt5-xxl-encoder-Q8_0.gguf" },
+    { "name": "video\\vae\\taew2_2.safetensors", "from": "D:\\dogai-b\\models\\video\\vae\\taew2_2.safetensors" },
+    { "name": "video\\vae\\wan2.2_vae.safetensors", "from": "D:\\dogai-b\\models\\video\\vae\\wan2.2_vae.safetensors" }
+  ],
+  "emptyFolders": [ "image\\loras", "image\\vae", "image\\upscalers", "voice" ],
+  "volatile": [ ".status", ".kv", "#card-use", "#card-panel" ],
+  "shots": [
+    { "name": "security-warning", "page": "install", "folder": "none", "kind": "kept", "note": "Windows' own warning for an exe from a zip that was not unblocked: taken from the screen." },
+    { "name": "first-start", "page": "install", "folder": "empty", "kind": "plain", "address": "general", "waitFor": ".nav-btn", "width": 1400, "height": 860, "marks": [ ".nav a[href='models']" ] },
+    { "name": "engines-not-found", "page": "install", "folder": "empty", "kind": "plain", "address": "models/engines", "waitFor": "#chat-engine", "width": 1400, "height": 860, "marks": [ "#go-online" ] },
+    { "name": "engine-check", "page": "install", "folder": "empty", "kind": "online", "address": "models/engines", "waitFor": "#chat-engine", "width": 1400, "height": 860,
+      "steps": [ { "mouse": "#go-online" }, { "wait": 1500 }, { "mouse": "#chat-engine-check" }, { "wait": 8000 } ], "marks": [ "#chat-engine-install" ] },
+    { "name": "engine-installed", "page": "install", "folder": "none", "kind": "kept", "note": "Models › Engines after Install, from the real first start." },
+    { "name": "recommended", "page": "install", "folder": "empty", "kind": "online", "address": "models", "waitFor": "#downloads-tray", "width": 1400, "height": 860,
+      "steps": [ { "eval": "document.querySelector('#go-online')?.click(); 'ok'" }, { "wait": 6000 } ], "marks": [ "#downloads-tray" ] },
+    { "name": "downloading", "page": "install", "folder": "none", "kind": "kept", "note": "The downloads list while Qwen3.5 9B arrives, from the real first start." },
+    { "name": "default-model", "page": "install", "folder": "made-up", "kind": "plain", "address": "models/library", "waitFor": "#default-general", "width": 1400, "height": 860, "marks": [ "#default-general" ] },
+    { "name": "first-reply", "page": "install", "folder": "none", "kind": "kept", "note": "The first question and reply, from the real first start." },
+
+    { "name": "main-parts", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "general", "waitFor": ".composer textarea", "width": 1400, "height": 860,
+      "steps": [ { "eval": "document.querySelector('a.li[href^=\"general/\"]:not(.li-link)')?.click(); 'opened'" }, { "wait": 1500 } ],
+      "marks": [ ".rail .nav", ".list", ".main", ".composer-wrap", ".aside", ".rail-foot", ".status" ] },
+    { "name": "quick-jump", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "general", "waitFor": ".composer textarea", "width": 1400, "height": 860,
+      "steps": [ { "press": "ctrl+k" }, { "wait": 600 }, { "type": "bis" }, { "wait": 800 } ], "marks": [] },
+    { "name": "search", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "search", "waitFor": "#search-jump", "width": 1400, "height": 860,
+      "steps": [ { "mouse": "input[type=search]" }, { "type": "fog" }, { "press": "enter" }, { "wait": 1200 } ], "marks": [] },
+    { "name": "settings", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "settings/appearance", "waitFor": "#settings-search", "width": 1400, "height": 860, "marks": [ "#settings-search" ] },
+    { "name": "look-fireside", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "settings/appearance", "waitFor": "#settings-search", "width": 1400, "height": 860,
+      "steps": [ { "eval": "document.querySelector(\"input[name=skin][value=fireside]\").click(); 'ok'" }, { "wait": 800 }, { "eval": "Blazor.navigateTo('characters/chat/4'); 'ok'" }, { "wait": 2000 } ] },
+    { "name": "look-playhouse", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "settings/appearance", "waitFor": "#settings-search", "width": 1400, "height": 860,
+      "steps": [ { "eval": "document.querySelector(\"input[name=skin][value=playhouse]\").click(); 'ok'" }, { "wait": 800 }, { "eval": "Blazor.navigateTo(''); 'ok'" }, { "wait": 1500 } ], "volatile": [ "h1" ] },
+    { "name": "look-workbench-light", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "settings/appearance", "waitFor": "#settings-search", "width": 1400, "height": 860,
+      "steps": [ { "eval": "document.querySelector(\"input[name=skin][value=workbench]\").click(); 'ok'" }, { "wait": 1200 }, { "eval": "document.querySelector(\"input[name=theme][value=light]\").click(); 'ok'" }, { "wait": 1200 }, { "eval": "Blazor.navigateTo('characters/group/5'); 'ok'" }, { "wait": 2000 } ] },
+    { "name": "narrow-drawer", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "general", "waitFor": ".composer textarea", "width": 700, "height": 860,
+      "steps": [ { "eval": "document.querySelector('a.li[href^=\"general/\"]:not(.li-link)')?.click(); 'opened'" }, { "wait": 1000 }, { "mouse": "#aside-drawer" }, { "wait": 800 } ], "marks": [ "#aside-close" ] }
+  ]
+}

@@ -9,7 +9,7 @@
 #                                                step opened (it prints the file name the dialog offered, types the
 #                                                path and presses Enter)
 #               @{ ok = 'window title' }         press OK in a Windows message box the previous step opened
-#               @{ press = 'ctrl+l' }            press a key in the page (ctrl/alt/shift + one letter, or 'esc'); it goes to
+#               @{ press = 'ctrl+l' }            press a key in the page (ctrl/alt/shift + one letter, 'esc' or 'enter'); it goes to
 #                                                whatever has the focus in the page, as a person's key would
 #               @{ type = 'some words' }         type text into whatever has the focus in the page, as typing would (the box
 #                                                gets input events, and change when it loses the focus); give the focus first
@@ -496,6 +496,7 @@ function Press-Key($combo) {
     if ($parts -contains 'ctrl') { $mods += 2 }
     if ($parts -contains 'shift') { $mods += 8 }
     if ($key -eq 'esc') { $key = 'Escape'; $code = 'Escape'; $vk = 27 }
+    elseif ($key -eq 'enter') { $key = 'Enter'; $code = 'Enter'; $vk = 13 }
     else { $code = 'Key' + $key.ToUpper(); $vk = [int][char]$key.ToUpper() }
     Send 'Input.dispatchKeyEvent' @{ type = 'keyDown'; modifiers = $mods; key = $key; code = $code; windowsVirtualKeyCode = $vk } | Out-Null
     Send 'Input.dispatchKeyEvent' @{ type = 'keyUp'; modifiers = $mods; key = $key; code = $code; windowsVirtualKeyCode = $vk } | Out-Null
