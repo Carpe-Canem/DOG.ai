@@ -976,6 +976,22 @@ public class JoinedClipScreenTests
     }
 
     [Fact]
+    public void The_page_gives_memory_back_only_between_clips_and_a_kept_clip_it_could_not_read_is_not_called_removed()
+    {
+        var make = Ui("Pages", "VideoMake.razor");
+        // The give-back stops every thread: three seconds after a join or a clip, the next clip may be under way (M22 step 4).
+        Assert.Contains("if (!Session.IsMaking) OwnMemory.GiveBack();", make);
+        // Kept videos does the same once a video's large view has closed (a joined video can be tens of megabytes).
+        Assert.Contains("if (!Session.IsMaking && _viewing is null) OwnMemory.GiveBack();", Ui("Components", "Video", "KeptVideos.razor"));
+        // A read that failed leaves Join pressable (the press reads again and says what went wrong); only a row that is gone is "removed".
+        Assert.Contains("_beforeFailed ? (Session.IsMaking ? VideoPanels.JoinWhileMaking : null)", make);
+        // The joined try goes into the strip only when no clip is being made at that moment, decided where the strip is changed.
+        var session = File.ReadAllText(Path.Combine(Root(), "src", "DogAI.Core", "Video", "VideoSession.cs"));
+        Assert.Contains("if (!Add(next, unlessMaking: true)) throw new InvalidOperationException(VideoPanels.JoinWhileMaking);", session);
+        Assert.Contains("if (unlessMaking && IsMaking) return false;", session);
+    }
+
+    [Fact]
     public void Join_is_on_the_Make_tab_only_and_both_tabs_use_the_shared_words()
     {
         var make = Ui("Pages", "VideoMake.razor");

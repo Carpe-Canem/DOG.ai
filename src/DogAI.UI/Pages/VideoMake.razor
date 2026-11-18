@@ -572,10 +572,12 @@ else
     /// 0.95 GB after the last of ten clips, 0.4 GB once asked). So a moment after a clip arrived, was cancelled or
     /// failed, the runtime is asked to give it back (<see cref="OwnMemory"/>); off the page's own thread.
     /// </summary>
-    private static void GiveBackSoon() => _ = Task.Run(async () =>
+    private void GiveBackSoon() => _ = Task.Run(async () =>
     {
         await Task.Delay(TimeSpan.FromSeconds(3));
-        OwnMemory.GiveBack();
+        // Only between clips: it stops every thread, and the next clip may have been asked for meanwhile (the engine
+        // gives back before and after every clip by itself).
+        if (!Session.IsMaking) OwnMemory.GiveBack();
     });
 
     private string Afterwards(bool chatWasIn) =>
@@ -668,6 +670,9 @@ else
     private Clip? _beforeFacts;
     private bool _beforeRead;
 
+    /// <summary>True when the kept clip could not be read (which is not "removed"): Join stays pressable, and the press reads it again and says what went wrong.</summary>
+    private bool _beforeFailed;
+
     /// <summary>Said by <see cref="JoinWhy"/> while the kept clip is read: Join waits, and no line is shown.</summary>
     private const string JoinReading = "Reading the kept video this clip continues…";
 
@@ -675,7 +680,9 @@ else
     private string? JoinWhy(VideoTry shown)
     {
         if (shown.Continues?.Kept is { } id)
-            return _beforeId != id || !_beforeRead ? JoinReading : Session.JoinProblem(shown, _beforeFacts);
+            return _beforeId != id || !_beforeRead ? JoinReading
+                : _beforeFailed ? (Session.IsMaking ? VideoPanels.JoinWhileMaking : null)
+                : Session.JoinProblem(shown, _beforeFacts);
         return Session.JoinProblem(shown);
     }
 
@@ -683,18 +690,20 @@ else
     private async Task ReadBeforeAsync()
     {
         if (_kept || Session.Shown?.Continues?.Kept is not { } id || _beforeId == id) return;
-        (_beforeId, _beforeFacts, _beforeRead) = (id, null, false);
+        (_beforeId, _beforeFacts, _beforeRead, _beforeFailed) = (id, null, false, false);
         Clip? facts = null;
+        var failed = false;
         try
         {
             facts = await Clips.FactsAsync(id);
         }
         catch (Exception e) when (e is InvalidOperationException or IOException)
         {
-            // Said as removed; the press reads it again.
+            // Not read is not removed: Join stays pressable, and the press reads it again.
+            failed = true;
         }
         if (_beforeId != id) return;
-        (_beforeFacts, _beforeRead) = (facts, true);
+        (_beforeFacts, _beforeRead, _beforeFailed) = (facts, true, failed);
         StateHasChanged();
     }
 
@@ -716,7 +725,7 @@ else
             {
                 kept = await Clips.GetAsync(id);
                 // What the line says follows what was found; the video read here is not kept in it.
-                (_beforeId, _beforeFacts, _beforeRead) = (id, kept is null ? null : await Clips.FactsAsync(id), true);
+                (_beforeId, _beforeFacts, _beforeRead, _beforeFailed) = (id, kept is null ? null : await Clips.FactsAsync(id), true, false);
             }
             var joined = await Task.Run(() => Session.Join(shown, kept));
             kept = null;

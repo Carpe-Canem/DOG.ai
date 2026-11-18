@@ -6,7 +6,8 @@
 #               @{ eval = '<javascript>'; save = '<file>' }  the same, but the value is written to the file, not printed
 #               @{ shot = '<name>' }             save a picture of the page
 #               @{ dialog = '<file path>'; title = '<dialog title>' }  fill in a Windows open/save dialog that the previous
-#                                                step opened (it types the path and presses Enter)
+#                                                step opened (it prints the file name the dialog offered, types the
+#                                                path and presses Enter)
 #               @{ ok = 'window title' }         press OK in a Windows message box the previous step opened
 #               @{ press = 'ctrl+l' }            press a key in the page (ctrl/alt/shift + one letter, or 'esc'); it goes to
 #                                                whatever has the focus in the page, as a person's key would
@@ -108,6 +109,7 @@ if (-not ('DogWalk.Win' -as [type])) {
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 [DllImport("user32.dll")] public static extern IntPtr PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, string lParam);
+[DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")] public static extern IntPtr SendMessageRead(IntPtr hWnd, uint msg, IntPtr wParam, System.Text.StringBuilder lParam);
 [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
 [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr hwnd, int x, int y, int width, int height, bool repaint);
@@ -628,6 +630,17 @@ try {
                 $ok = $all | Where-Object { $_.Current.AutomationId -eq '1' -and $_.Current.ClassName -eq 'Button' } | Select-Object -First 1
                 if (-not $box -or -not $ok) { "DIALOG CONTROLS NOT FOUND: $($step.title)" }
                 else {
+                    # What the dialog offered before the path is typed over it (a save dialog's suggested file name).
+                    # Read with a window message: the box gives UI Automation no value.
+                    $offered = ''
+                    foreach ($try in 1..5) {
+                        $text = [System.Text.StringBuilder]::new(1024)
+                        [DogWalk.Win]::SendMessageRead([IntPtr]$box.Current.NativeWindowHandle, 0x000D, [IntPtr]1024, $text) | Out-Null  # WM_GETTEXT
+                        $offered = $text.ToString()
+                        if ($offered) { break }
+                        Start-Sleep -Milliseconds 200
+                    }
+                    "dialog offered: [$offered]"
                     [DogWalk.Win]::SendMessage([IntPtr]$box.Current.NativeWindowHandle, 0x000C, [IntPtr]::Zero, $step.dialog) | Out-Null  # WM_SETTEXT
                     [DogWalk.Win]::PostMessage([IntPtr]$ok.Current.NativeWindowHandle, 0x00F5, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null  # BM_CLICK
                     Start-Sleep -Milliseconds 1500

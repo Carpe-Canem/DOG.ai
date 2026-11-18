@@ -287,7 +287,8 @@ public static class WebmJoin
             file.Write(Id(WebmInfo.Cues));
             file.Write(Size(points.Length, 0));
             points.WriteTo(file);
-            return file.ToArray();
+            // The stream was sized to the byte: its own buffer is the file, with no second copy of it.
+            return file.Length == file.Capacity ? file.GetBuffer() : file.ToArray();
         }
         return null;
     }

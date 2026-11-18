@@ -302,12 +302,26 @@
             _frameSrc = null;
             _confirmRemove = false;
             _viewError = null;
+            GiveBackSoon();
         }
         finally
         {
             _changing = false;
         }
     }
+
+    /// <summary>
+    /// The large view holds the whole video (a joined one can be tens of megabytes) and passes it to the page's
+    /// player; closing it leaves those copies behind in DOG.ai itself until the runtime collects (measured, M22 step
+    /// 4: 0.2 GB after one Better video of 24 MB). So a moment after the view has closed the runtime is asked to give
+    /// them back (<see cref="OwnMemory"/>), as the Make tab does after a clip; off the page's own thread, not while
+    /// another video is open, and never while a clip is being made (it stops every thread).
+    /// </summary>
+    private void GiveBackSoon() => _ = Task.Run(async () =>
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        if (!Session.IsMaking && _viewing is null) OwnMemory.GiveBack();
+    });
 
     /// <summary>The clip before (-1, newer) or after (+1, older) this one among those shown, or null.</summary>
     private long? Neighbour(long id, int step)
@@ -335,7 +349,11 @@
             _viewError = await handOver(clip);
             if (_viewError is not null && !_disposed) _playing = null; // played again on the next render
             // Done: the Make tab is opening and this view is closed, so no render gives the player the clip again.
-            if (_viewError is null) (_viewing, _frameSrc) = (null, null);
+            if (_viewError is null)
+            {
+                (_viewing, _frameSrc) = (null, null);
+                GiveBackSoon();
+            }
         }
         finally
         {

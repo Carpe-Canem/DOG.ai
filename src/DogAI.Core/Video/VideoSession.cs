@@ -455,13 +455,12 @@ public sealed class VideoSession
         // What a kept clip must be, asked before it is shown.
         if (VideoClips.Problem(joined, made.Result.Width, made.Result.Height, made.Request.Frames, parts) is { } wrong)
             throw new InvalidOperationException(wrong);
-        var info = WebmInfo.Read(joined)!.Value;
-        // Draw may have been pressed meanwhile: nothing is put into the strip under a clip being made.
-        if (IsMaking) throw new InvalidOperationException(VideoPanels.JoinWhileMaking);
+        // The check above has said it: the joined file is the clips' size and holds exactly their frames.
         var next = new VideoTry(Interlocked.Increment(ref _number), made.Request,
-            new VideoResult(joined, info.Width, info.Height, info.Frames, made.Result.Fps, made.Result.Seed),
+            new VideoResult(joined, made.Result.Width, made.Result.Height, VideoClips.FramesOf(made.Request.Frames, parts), made.Result.Fps, made.Result.Seed),
             TimeSpan.Zero, 0, KeptId: null, Still: before.Still, Continues: before.Continues, Parts: parts);
-        Add(next);
+        // Draw may have been pressed meanwhile: nothing is put into the strip under a clip being made.
+        if (!Add(next, unlessMaking: true)) throw new InvalidOperationException(VideoPanels.JoinWhileMaking);
         return next;
     }
 
@@ -525,10 +524,12 @@ public sealed class VideoSession
         return now;
     }
 
-    private void Add(VideoTry next)
+    /// <param name="unlessMaking">For a joined try: not added (false) when a clip is being made at the moment it would go in.</param>
+    private bool Add(VideoTry next, bool unlessMaking = false)
     {
         lock (_gate)
         {
+            if (unlessMaking && IsMaking) return false;
             Dropped = false;
             _tries.Add(next);
             while (_tries.Count > Max && _tries.FindIndex(t => !ReferenceEquals(t, next) && !ReferenceEquals(t, _selected)) is var i and >= 0)
@@ -541,6 +542,7 @@ public sealed class VideoSession
             FrameShown = false;
         }
         Changed?.Invoke();
+        return true;
     }
 
     /// <summary>Reports straight through (no captured context): the page switches to its renderer itself.</summary>
