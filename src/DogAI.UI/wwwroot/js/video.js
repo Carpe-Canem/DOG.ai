@@ -99,11 +99,14 @@ export async function lastFrame(bytes, width, height, quality, lastTime) {
       v.src = url;
     });
     const end = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : lastTime;
-    await new Promise((resolve, reject) => {
-      v.onseeked = resolve;
-      v.onerror = () => reject(new Error('The video could not be read.'));
-      v.currentTime = end;
-    });
+    // A player that is already there gets no "seeked" (a clip of one frame): nothing to wait for then.
+    if (Number.isFinite(end) && Math.abs(v.currentTime - end) > 1e-6) {
+      await new Promise((resolve, reject) => {
+        v.onseeked = resolve;
+        v.onerror = () => reject(new Error('The video could not be read.'));
+        v.currentTime = end;
+      });
+    }
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;

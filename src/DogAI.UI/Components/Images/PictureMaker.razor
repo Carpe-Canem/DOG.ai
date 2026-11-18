@@ -312,7 +312,7 @@
     /// request brings the model back first, which takes about half a minute for a large one.
     /// </summary>
     private string? StatusText => _planning && !Engine.IsLoaded
-        ? "The chat model was set aside to make room for pictures. Loading it again before it plans the picture (about half a minute for a large model)…"
+        ? SetAsideWords.MadeRoom(Coordinator.SetAsideForVideo) + " Loading it again before it plans the picture (about half a minute for a large model)…"
         // A chat model that is loading (often the page's own default) holds the graphics card; loading the picture model waits
         // for it and reports no progress of its own, so say what is happening.
         : _drawing && _status == Starting && Engine.State == EngineState.Loading

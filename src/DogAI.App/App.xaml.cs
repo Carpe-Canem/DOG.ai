@@ -20,6 +20,7 @@ namespace DogAI.App;
 public partial class App : Application
 {
     private ServiceProvider? _services;
+    private MemoryLog? _memoryLog;
 
     /// <summary>Given to a restarted DOG.ai: wait for this process (the old one) to exit before touching any files.</summary>
     public const string AfterArgument = "--after";
@@ -78,6 +79,7 @@ public partial class App : Application
             _services = BuildServices(paths, key);
             var log = _services.GetRequiredService<ILogger<App>>();
             log.LogInformation("DOG.ai starting. Data folder: {Root}{Portable}", paths.Root, paths.IsPortable ? " (portable)" : "");
+            _memoryLog = MemoryLog.StartIfAsked();
 
             var audit = _services.GetRequiredService<NetworkAudit>();
             audit.Recorded += entry =>

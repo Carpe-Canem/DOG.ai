@@ -136,6 +136,8 @@ public sealed class VideoServer : IVideoEngine, IDisposable
         try
         {
             progress?.Report(new VideoProgress(VideoStages.Starting));
+            // What showing the last clip left behind goes before the engine takes its share of the PC's memory.
+            OwnMemory.GiveBack();
             var api = await StartAsync(model, request.Decoder, VideoMemory.EnginePlan(cardFreeBytes, request.Decoder), request.Faster, ct).ConfigureAwait(false);
             try
             {
@@ -159,6 +161,9 @@ public sealed class VideoServer : IVideoEngine, IDisposable
             if (_filter.TakeHeldBack() is > 0 and var held)
                 Logged?.Invoke($"({held} of the engine's status lines were not logged because they share a word with a sentence)");
             Changed?.Invoke();
+            // A clip leaves a few hundred megabytes of short-lived copies behind in DOG.ai itself (previews, answers).
+            var took = OwnMemory.GiveBack();
+            Logged?.Invoke($"DOG.ai gave its own unused memory back to Windows ({took.TotalMilliseconds:0} ms)");
         }
     }
 

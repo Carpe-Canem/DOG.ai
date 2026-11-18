@@ -429,10 +429,10 @@ public static class PortraitLooks
         : new($"The default model for Characters ({defaultName}) cannot see pictures, and it is the one used when none is loaded. Models that can are marked “{Projectors.Label}” in",
             ModelsPlaces.LibraryName, ModelsPlaces.Address(ModelsPlaces.Library));
 
-    /// <summary>What the box says while the model looks (a model set aside for pictures comes back first).</summary>
-    public static string Looking(bool inMemory) => inMemory
+    /// <summary>What the box says while the model looks (a model set aside for pictures or a video comes back first).</summary>
+    public static string Looking(bool inMemory, bool forVideo = false) => inMemory
         ? "Looking at the picture…"
-        : "The chat model was set aside for pictures. It is loading again, then looks at the picture…";
+        : SetAsideWords.Away(forVideo) + " It is loading again, then looks at the picture…";
 
     /// <summary>Said when the page could not turn the editor's picture into the JPEG the model is given.</summary>
     public static string Unreadable(bool persona) => persona

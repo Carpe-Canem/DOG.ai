@@ -403,6 +403,23 @@ public sealed class CardGuestsAndSizesTests : IDisposable
         never.SetResult();
         await loading;
         Assert.True(waiting.Search.HoldsMemory);
+
+        // Someone who listens at the door and fails (M21 step 6, the review): the door is told to close and to open
+        // inside the clip's own "try", so it is open afterwards and the card is not counted as busy for ever.
+        var listened = new Rig();
+        var fail = true;
+        listened.Door.Changed += () =>
+        {
+            if (!fail) return;
+            fail = false;
+            throw new InvalidOperationException("a listener failed");
+        };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => listened.Engine.MakeAsync(_model, Quick));
+        Assert.False(listened.Door.IsClosed);
+        Assert.False(listened.Coordinator.IsBusy);
+        Assert.False(listened.Coordinator.IsMakingVideo);
+        await listened.Engine.MakeAsync(_model, Quick);
+        Assert.False(listened.Door.IsClosed);
     }
 
     [Fact]
@@ -435,6 +452,41 @@ public sealed class CardGuestsAndSizesTests : IDisposable
         Assert.Contains("the speech recognition model", cleared.Gone);
         Assert.Equal(0, closings);
         Assert.Equal((0, 0), (rig.Search.ProcessorLoads, rig.Speech.ProcessorLoads));
+    }
+
+    [Fact]
+    public async Task The_owner_is_told_whether_the_chat_model_made_room_for_a_video_or_for_pictures()
+    {
+        // M21 step 6: the status bar said "set aside for pictures" after a video too.
+        var rig = new Rig(chatLoaded: true);
+        await rig.Engine.MakeAsync(_model, Quick);
+        Assert.True(rig.Chat.IsResting);
+        Assert.True(rig.Coordinator.SetAsideForVideo);
+        Assert.Equal("Huihui · set aside for a video, back with your next message", SetAsideWords.Status("Huihui", rig.Coordinator.SetAsideForVideo));
+        Assert.Equal("was set aside to make room for a video. It loads again by itself with your next message.", SetAsideWords.Notice(true));
+        Assert.Equal("The chat model was set aside for a video.", SetAsideWords.Away(true));
+
+        // It comes back with a reply, and a picture that does not fit beside it sets it aside again: the words follow.
+        Assert.True(await rig.Chat.AskAsync());
+        rig.Card.ChatBytes = 20 * Gb;
+        await rig.Coordinator.LoadAsync(Checkpoint);
+        await rig.Coordinator.DrawAsync(Picture);
+        Assert.True(rig.Chat.IsResting);
+        Assert.False(rig.Coordinator.SetAsideForVideo);
+        Assert.Equal("Huihui · set aside for pictures, back with your next message", SetAsideWords.Status("Huihui", rig.Coordinator.SetAsideForVideo));
+        Assert.Equal("The chat model was set aside to make room for pictures.", SetAsideWords.MadeRoom(false));
+
+        // No screen words it by hand any more: the status bar, the model button and the helpers ask the one place.
+        var ui = Path.Combine(RepoRoot(), "src", "DogAI.UI");
+        foreach (var file in Directory.EnumerateFiles(ui, "*.razor", SearchOption.AllDirectories))
+        {
+            var text = File.ReadAllText(file);
+            // (As words on the screen: a remark in the code may still say what a model was set aside for.)
+            foreach (var worded in new[] { "· set aside for pictures", "was set aside for pictures.", "to make room for pictures." })
+                Assert.False(text.Contains(worded, StringComparison.Ordinal), file);
+        }
+        Assert.Contains("SetAsideWords.Status(Engine.ModelName, Coordinator.SetAsideForVideo)", File.ReadAllText(Path.Combine(ui, "Components", "EngineStatus.razor")));
+        Assert.Contains("SetAsideWords.Notice(Coordinator.SetAsideForVideo)", File.ReadAllText(Path.Combine(ui, "Components", "ModelPicker.razor")));
     }
 
     [Fact]

@@ -14,6 +14,7 @@
 @inject ISettingsStore SettingsStore
 @inject DogAI.Engine.Images.ExtraTags ExtraTagList
 @inject IJSRuntime JS
+@inject DogAI.Core.Images.CardCoordinator Coordinator
 
 <div class="field-block looks-box">
     <div class="field-label">
@@ -225,7 +226,7 @@
                     _error = blind.Text + " " + blind.PlaceName + ".";
                     return;
                 }
-                _working = PortraitLooks.Looking(Engine.IsLoaded);
+                _working = PortraitLooks.Looking(Engine.IsLoaded, Coordinator.SetAsideForVideo);
                 StateHasChanged();
                 draft = await Writer.DraftLooksFromPictureAsync(jpeg, Name, _style, TagList.Current, cts.Token);
             }

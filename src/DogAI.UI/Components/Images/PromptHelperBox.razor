@@ -15,6 +15,7 @@
 @inject ExtraTags ExtraTagList
 @inject ImagesSession Session
 @inject IJSRuntime JS
+@inject DogAI.Core.Images.CardCoordinator Coordinator
 
 <Modal Title="Write it for me" Class="wide writer-box" OnClose="OnClose">
     <div class="writer" id="writer">
@@ -218,8 +219,8 @@
             {
                 (true, true) => "The chat model is writing the prompt…",
                 (true, false) => "The chat model is looking at the picture…",
-                (false, true) => "The chat model was set aside for pictures. It is loading again, then writes the prompt…",
-                (false, false) => "The chat model was set aside for pictures. It is loading again, then looks at the picture…",
+                (false, true) => SetAsideWords.Away(Coordinator.SetAsideForVideo) + " It is loading again, then writes the prompt…",
+                (false, false) => SetAsideWords.Away(Coordinator.SetAsideForVideo) + " It is loading again, then looks at the picture…",
             };
             StateHasChanged();
             _draft = picture is null

@@ -541,8 +541,21 @@ else
         finally
         {
             _starting = false;
+            GiveBackSoon();
         }
     }
+
+    /// <summary>
+    /// Showing a finished clip passes it to the page twice (its still, the player), and that leaves about half a
+    /// gigabyte of copies behind in DOG.ai itself which nothing collects until the next clip (measured, M21 step 6:
+    /// 0.95 GB after the last of ten clips, 0.4 GB once asked). So a moment after a clip arrived, was cancelled or
+    /// failed, the runtime is asked to give it back (<see cref="OwnMemory"/>); off the page's own thread.
+    /// </summary>
+    private static void GiveBackSoon() => _ = Task.Run(async () =>
+    {
+        await Task.Delay(TimeSpan.FromSeconds(3));
+        OwnMemory.GiveBack();
+    });
 
     private string Afterwards(bool chatWasIn) =>
         (chatWasIn && (Coordinator.LastDecision?.Choice == CardChoice.SetChatAside || Engine.State == EngineState.Resting)
@@ -692,6 +705,8 @@ else
         {
             var r = shown.Result;
             var jpeg = await LastFrameAsync(r.Webm, r.Width, r.Height, r.Frames, r.Fps);
+            // Draw may have been pressed while the page read the frame: nothing is changed under a clip being made.
+            if (LikeBlocked is not null) return;
             var (next, problem) = VideoContinue.Of(shown, jpeg);
             if (next is null)
             {

@@ -293,7 +293,11 @@ public sealed class SdApi(HttpClient http, int port)
     }
 
     /// <param name="shown">The preview already passed on (its step and base64 length): the engine repeats it on every poll, and it is not decoded again.</param>
-    public async Task<SdVideoJob> VideoJobAsync(string id, CancellationToken ct = default, (int? Step, int Chars)? shown = null)
+    public Task<SdVideoJob> VideoJobAsync(string id, CancellationToken ct = default, (int? Step, int Chars)? shown = null) =>
+        VideoJobAsync(id, new AnswerBuffer(), shown, ct);
+
+    /// <param name="buffer">Where the answer is read; a clip gives the same one to every poll.</param>
+    private async Task<SdVideoJob> VideoJobAsync(string id, AnswerBuffer buffer, (int? Step, int Chars)? shown, CancellationToken ct)
     {
         using var response = await http.GetAsync(_base + "jobs/" + Uri.EscapeDataString(id), HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
@@ -305,47 +309,65 @@ public sealed class SdApi(HttpClient http, int port)
         }
         // Every answer repeats the newest preview (up to 1.9 MB of text), once a second for minutes. Read as text and
         // taken apart into objects, that was about 10 MB of short-lived copies a poll, and DOG.ai's own memory rose
-        // from 0.2 to 1.9 GB over ten clips (M20 step 6). So the answer is read into a borrowed buffer and walked in
-        // place: nothing of that size is made but a preview that is new, and the clip itself.
-        var (buffer, length) = await ReadBorrowedAsync(response, ct).ConfigureAwait(false);
+        // from 0.2 to 1.9 GB over ten clips (M20 step 6). So the answer is read into a buffer and walked in place:
+        // nothing of that size is made but a preview that is new, and the clip itself. The buffer is the clip's own,
+        // one for all its polls, and goes when the clip is done. Not the shared pool, which M20 used: it keeps what
+        // each thread gave back, and after ten clips DOG.ai held 0.3 GB that way (M21 step 6).
         try
         {
-            return ParseVideoJob(buffer.AsSpan(0, length), shown);
+            var length = await buffer.ReadAsync(response, ct).ConfigureAwait(false);
+            return ParseVideoJob(buffer.Bytes.AsSpan(0, length), shown);
         }
         finally
         {
-            // Wiped before it goes back: the answer holds the clip and, in generation_info, the sentence.
-            System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+            // Wiped after every answer: it holds the clip and, in generation_info, the sentence.
+            buffer.Wipe();
         }
     }
 
-    private static async Task<(byte[] Buffer, int Length)> ReadBorrowedAsync(HttpResponseMessage response, CancellationToken ct)
+    /// <summary>
+    /// The bytes one clip's answers are read into: one array for all its polls, grown when an answer is larger (a
+    /// first preview, then the clip itself), wiped after every answer.
+    /// </summary>
+    internal sealed class AnswerBuffer
     {
-        var pool = System.Buffers.ArrayPool<byte>.Shared;
-        var buffer = pool.Rent((int)Math.Clamp(response.Content.Headers.ContentLength ?? 1 << 16, 1 << 12, 1 << 28));
-        var length = 0;
-        try
+        private int _used;
+
+        public byte[] Bytes { get; private set; } = new byte[1 << 16];
+
+        /// <summary>Reads the whole answer and returns its length.</summary>
+        public async Task<int> ReadAsync(HttpResponseMessage response, CancellationToken ct)
         {
+            // Sized by what the engine says is coming, with a quarter to spare (the next preview is seldom the same size).
+            if (response.Content.Headers.ContentLength is { } known && known > Bytes.Length)
+                Grow((int)Math.Min(known + known / 4, 1 << 28), 0);
+            var length = 0;
             await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             while (true)
             {
-                if (length == buffer.Length)
-                {
-                    var larger = pool.Rent(checked(buffer.Length * 2));
-                    buffer.AsSpan(0, length).CopyTo(larger);
-                    pool.Return(buffer, clearArray: true);
-                    buffer = larger;
-                }
-                var read = await stream.ReadAsync(buffer.AsMemory(length), ct).ConfigureAwait(false);
+                if (length == Bytes.Length) Grow(checked(Bytes.Length * 2), length);
+                var read = await stream.ReadAsync(Bytes.AsMemory(length), ct).ConfigureAwait(false);
                 if (read == 0) break;
                 length += read;
+                _used = Math.Max(_used, length);
             }
-            return (buffer, length);
+            return length;
         }
-        catch
+
+        private void Grow(int size, int keep)
         {
-            pool.Return(buffer, clearArray: true);
-            throw;
+            var larger = new byte[size];
+            Bytes.AsSpan(0, keep).CopyTo(larger);
+            Wipe();
+            Bytes = larger;
+            _used = keep;
+        }
+
+        /// <summary>Clears what an answer left in it.</summary>
+        public void Wipe()
+        {
+            Array.Clear(Bytes, 0, Math.Min(_used, Bytes.Length));
+            _used = 0;
         }
     }
 
@@ -359,12 +381,14 @@ public sealed class SdApi(HttpClient http, int port)
         var id = await StartVideoAsync(VideoBody(request, seed), ct).ConfigureAwait(false);
         VideoProgress? last = null;
         (int? Step, int Chars)? lastPreview = null;
+        // One buffer for all this clip's answers (see VideoJobAsync).
+        var buffer = new AnswerBuffer();
         try
         {
             while (true)
             {
                 // The engine repeats its newest preview (0.5 to 1.4 MB) on every poll: only a new one is decoded.
-                var job = await VideoJobAsync(id, ct, lastPreview).ConfigureAwait(false);
+                var job = await VideoJobAsync(id, buffer, lastPreview, ct).ConfigureAwait(false);
                 if (progress is not null && job.Progress is not null)
                 {
                     var now = job.Progress;

@@ -649,9 +649,11 @@ button.cite:hover { border-color: var(--accent); }
 .images-meta { margin: 0; text-align: center; overflow-wrap: anywhere; }
 .images-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .images-note { margin: 0; text-align: center; }
-.images-composer { max-width: 900px; margin: 0 auto; display: grid; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; }
+/* One column that may be narrower than its longest line: a status line that does not wrap must not push the box
+   (and Cancel with it) past a narrow window (M21 step 6). */
+.images-composer { max-width: 900px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 10px; }
 .images-composer:focus-within { border-color: var(--accent); }
-.images-box { display: grid; grid-template-columns: 70px 1fr; gap: 8px; align-items: start; }
+.images-box { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; align-items: start; }
 .images-box > span { color: var(--muted); font-size: .88em; padding-top: 6px; }
 .images-box textarea { resize: vertical; min-height: 34px; max-height: 30vh; font: inherit; line-height: 1.45; }
 .images-send { display: flex; gap: 8px; align-items: center; }
@@ -763,8 +765,10 @@ button.cite:hover { border-color: var(--accent); }
 }
 @media (max-width: 760px) {
   .images-tries { width: 68px; }
-  .images-box { grid-template-columns: 1fr; gap: 2px; }
+  .images-box { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .images-box > span { padding-top: 0; }
+  /* In a narrow window the status line wraps and is read whole. */
+  .images-status { white-space: normal; }
   .saved-item { flex-direction: column; align-items: stretch; }
   .tagcheck-item { flex-direction: column; align-items: stretch; }
   .head-select { max-width: 150px; }

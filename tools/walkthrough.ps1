@@ -218,11 +218,13 @@ function Hold-GlobalKey($ms) {
     & $pump $ms
     $k::keybd_event(0x20, 0, 2, [UIntPtr]::Zero); $k::keybd_event(0x12, 0, 2, [UIntPtr]::Zero); $k::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
     # What was said is typed a moment later (longer while a video is made: the speech model is on the processor then).
-    $atRelease = $box.Text.Length; $arrived = $null; $until = (Get-Date).AddSeconds(20)
+    # The window stays until the text has stopped growing for two seconds: typing is slow while a video is made, and
+    # letters typed after the window closed would land in whatever program has the focus next.
+    $seen = $box.Text.Length; $changed = $null; $until = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $until) {
         & $pump 250
-        if (-not $arrived -and $box.Text.Length -gt $atRelease) { $arrived = Get-Date }
-        if ($arrived -and ((Get-Date) - $arrived).TotalMilliseconds -gt 1500) { break }
+        if ($box.Text.Length -ne $seen) { $seen = $box.Text.Length; $changed = Get-Date }
+        if ($changed -and ((Get-Date) - $changed).TotalMilliseconds -gt 2000) { break }
     }
     $typed = $box.Text.Trim()
     $form.Close()

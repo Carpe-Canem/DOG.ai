@@ -217,6 +217,28 @@ public static class CardGuestWords
     }
 }
 
+/// <summary>
+/// What the owner is told about a chat model that was set aside, by what it made room for: pictures, or a video
+/// (M21 step 6: the status bar said "set aside for pictures" after a video too). One place, so the status bar, the
+/// model button and the helpers that wait for the model agree. <see cref="CardCoordinator.SetAsideForVideo"/> says which.
+/// </summary>
+public static class SetAsideWords
+{
+    private static string For(bool video) => video ? "a video" : "pictures";
+
+    /// <summary>The status bar: "Huihui · set aside for a video, back with your next message".</summary>
+    public static string Status(string? model, bool video) => $"{model} · set aside for {For(video)}, back with your next message";
+
+    /// <summary>The model button's notice, after the model's name.</summary>
+    public static string Notice(bool video) => $"was set aside to make room for {For(video)}. It loads again by itself with your next message.";
+
+    /// <summary>The start of a helper's line while the model comes back: "The chat model was set aside for a video."</summary>
+    public static string Away(bool video) => $"The chat model was set aside for {For(video)}.";
+
+    /// <summary>The same with "to make room".</summary>
+    public static string MadeRoom(bool video) => $"The chat model was set aside to make room for {For(video)}.";
+}
+
 /// <summary>What "Unload everything" did.</summary>
 /// <param name="Gone">What was taken out of graphics memory, as names for a sentence.</param>
 /// <param name="Stayed">What was left because it is being used.</param>
@@ -401,6 +423,14 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
 
     /// <summary>True from the moment a video is asked for until it is finished, cancelled or has failed.</summary>
     public bool IsMakingVideo => Volatile.Read(ref _clips) > 0;
+
+    /// <summary>
+    /// True when the chat model that is set aside now made room for a video, false when it was for a picture. Only
+    /// for the words the owner reads while it is away (<see cref="SetAsideWords"/>).
+    /// </summary>
+    public bool SetAsideForVideo => Volatile.Read(ref _restedForVideo) == 1;
+
+    private int _restedForVideo;
 
     /// <summary>
     /// True while a video is made by a plan: on a card that another program holds part of, or one under 24 GB.
@@ -595,13 +625,13 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         Interlocked.Increment(ref _pictures);
         Interlocked.Increment(ref _clips);
         // From here until the clip has ended no guest comes onto the card (M21): one that is needed meanwhile runs
-        // on the processor. A guest loads without a card turn, so only the door keeps it off. (Closed here and
-        // opened in the last "finally" below: nothing that can fail stands between the two.)
-        _door.Close();
+        // on the processor. A guest loads without a card turn, so only the door keeps it off. (Closed inside the "try"
+        // and opened in its "finally": the door tells its listeners, and one that failed must not leave it closed.)
         try
         {
+            _door.Close();
             Changed?.Invoke();
-            await SetAsidePageLoadAsync().ConfigureAwait(false);
+            await SetAsidePageLoadAsync(forVideo: true).ConfigureAwait(false);
             if (_turn.CurrentCount == 0) progress?.Report(new VideoProgress(VideoStages.Waiting));
             await _turn.WaitAsync(ct).ConfigureAwait(false);
             try
@@ -628,9 +658,9 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
         }
         finally
         {
-            _door.Open();
             Interlocked.Decrement(ref _clips);
             Interlocked.Decrement(ref _pictures);
+            _door.Open();
             Changed?.Invoke();
         }
     }
@@ -673,6 +703,7 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
             if (await _chat.RestAsync().ConfigureAwait(false))
             {
                 Interlocked.Exchange(ref _restedBytes, before?.ChatBytes ?? 0);
+                Interlocked.Exchange(ref _restedForVideo, 1);
                 gone.Add($"{ChatName} ({Gb(before?.ChatBytes ?? -1)}) was set aside");
                 break;
             }
@@ -796,13 +827,14 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
     /// it aside as soon as it is in. So it is set aside now instead, before it finishes (the next request loads it).
     /// A load the owner started, or one bringing the model back for a request, is waited for as before.
     /// </summary>
-    private async Task SetAsidePageLoadAsync()
+    private async Task SetAsidePageLoadAsync(bool forVideo = false)
     {
         if (_turn.CurrentCount > 0 || !await _chat.SetAsideLoadAsync().ConfigureAwait(false)) return;
         Interlocked.Exchange(ref _stoppedLoad, 1);
+        Interlocked.Exchange(ref _restedForVideo, forVideo ? 1 : 0);
         // Its size on the card was never measured: when it comes back, the picture model is let go to be safe.
         Interlocked.Exchange(ref _restedBytes, 0);
-        Noted?.Invoke("a chat model was loading only because a page opened, so the load was stopped and the model set aside for the picture. It loads when it is next asked for.");
+        Noted?.Invoke($"a chat model was loading only because a page opened, so the load was stopped and the model set aside for the {(forVideo ? "video" : "picture")}. It loads when it is next asked for.");
     }
 
     private int _stoppedLoad;
@@ -847,6 +879,7 @@ public sealed class CardCoordinator : IImageEngine, IVideoEngine
             if (await _chat.RestAsync().ConfigureAwait(false))
             {
                 Interlocked.Exchange(ref _restedBytes, now?.ChatBytes ?? 0);
+                Interlocked.Exchange(ref _restedForVideo, 0);
                 break;
             }
             // A reply is being written. It is never cut off; the picture waits for it.

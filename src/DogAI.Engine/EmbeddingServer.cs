@@ -44,6 +44,7 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
     private DateTime _lastUse = DateTime.UtcNow;
     private int _busy;
     private int _answering;
+    private int _leaving;
     private volatile bool _onProcessor;
 
     /// <param name="door">Asked before the model starts on the graphics card; null where nothing shares the card (tests).</param>
@@ -180,8 +181,10 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
                 }
                 catch (HttpRequestException) when (attempt == 0)
                 {
-                    // The process died between requests; start it again once.
-                    await StopAsync().ConfigureAwait(false);
+                    // The process died between requests; start it again once. Only the program this request asked:
+                    // another request may have started the model again meanwhile (after it left the card for a
+                    // video), and that one is answering.
+                    await StopAsync(api).ConfigureAwait(false);
                 }
                 catch (HttpRequestException e)
                 {
@@ -203,7 +206,9 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
     {
         var path = await ModelPathAsync(ct).ConfigureAwait(false)
                    ?? throw new EmbedderUnavailableException("There is no document search model yet. Get one in " + DogAI.Core.Models.ModelsPlaces.RecommendedName + ", under Document search.");
-        if (_api is { } ready && _process is { HasExited: false } && _runningPath == path && InPlace) return ready;
+        // Not while the model is leaving the card for a video: a request that slipped in here would keep the program
+        // answering, and the video waiting. It queues behind the leaving instead and then starts on the processor.
+        if (_api is { } ready && _process is { HasExited: false } && _runningPath == path && InPlace && Volatile.Read(ref _leaving) == 0) return ready;
 
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -305,11 +310,15 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
         return args;
     }
 
-    public async Task StopAsync()
+    public Task StopAsync() => StopAsync(null);
+
+    /// <param name="only">Stop the program only if it is still the one this client talks to; null stops whatever runs.</param>
+    private async Task StopAsync(LlamaApi? only)
     {
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
+            if (only is not null && !ReferenceEquals(only, _api)) return;
             StopProcess();
         }
         finally
@@ -349,16 +358,26 @@ public sealed class EmbeddingServer : IEmbedder, ICardGuest, IDisposable
     /// </summary>
     public async Task<bool> StepOffAsync(CancellationToken ct = default)
     {
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        // From now no new request reaches the running program (they wait for the lock below), so what is being
+        // answered runs out: with batches following each other closely the wait could otherwise go on for many.
+        Interlocked.Increment(ref _leaving);
         try
         {
-            if (_process is null || _onProcessor) return true;
-            while (Volatile.Read(ref _answering) > 0) await Task.Delay(20, ct).ConfigureAwait(false);
-            StopProcess();
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                if (_process is null || _onProcessor) return true;
+                while (Volatile.Read(ref _answering) > 0) await Task.Delay(20, ct).ConfigureAwait(false);
+                StopProcess();
+            }
+            finally
+            {
+                _gate.Release();
+            }
         }
         finally
         {
-            _gate.Release();
+            Interlocked.Decrement(ref _leaving);
         }
         Changed?.Invoke();
         return true;

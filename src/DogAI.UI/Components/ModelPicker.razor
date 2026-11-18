@@ -4,6 +4,7 @@
 @inject IDesktopShell Desktop
 @inject ModelLauncher Launcher
 @inject AppPaths Paths
+@inject DogAI.Core.Images.CardCoordinator Coordinator
 
 <button class="btn model-btn @(Primary ? "primary" : "")" @onclick="OpenAsync" title="Choose which model answers">
     <i class="dot @StateClass"></i><span>@ButtonText</span>
@@ -33,7 +34,7 @@
         else if (Engine.State == EngineState.Resting)
         {
             <div class="notice">
-                <span><b>@Engine.ModelName</b> was set aside to make room for pictures. It loads again by itself with your next message.</span>
+                <span><b>@Engine.ModelName</b> @DogAI.Core.Images.SetAsideWords.Notice(Coordinator.SetAsideForVideo)</span>
                 <button class="btn" @onclick="Launcher.UnloadByUserAsync">Unload</button>
             </div>
         }

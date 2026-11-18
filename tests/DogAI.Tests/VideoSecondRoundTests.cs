@@ -462,3 +462,91 @@ public class VideoSecondRoundTests
         return root!.FullName;
     }
 }
+
+/// <summary>
+/// DOG.ai's own memory while clips are made (M21 step 6): the engine's answers are read into one buffer per clip, not
+/// the shared pool (which kept what every thread gave back: 0.3 GB after ten clips), and it is wiped after each answer.
+/// </summary>
+public class VideoAnswerBufferTests
+{
+    /// <summary>An answer that does not say how long it is (the reader then grows as it reads).</summary>
+    private sealed class Unsized(byte[] bytes) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context) => stream.WriteAsync(bytes, 0, bytes.Length);
+
+        protected override Task<Stream> CreateContentReadStreamAsync() => Task.FromResult<Stream>(new MemoryStream(bytes));
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
+
+    private static byte[] Filled(int length, byte with)
+    {
+        var bytes = new byte[length];
+        Array.Fill(bytes, with);
+        return bytes;
+    }
+
+    [Fact]
+    public async Task One_buffer_takes_every_answer_of_a_clip_grows_when_it_must_and_is_wiped_after_each()
+    {
+        var buffer = new SdApi.AnswerBuffer();
+        var small = buffer.Bytes;
+
+        // A short answer (no preview yet) fits the buffer as it starts.
+        var first = Filled(900, 7);
+        using (var answer = new HttpResponseMessage { Content = new ByteArrayContent(first) })
+            Assert.Equal(900, await buffer.ReadAsync(answer, default));
+        Assert.Same(small, buffer.Bytes);
+        Assert.Equal(first, buffer.Bytes[..900]);
+        buffer.Wipe();
+        Assert.All(buffer.Bytes, b => Assert.Equal(0, b));
+
+        // An answer with a preview says its length: the buffer is made large enough at once, with room to spare.
+        var preview = Filled(1_900_000, 9);
+        using (var answer = new HttpResponseMessage { Content = new ByteArrayContent(preview) })
+            Assert.Equal(preview.Length, await buffer.ReadAsync(answer, default));
+        var grown = buffer.Bytes;
+        Assert.NotSame(small, grown);
+        Assert.InRange(grown.Length, preview.Length, preview.Length * 2);
+        Assert.True(grown.AsSpan(0, preview.Length).SequenceEqual(preview));
+        buffer.Wipe();
+        Assert.Equal(-1, grown.AsSpan().IndexOfAnyExcept((byte)0));
+
+        // The same size again reuses it: nothing new of that size is made for a repeated preview.
+        using (var answer = new HttpResponseMessage { Content = new ByteArrayContent(preview) })
+            await buffer.ReadAsync(answer, default);
+        Assert.Same(grown, buffer.Bytes);
+
+        // An answer that does not say its length (the clip itself, say) grows the buffer as it is read; what the
+        // buffer held before is wiped, in the array that was left behind as well.
+        var clip = Filled(6_000_000, 3);
+        using (var answer = new HttpResponseMessage { Content = new Unsized(clip) })
+            Assert.Equal(clip.Length, await buffer.ReadAsync(answer, default));
+        Assert.NotSame(grown, buffer.Bytes);
+        Assert.True(buffer.Bytes.AsSpan(0, clip.Length).SequenceEqual(clip));
+        Assert.Equal(-1, grown.AsSpan().IndexOfAnyExcept((byte)0));
+        buffer.Wipe();
+        Assert.Equal(-1, buffer.Bytes.AsSpan().IndexOfAnyExcept((byte)0));
+    }
+
+    [Fact]
+    public void The_answers_no_longer_go_through_the_shared_pool_and_memory_is_given_back_around_every_clip()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "DogAI.sln"))) root = root.Parent;
+        Assert.NotNull(root);
+        var api = File.ReadAllText(Path.Combine(root!.FullName, "src", "DogAI.Engine", "Images", "SdApi.cs"));
+        Assert.DoesNotContain("ArrayPool", api);
+        var server = File.ReadAllText(Path.Combine(root.FullName, "src", "DogAI.Engine", "Video", "VideoServer.cs"));
+        Assert.Equal(2, server.Split("OwnMemory.GiveBack();").Length - 1);
+        // It only collects: it must run and leave a live object alone.
+        var kept = new byte[200_000];
+        kept[^1] = 5;
+        DogAI.Engine.OwnMemory.GiveBack();
+        Assert.Equal(5, kept[^1]);
+    }
+}
