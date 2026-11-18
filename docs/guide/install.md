@@ -65,9 +65,9 @@ When it is done, **Chat engine** shows where the program is and which build it i
 
 1. Choose **Get models** in the Models list. **Recommended** lists models picked for this kind of use, each judged
    against your PC: **Fits on GPU** means it runs entirely on your graphics card, with a rough speed.
-2. Press **Download** beside one. **Qwen3.5 9B** is a good first model: quick, about 10 GB with its picture input
-   (the part that lets it look at pictures you give it), and it fits on a card with 12 GB or more. On a smaller card,
-   take **Qwen3.5 4B**.
+2. Press **Download** beside one. **Qwen3.5 9B** is a good first model: quick, and able to look at pictures you give
+   it. The row says which version DOG.ai picked for your card, how large it is with its picture input, and whether it
+   fits. If it says it does not, take **Qwen3.5 4B**.
 
    ![Get models › Recommended](img/install/recommended.png)
 
@@ -99,8 +99,8 @@ That is all DOG.ai needs. The [next page](finding-your-way.md) shows your way ar
 ## Moving, updating and removing DOG.ai
 
 - **Moving:** close DOG.ai and move the whole folder. It notices the move at its next start.
-- **Updating:** close DOG.ai, download the new zip, and unzip its `DOG.ai.exe`, `portable.txt` and `app` folder over
-  the old ones. Your `data` and `models` folders are left as they are.
+- **Updating:** close DOG.ai, download the new zip, delete the old `app` folder, and unzip the new `DOG.ai.exe`,
+  `portable.txt` and `app` folder in its place. Your `data` and `models` folders are left as they are.
 - **Removing:** delete the folder. DOG.ai leaves nothing behind elsewhere on your PC.
 
 ## Building it yourself

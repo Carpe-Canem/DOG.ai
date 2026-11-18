@@ -1,5 +1,5 @@
 {
-  "about": "The user guide's pictures. Read by tools/guide-shots.ps1 (makes them) and GuideTests (checks them). Each shot: name (the file name), page (docs/guide/<page>.md, picture in docs/guide/img/<page>/), folder (empty | made-up | none), kind (plain | online | live | kept), address, waitFor (a selector), steps (walkthrough steps), marks (selectors numbered 1, 2, 3 in the picture), volatile (selectors whose pixels change from run to run), width and height. kind kept = taken by hand and kept (Windows' own windows, the first start's downloads); the script leaves those alone.",
+  "about": "The user guide's pictures. Read by tools/guide-shots.ps1 (makes them), tools/guide-stale.ps1 (says which are stale) and GuideTests (checks them). Each shot: name (the file name), page (docs/guide/<page>.md, picture in docs/guide/img/<page>/), folder (empty | made-up | none), kind (plain | online | live | kept), address (also tells guide-stale which page's screen it shows), shows (more addresses it ends up on, for guide-stale), waitFor (a selector), steps (walkthrough steps), marks (selectors numbered 1, 2, 3 in the picture), volatile (selectors whose pixels change from run to run), width and height. kind kept = taken by hand and kept (Windows' own windows, the first start's downloads); the script leaves those alone.",
   "models": [
     { "name": "Qwen3.5-9B\\Qwen3.5-9B-Q8_0.gguf", "from": "Qwen3.5-9B\\Qwen3.5-9B-Q8_0.gguf" },
     { "name": "Qwen3.5-9B\\mmproj-F16.gguf", "from": "Qwen3.5-9B\\mmproj-F16.gguf" },
@@ -18,12 +18,12 @@
     { "name": "engines-not-found", "page": "install", "folder": "empty", "kind": "plain", "address": "models/engines", "waitFor": "#chat-engine", "width": 1400, "height": 860, "marks": [ "#go-online" ] },
     { "name": "engine-check", "page": "install", "folder": "empty", "kind": "online", "address": "models/engines", "waitFor": "#chat-engine", "width": 1400, "height": 860,
       "steps": [ { "mouse": "#go-online" }, { "wait": 1500 }, { "mouse": "#chat-engine-check" }, { "wait": 8000 } ], "marks": [ "#chat-engine-install" ] },
-    { "name": "engine-installed", "page": "install", "folder": "none", "kind": "kept", "note": "Models › Engines after Install, from the real first start." },
+    { "name": "engine-installed", "page": "install", "folder": "none", "kind": "kept", "address": "models/engines", "note": "Models › Engines after Install, from the real first start." },
     { "name": "recommended", "page": "install", "folder": "empty", "kind": "online", "address": "models", "waitFor": "#downloads-tray", "width": 1400, "height": 860,
       "steps": [ { "eval": "document.querySelector('#go-online')?.click(); 'ok'" }, { "wait": 6000 } ], "marks": [ "#downloads-tray" ] },
-    { "name": "downloading", "page": "install", "folder": "none", "kind": "kept", "note": "The downloads list while Qwen3.5 9B arrives, from the real first start." },
+    { "name": "downloading", "page": "install", "folder": "none", "kind": "kept", "address": "models", "note": "The downloads list while Qwen3.5 9B arrives, from the real first start." },
     { "name": "default-model", "page": "install", "folder": "made-up", "kind": "plain", "address": "models/library", "waitFor": "#default-general", "width": 1400, "height": 860, "marks": [ "#default-general" ] },
-    { "name": "first-reply", "page": "install", "folder": "none", "kind": "kept", "note": "The first question and reply, from the real first start." },
+    { "name": "first-reply", "page": "install", "folder": "none", "kind": "kept", "address": "general", "note": "The first question and reply, from the real first start." },
 
     { "name": "main-parts", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "general", "waitFor": ".composer textarea", "width": 1400, "height": 860,
       "steps": [ { "eval": "document.querySelector('a.li[href^=\"general/\"]:not(.li-link)')?.click(); 'opened'" }, { "wait": 1500 } ],
@@ -34,11 +34,11 @@
       "steps": [ { "mouse": "input[type=search]" }, { "type": "fog" }, { "press": "enter" }, { "wait": 1200 } ], "marks": [] },
     { "name": "settings", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "settings/appearance", "waitFor": "#settings-search", "width": 1400, "height": 860, "marks": [ "#settings-search" ] },
     { "name": "look-fireside", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "settings/appearance", "waitFor": "#settings-search", "width": 1400, "height": 860,
-      "steps": [ { "eval": "document.querySelector(\"input[name=skin][value=fireside]\").click(); 'ok'" }, { "wait": 800 }, { "eval": "Blazor.navigateTo('characters/chat/4'); 'ok'" }, { "wait": 2000 } ] },
+      "steps": [ { "eval": "document.querySelector(\"input[name=skin][value=fireside]\").click(); 'ok'" }, { "wait": 800 }, { "eval": "Blazor.navigateTo('characters'); 'ok'" }, { "wait": 1500 }, { "eval": "[...document.querySelectorAll('a.li')].find(a => a.querySelector('.li-title')?.textContent.trim() === 'Biscuit')?.click(); 'opened'" }, { "wait": 2000 }, { "eval": "[...document.querySelectorAll('.main a, .main button')].find(e => /^Biscuit\\s*\\d/.test(e.textContent.trim()))?.click(); 'chat'" }, { "wait": 2000 } ], "shows": [ "characters" ] },
     { "name": "look-playhouse", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "settings/appearance", "waitFor": "#settings-search", "width": 1400, "height": 860,
-      "steps": [ { "eval": "document.querySelector(\"input[name=skin][value=playhouse]\").click(); 'ok'" }, { "wait": 800 }, { "eval": "Blazor.navigateTo(''); 'ok'" }, { "wait": 1500 } ], "volatile": [ "h1" ] },
+      "steps": [ { "eval": "document.querySelector(\"input[name=skin][value=playhouse]\").click(); 'ok'" }, { "wait": 800 }, { "eval": "Blazor.navigateTo(''); 'ok'" }, { "wait": 1500 } ], "volatile": [ "h1" ], "shows": [ "" ] },
     { "name": "look-workbench-light", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "settings/appearance", "waitFor": "#settings-search", "width": 1400, "height": 860,
-      "steps": [ { "eval": "document.querySelector(\"input[name=skin][value=workbench]\").click(); 'ok'" }, { "wait": 1200 }, { "eval": "document.querySelector(\"input[name=theme][value=light]\").click(); 'ok'" }, { "wait": 1200 }, { "eval": "Blazor.navigateTo('characters/group/5'); 'ok'" }, { "wait": 2000 } ] },
+      "steps": [ { "eval": "document.querySelector(\"input[name=skin][value=workbench]\").click(); 'ok'" }, { "wait": 1200 }, { "eval": "document.querySelector(\"input[name=theme][value=light]\").click(); 'ok'" }, { "wait": 1200 }, { "eval": "Blazor.navigateTo('characters'); 'ok'" }, { "wait": 1500 }, { "eval": "[...document.querySelectorAll('a.li')].find(a => a.querySelector('.li-title')?.textContent.trim() === 'Biscuit and Mara')?.click(); 'opened'" }, { "wait": 2000 } ], "shows": [ "characters" ] },
     { "name": "narrow-drawer", "page": "finding-your-way", "folder": "made-up", "kind": "plain", "address": "general", "waitFor": ".composer textarea", "width": 700, "height": 860,
       "steps": [ { "eval": "document.querySelector('a.li[href^=\"general/\"]:not(.li-link)')?.click(); 'opened'" }, { "wait": 1000 }, { "mouse": "#aside-drawer" }, { "wait": 800 } ], "marks": [ "#aside-close" ] }
   ]

@@ -4,6 +4,8 @@
 #   pwsh tools/guide-shots.ps1 -Page install        the shots of one page
 #   pwsh tools/guide-shots.ps1 -Only first-start,engines-offline
 #   pwsh tools/guide-shots.ps1 -Online -Live        also the shots that go online, and those that need a model at work
+#                                                   (-Only takes any shot it names, online and live ones too)
+#   pwsh tools/guide-shots.ps1 -Page install -Force write the pictures even where the pixels did not change
 #   pwsh tools/guide-shots.ps1 -Show                print the list and stop
 #   pwsh tools/guide-shots.ps1 -Prepare made-up     only set up -GuideHome with that folder (to look around in it, or to
 #                                                   draw new pictures for tools/GuideData/assets), then stop
@@ -33,6 +35,7 @@ param(
     [switch]$Online,
     [switch]$Live,
     [switch]$Show,
+    [switch]$Force,
     [ValidateSet('', 'empty', 'made-up')][string]$Prepare = '',
     [string]$GuideHome = 'D:\Apps\DOG.ai',
     [string]$ModelSource = 'D:\DOG.ai\Models',
@@ -45,7 +48,7 @@ $repo = Split-Path $PSScriptRoot -Parent
 $list = Get-Content (Join-Path $PSScriptRoot 'guide-shots.json') -Raw | ConvertFrom-Json
 $shots = @($list.shots | Where-Object {
     ($Only.Count -eq 0 -or $_.name -in $Only) -and (-not $Page -or $_.page -eq $Page) -and $_.kind -ne 'kept' -and
-    ($_.kind -ne 'online' -or $Online) -and ($_.kind -ne 'live' -or $Live)
+    ($_.name -in $Only -or (($_.kind -ne 'online' -or $Online) -and ($_.kind -ne 'live' -or $Live)))
 })
 if ($Show) { $list.shots | Format-Table name, page, folder, kind, address -AutoSize | Out-String -Width 200; return }
 if ($shots.Count -eq 0) { "No shot matches."; return }
@@ -60,7 +63,7 @@ foreach ($w in 'D:\DOG.ai', 'dogai-b', $ModelSource, $EngineSource) { $forbidden
 $mail = (git -C $repo config user.email) 2>$null
 if ($mail) { $forbidden.Add(($mail -split '@')[0]) }
 if (Test-Path $ModelSource) {
-    Get-ChildItem $ModelSource -Recurse -File -Include *.gguf, *.safetensors, *.bin, *.onnx |
+    Get-ChildItem $ModelSource -Recurse -FollowSymlink -File -Include *.gguf, *.safetensors, *.bin, *.onnx |
         ForEach-Object { [IO.Path]::GetFileNameWithoutExtension($_.Name) } |
         Where-Object { $_.Length -ge 8 -and $_ -match '[-_.]' -and $_ -notin $linked } | Sort-Object -Unique | ForEach-Object { $forbidden.Add($_) }
 }
@@ -117,6 +120,7 @@ if ($Prepare) { Prepare-Home $Prepare; "Ready: $GuideHome ($Prepare). Run it wit
 # --- The page script run before every picture -------------------------------------------------------------------------
 # Stills the page, draws the marks, finds the volatile parts and looks for forbidden words. Returns one line of JSON.
 function Before-Shot($shot) {
+    $name = ConvertTo-Json "$($shot.name)" -Compress
     $marks = ConvertTo-Json @($shot.marks | Where-Object { $_ }) -Compress
     $volatile = ConvertTo-Json @(@($list.volatile) + @($shot.volatile) | Where-Object { $_ }) -Compress
     @"
@@ -151,7 +155,7 @@ function Before-Shot($shot) {
   }
   const text = (document.body.innerText + '\n' + [...document.querySelectorAll('input,textarea,select')].map(e => e.value).join('\n')).toLowerCase();
   for (const w of $forbiddenJson) if (text.includes(w.toLowerCase())) out.found.push(w);
-  return 'GUIDE ' + JSON.stringify(out);
+  return 'GUIDE ' + $name + ' ' + JSON.stringify(out);
 })()
 "@
 }
@@ -199,12 +203,11 @@ foreach ($group in $groups) {
         $steps.Add(@{ shot = $shot.name })
         $steps.Add(@{ eval = "document.getElementById('guide-marks')?.remove(); 'unmarked'" })
     }
-    $log = & (Join-Path $PSScriptRoot 'walkthrough.ps1') -Exe "$GuideHome\app\DOG.ai.exe" -Portable -OutDir $work -Width $w -Height $h -Port $Port -Steps $steps.ToArray() *>&1 | Out-String -Width 400
+    $log = & (Join-Path $PSScriptRoot 'walkthrough.ps1') -Exe "$GuideHome\app\DOG.ai.exe" -Portable -OutDir $work -Width $w -Height $h -Port $Port -Steps $steps.ToArray() *>&1 | Out-String -Width 100000
     $log -split "`r?`n" | Where-Object { $_ -match 'GUIDE-TIMEOUT|GUIDE-STILL-OPEN|EVAL ERROR|TARGET NOT FOUND|not loaded' } | ForEach-Object { "  $_" }
-    # The page script prints one line per shot, in the order of the shots.
-    $guideLines = @($log -split "`r?`n" | Where-Object { $_ -match '^=> GUIDE \{' })
-    for ($i = 0; $i -lt $group.Group.Count; $i++) {
-        $results[$group.Group[$i].name] = if ($i -lt $guideLines.Count) { ($guideLines[$i] -replace '^=> GUIDE ', '') | ConvertFrom-Json } else { $null }
+    # The page script prints one line per shot, naming it: a shot whose script failed gets no result, never another's.
+    foreach ($line in $log -split "`r?`n") {
+        if ($line.Trim() -match '^=> GUIDE (\S+) (\{.*\})$') { $results[$Matches[1]] = $Matches[2] | ConvertFrom-Json }
     }
     ($log -split "`r?`n" | Where-Object { $_ -match '\[(WRN|ERR|FTL)\]' }) | ForEach-Object { "  app log: $_" }
 }
@@ -243,7 +246,7 @@ foreach ($shot in $shots) {
     if ($r.found.Count) { "REFUSED     $($shot.name): the page shows $($r.found -join ', ')"; $failed++; continue }
     if ($r.missing.Count) { "NO MARK     $($shot.name): $($r.missing -join ', ') not on the page"; $failed++; continue }
     New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
-    if ((Test-Path $target) -and (Same-Pixels $made $target $r.volatile)) { "same        $($shot.name)"; continue }
+    if (-not $Force -and (Test-Path $target) -and (Same-Pixels $made $target $r.volatile)) { "same        $($shot.name)"; continue }
     Copy-Item $made $target -Force
     "written     $($shot.name) -> docs/guide/img/$($shot.page)/$($shot.name).png"
 }
