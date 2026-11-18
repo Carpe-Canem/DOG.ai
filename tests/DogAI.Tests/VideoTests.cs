@@ -70,7 +70,8 @@ internal static class TestWebm
     public static byte[] Make(int width = 960, int height = 640, int frames = 121, int seed = 1, int filler = 300, byte[]? marker = null,
         string docType = "webm", string codec = "V_VP8", int trackType = 1, string writer = "stable-diffusion.cpp",
         byte[]? inSegment = null, byte[]? inInfo = null, byte[]? inTrack = null, byte[]? moreTracks = null, byte[]? after = null,
-        bool open = false, byte[]? padding = null, int blockTrack = 1, byte blockFlags = 0x80)
+        bool open = false, byte[]? padding = null, int blockTrack = 1, byte blockFlags = 0x80,
+        string? mark = null, float? length = null, int track = 1, long scale = 1_000_000)
     {
         var random = new Random(seed);
         var uid = new byte[7];
@@ -79,15 +80,16 @@ internal static class TestWebm
         var body = new List<byte>();
         body.AddRange(El(0x114D9B74, El(0x4DBB, El(0x53AB, [0x15, 0x49, 0xA9, 0x66]), Num(0x53AC, 110))));
         body.AddRange(El(0xEC, padding ?? new byte[45]));
-        body.AddRange(El(Info, Num(0x2AD7B1, 1_000_000), Float(0x4489, frames * 1000f / 24), Text(0x4D80, writer), Text(0x5741, writer), inInfo ?? []));
+        body.AddRange(El(Info, Num(0x2AD7B1, scale), Float(0x4489, length ?? frames * 1000f / 24), Text(0x4D80, writer), Text(0x5741, writer), inInfo ?? []));
         body.AddRange(El(Tracks,
-            El(TrackEntry, Num(0xD7, 1), El(0x73C5, uid), Num(0x83, trackType), Text(0x86, codec),
+            El(TrackEntry, Num(0xD7, track), El(0x73C5, uid), Num(0x83, trackType), Text(0x86, codec),
                 El(0xE0, Num(0xB0, width), Num(0xBA, height), Num(0x54B0, width), Num(0x54BA, height), Float(0x2383E3, 24)), inTrack ?? []),
             moreTracks ?? []));
         for (var i = 0; i < frames; i++)
         {
             var frame = new byte[filler];
             random.NextBytes(frame);
+            if (mark is not null) FrameMark(mark, i).CopyTo(frame, 0);
             if (i == 0 && filler >= 2 * (marker ?? Marker).Length) (marker ?? Marker).CopyTo(frame.AsSpan(filler / 2));
             byte[] block = [(byte)(0x80 | blockTrack), 0, 0, blockFlags, .. frame];
             body.AddRange(open ? Open(Cluster, Num(0xE7, i * 42), El(0xA3, block)) : El(Cluster, Num(0xE7, i * 42), El(0xA3, block)));
@@ -95,6 +97,49 @@ internal static class TestWebm
         body.AddRange(El(0x1C53BB6B, El(0xBB, Num(0xB3, 0), El(0xB7, Num(0xF7, 1), Num(0xF1, 233)))));
         if (inSegment is not null) body.AddRange(inSegment);
         return [.. header, .. El(Segment, [.. body]), .. after ?? []];
+    }
+
+    /// <summary>What a frame made with <c>mark</c> begins with: the file's mark and the frame's number, so a joined file can be read back frame by frame.</summary>
+    public static byte[] FrameMark(string mark, int frame) => Encoding.ASCII.GetBytes($"[{mark}:{frame:000}]");
+
+    /// <summary>
+    /// A file laid out exactly as the video engine lays its clips out (read from a real one in M22 step 1): an index
+    /// of four entries (the facts, the track, the first cluster, the cue list) with padding after it up to 110 bytes,
+    /// the length as the last frame's time in a four-byte number, one cluster a frame with its size in eight bytes and
+    /// its time in milliseconds rounded down, every frame a key frame, then one cue a frame. Each frame begins with
+    /// <see cref="FrameMark"/>.
+    /// </summary>
+    public static byte[] Engine(string mark, int width = 960, int height = 640, int frames = 121, int seed = 1, int filler = 60)
+    {
+        var random = new Random(seed);
+        var uid = new byte[7];
+        random.NextBytes(uid);
+        const string writer = "stable-diffusion.cpp";
+        var header = El(Ebml, Num(0x4286, 1), Num(0x42F7, 1), Num(0x42F2, 4), Num(0x42F3, 8), Text(0x4282, "webm"), Num(0x4287, 4), Num(0x4285, 2));
+        var info = El(Info, Num(0x2AD7B1, 1_000_000), Float(0x4489, (frames - 1) * 1000f / 24), Text(0x4D80, writer), Text(0x5741, writer));
+        var tracks = El(Tracks, El(TrackEntry, Num(0xD7, 1), El(0x73C5, uid), Num(0x83, 1), Text(0x86, "V_VP8"),
+            El(0xE0, Num(0xB0, width), Num(0xBA, height), Num(0x54B0, width), Num(0x54BA, height), Float(0x2383E3, 24))));
+        const int reserved = 110;
+        var clusters = new List<byte>();
+        var cues = new List<byte>();
+        for (var i = 0; i < frames; i++)
+        {
+            var frame = new byte[filler];
+            random.NextBytes(frame);
+            FrameMark(mark, i).CopyTo(frame, 0);
+            var time = i * 1000L / 24;
+            cues.AddRange(El(0xBB, Num(0xB3, time), El(0xB7, Num(0xF7, 1), Num(0xF1, reserved + info.Length + tracks.Length + clusters.Count))));
+            byte[] inside = [.. Num(0xE7, time), .. El(0xA3, [0x81, 0, 0, 0x80, .. frame])];
+            clusters.AddRange([0x1F, 0x43, 0xB6, 0x75, 0x01, 0, 0, 0, (byte)(inside.Length >> 24), (byte)(inside.Length >> 16), (byte)(inside.Length >> 8), (byte)inside.Length, .. inside]);
+        }
+        byte[] Entry(byte[] id, long position) => El(0x4DBB, El(0x53AB, id), Num(0x53AC, position));
+        var index = El(0x114D9B74,
+            Entry([0x15, 0x49, 0xA9, 0x66], reserved),
+            Entry([0x16, 0x54, 0xAE, 0x6B], reserved + info.Length),
+            Entry([0x1F, 0x43, 0xB6, 0x75], reserved + info.Length + tracks.Length),
+            Entry([0x1C, 0x53, 0xBB, 0x6B], reserved + info.Length + tracks.Length + clusters.Count));
+        byte[] body = [.. index, .. El(0xEC, new byte[reserved - index.Length - 2]), .. info, .. tracks, .. clusters, .. El(0x1C53BB6B, [.. cues])];
+        return [.. header, 0x18, 0x53, 0x80, 0x67, 0x01, 0, 0, 0, (byte)(body.Length >> 24), (byte)(body.Length >> 16), (byte)(body.Length >> 8), (byte)body.Length, .. body];
     }
 
     /// <summary>What an engine started without its metadata switch writes: the prompt, as a tag.</summary>

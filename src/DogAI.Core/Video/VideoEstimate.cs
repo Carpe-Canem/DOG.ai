@@ -373,16 +373,49 @@ public static class VideoClips
     /// (<see cref="WebmInfo"/>: one VP8 track and nothing a program could have written a prompt into), and, with
     /// <paramref name="width"/>, <paramref name="height"/> and <paramref name="frames"/>, of the size and length asked for.
     /// </summary>
-    public static string? Problem(byte[]? webm, int width = 0, int height = 0, int frames = 0)
+    /// <param name="parts">
+    /// How many clips the file holds (M22): 1 for a clip as the engine made it, which must have exactly
+    /// <paramref name="frames"/>; 2 or 3 for clips joined by <see cref="WebmJoin"/>, which must have
+    /// <see cref="FramesOf"/> and be written as DOG.ai writes a joined file, with an index and a cue list that point
+    /// at its frames.
+    /// </param>
+    public static string? Problem(byte[]? webm, int width = 0, int height = 0, int frames = 0, int parts = 1)
     {
+        if (parts is < 1 or > MaxParts) return TooManyParts;
         if (webm is null || webm.Length == 0) return "The video is empty.";
         if (webm.Length > MaxBytes) return "The video is too large a file.";
-        if (WebmInfo.Read(webm, out var why) is not { } info) return "The video is not a plain WebM file: " + why;
+        // A single clip is read exactly as before M22; only a joined one needs its parts' places.
+        WebmParts? file = null;
+        if ((parts == 1 ? WebmInfo.Read(webm, out var why) : (file = WebmInfo.Parts(webm, out why))?.Info) is not { } info)
+            return "The video is not a plain WebM file: " + why;
         if (width > 0 && height > 0 && (info.Width != width || info.Height != height))
             return $"The video is {info.Width} × {info.Height}, not the {width} × {height} asked for.";
-        if (frames > 0 && info.Frames != frames) return $"The video has {info.Frames} frames, not the {frames} asked for.";
-        return null;
+        if (file is null)
+            return frames > 0 && info.Frames != frames ? $"The video has {info.Frames} frames, not the {frames} asked for." : null;
+        if (frames > 0 && info.Frames != FramesOf(frames, parts))
+            return $"The video has {info.Frames} frames, not the {FramesOf(frames, parts)} that {parts} joined clips of {frames} frames have.";
+        return (WebmJoin.ShapeProblem(file) ?? file.IndexProblem()) is { } wrong ? "The joined video is not written as DOG.ai writes one: " + wrong + "." : null;
     }
+
+    /// <summary>The most clips one file holds (the owner's decision, 2026-11-18): a clip and two continuations, 15 seconds.</summary>
+    public const int MaxParts = 3;
+
+    public static readonly string TooManyParts = $"A video holds between 1 and {MaxParts} clips.";
+
+    /// <summary>
+    /// How many frames a file of <paramref name="parts"/> joined clips has, each of <paramref name="frames"/>: a
+    /// continuation's first frame repeats the clip before's last and is left out, so 121 gives 241 and 361.
+    /// </summary>
+    public static int FramesOf(int frames, int parts) => parts <= 1 ? frames : parts * (frames - 1) + 1;
+
+    /// <summary>How long such a file plays, in seconds, counted as a single clip's length is (frames over frames a second).</summary>
+    public static double SecondsOf(int frames, int fps, int parts = 1) => fps > 0 ? FramesOf(frames, parts) / (double)fps : 0;
+
+    /// <summary>
+    /// When such a file's last frame shows, in seconds. The page reads a clip's last frame by setting the player's
+    /// time to the file's own length; this is what it uses when the file does not say one.
+    /// </summary>
+    public static double LastFrameSeconds(int frames, int fps, int parts = 1) => fps > 0 ? Math.Max(0, FramesOf(frames, parts) - 1) / (double)fps : 0;
 
     /// <summary>The same for a request's clip.</summary>
     public static string? Problem(byte[]? webm, VideoRequest request) => Problem(webm, request.Width, request.Height, request.Frames);

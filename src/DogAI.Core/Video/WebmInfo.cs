@@ -27,15 +27,29 @@ public readonly record struct WebmInfo(int Width, int Height, int Frames, double
         var found = new Found();
         problem = File(data, found) ?? found.Verdict();
         if (problem is not null) return null;
-        return new WebmInfo(found.Width, found.Height, found.Frames,
-            found.Duration > 0 ? found.Duration * found.Scale / 1_000_000_000.0 : 0, found.Writer ?? found.Muxer ?? "");
+        return found.Info();
+    }
+
+    /// <summary>
+    /// The same walk, handing out where the file's parts are (M22): the header, the segment's own parts in order, each
+    /// frame with its time and its bytes, the index and the cue list as the file has them. Not a second reader: the
+    /// walk that decides whether the file is a clip notes the places as it goes. Null, with
+    /// <paramref name="problem"/>, for exactly the files <see cref="Read(ReadOnlySpan{byte}, out string?)"/> refuses.
+    /// </summary>
+    public static WebmParts? Parts(ReadOnlySpan<byte> data, out string? problem)
+    {
+        var found = new Found { Noted = new WebmParts.Notes() };
+        problem = File(data, found) ?? found.Verdict();
+        return problem is null ? found.Noted.Build(found.Info(), found.Scale, found.TrackNumber, found.Duration, data.Length) : null;
     }
 
     // ---- The parts of a file (EBML element ids, as Matroska names them) ----
 
-    private const uint Ebml = 0x1A45DFA3, Segment = 0x18538067, SeekHead = 0x114D9B74, Info = 0x1549A966, Tracks = 0x1654AE6B,
+    internal const uint Ebml = 0x1A45DFA3, Segment = 0x18538067, SeekHead = 0x114D9B74, Info = 0x1549A966, Tracks = 0x1654AE6B,
         Cues = 0x1C53BB6B, Cluster = 0x1F43B675, TrackEntry = 0xAE, Video = 0xE0, Seek = 0x4DBB, CuePoint = 0xBB,
-        CueTrackPositions = 0xB7, BlockGroup = 0xA0, Padding = 0xEC, Checksum = 0xBF;
+        CueTrackPositions = 0xB7, BlockGroup = 0xA0, Padding = 0xEC, Checksum = 0xBF,
+        SeekId = 0x53AB, SeekPosition = 0x53AC, Length = 0x4489, ClusterTime = 0xE7, SimpleBlock = 0xA3, GroupBlock = 0xA1,
+        CueTime = 0xB3, CueTrack = 0xF7, CueClusterPosition = 0xF1;
 
     private enum Kind
     {
@@ -101,6 +115,12 @@ public readonly record struct WebmInfo(int Width, int Height, int Frames, double
         public double Duration;
         public bool MixedBlocks;
 
+        /// <summary>Where the parts are, noted only when asked for (<see cref="Parts"/>).</summary>
+        public WebmParts.Notes? Noted;
+
+        public WebmInfo Info() =>
+            new(Width, Height, Frames, Duration > 0 ? Duration * Scale / 1_000_000_000.0 : 0, Writer ?? Muxer ?? "");
+
         /// <summary>What the file as a whole lacks, after every part was let through.</summary>
         public string? Verdict() =>
             DocType != "webm" ? "it does not say it is a WebM"
@@ -122,6 +142,7 @@ public readonly record struct WebmInfo(int Width, int Height, int Frames, double
         var at = body + (int)size;
         if (!Head(data, at, data.Length, out id, out size, out body) || id != Segment) return "it has no segment";
         found.Segments++;
+        found.Noted?.Segment(at, body);
         // A segment written to a stream may not know its size; it then runs to the end of the file.
         var end = size < 0 ? data.Length : body + (int)size;
         if (end != data.Length) return "it has bytes after its end";
@@ -150,6 +171,7 @@ public readonly record struct WebmInfo(int Width, int Height, int Frames, double
                 // Padding is room left for the index. It must be empty: it is the one part that could hold anything.
                 if (id == Padding && data.Slice(body, (int)size).IndexOfAnyExcept((byte)0) >= 0) return "its padding is not empty";
                 if (id == Checksum && size != 4) return "it has a part DOG.ai does not know";
+                found.Noted?.Extra(parent, id, at, body, body + (int)size);
                 at = body + (int)size;
                 continue;
             }
@@ -162,14 +184,18 @@ public readonly record struct WebmInfo(int Width, int Height, int Frames, double
                 // Only the frames may leave their size open.
                 if (size < 0 && id != Cluster) return "it is cut short";
                 var inner = size < 0 ? end : body + (int)size;
+                found.Noted?.Open(parent, id, at, body, size >= 0);
                 if (Children(data, body, inner, id, size < 0, found, out var next) is { } problem) return problem;
-                at = size < 0 ? next : inner;
+                var after = size < 0 ? next : inner;
+                found.Noted?.Close(parent, id, at, body, after);
+                at = after;
                 continue;
             }
 
             if (size < 0) return "it is cut short";
             var value = data.Slice(body, (int)size);
             if (Value(kind, value, found) is { } wrong) return wrong;
+            found.Noted?.Leaf(parent, id, at, body, value);
             at = body + (int)size;
         }
         return null;

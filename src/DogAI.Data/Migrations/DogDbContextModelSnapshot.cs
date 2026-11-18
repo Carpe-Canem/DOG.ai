@@ -811,6 +811,9 @@ namespace DogAI.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("Parts")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Prompt")
                         .IsRequired()
                         .HasColumnType("TEXT");

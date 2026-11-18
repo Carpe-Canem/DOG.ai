@@ -730,7 +730,8 @@ else
         if (LikeBlocked is { } blocked) return blocked;
         var clip = kept.Video is null ? await Clips.GetAsync(kept.Id) ?? kept : kept;
         if (clip.Video is not { } webm) return "That video is not there any more.";
-        var jpeg = await LastFrameAsync(webm, clip.Width, clip.Height, clip.Frames, clip.Fps);
+        // All of its frames: a joined clip holds two or three clips' worth.
+        var jpeg = await LastFrameAsync(webm, clip.Width, clip.Height, clip.TotalFrames, clip.Fps);
         var (next, problem) = VideoContinue.Of(clip, jpeg);
         if (next is null) return problem;
         await PutOnAsync(next);

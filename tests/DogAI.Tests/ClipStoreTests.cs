@@ -84,6 +84,29 @@ public sealed class ClipStoreTests : IDisposable
         return Clip.Of(kind, owner, VideoFiles.Wan22, request, result, KeptPictureTests.Webp(384, 256, 2000, seed, StillMarker));
     }
 
+    private static readonly byte[] JoinedFirst = TestWebm.FrameMark("JOINED-FIRST-PART-WOMBAT", 7), JoinedSecond = TestWebm.FrameMark("JOINED-SECOND-PART-BILBY", 99);
+
+    /// <summary>
+    /// A joined clip as the Video section keeps one: two or three clips in one video (each frame of each part begins
+    /// with a mark of its own), with its last part's sentence and first frame.
+    /// </summary>
+    private static Clip Joined(int seed = 1, int parts = 2, int filler = 400)
+    {
+        var frame = KeptPictureTests.Webp(960, 640, seed: seed, marker: FrameMarker);
+        var request = VideoRequest.For($"The fox walks on, {Word}", VideoQuality.Quick, PictureShape.Wide, startFrame: frame);
+        var video = TestWebm.Make(960, 640, 121, seed, filler, mark: "JOINED-FIRST-PART-WOMBAT");
+        for (var part = 1; part < parts; part++)
+        {
+            video = WebmJoin.Join(video, TestWebm.Make(960, 640, 121, seed + part, filler, mark: part == 1 ? "JOINED-SECOND-PART-BILBY" : "JOINED-THIRD-PART-QUENDA"), out var problem);
+            Assert.True(video is not null, problem);
+        }
+        var result = new VideoResult(video!, 960, 640, VideoClips.FramesOf(121, parts), 24, 4_000_000_000 + seed);
+        return Clip.Of(ClipOwners.Video, ClipOwners.VideoOwner, VideoFiles.Wan22, request, result, KeptPictureTests.Webp(384, 256, 2000, seed, StillMarker), parts);
+    }
+
+    /// <summary>True when the folder holds a frame of a joined sample's first part and (unless told otherwise) one of its second.</summary>
+    private static bool HoldsJoined(string path, bool second = true) => Holds(path, JoinedFirst) || (second && Holds(path, JoinedSecond));
+
     private static byte[] Bytes(string file)
     {
         try
@@ -307,7 +330,7 @@ public sealed class ClipStoreTests : IDisposable
         Assert.Equal(
         [
             "Id", "OwnerKind", "OwnerId", "Prompt", "NegativePrompt", "Width", "Height", "Frames", "Fps", "Seed", "Steps", "Sampler", "Guidance",
-            "FlowShift", "Decoder", "Compression", "Faster", "Model", "Vae", "TextEncoder", "FastDecoder", "VideoBytes", "StartFrameBytes", "CreatedAt",
+            "FlowShift", "Decoder", "Compression", "Faster", "Parts", "Model", "Vae", "TextEncoder", "FastDecoder", "VideoBytes", "StartFrameBytes", "CreatedAt",
             "Still", "StartFrame", "Video",
         ], columns);
     }
@@ -325,13 +348,16 @@ public sealed class ClipStoreTests : IDisposable
     ];
 
     /// <summary>Brings a folder's database to the schema M20's build left it with.</summary>
-    private static async Task ToM20(AppPaths paths, byte[]? key)
+    private static Task ToM20(AppPaths paths, byte[]? key) => To(paths, key, M20);
+
+    /// <summary>Brings a folder's database to the schema an older build left it with, by that build's last migration.</summary>
+    private static async Task To(AppPaths paths, byte[]? key, string migration)
     {
         await using (var services = Open(paths, key))
         {
             var factory = services.GetRequiredService<IDbContextFactory<DogDbContext>>();
             await using var db = await factory.CreateDbContextAsync();
-            await db.GetService<IMigrator>().MigrateAsync(M20);
+            await db.GetService<IMigrator>().MigrateAsync(migration);
         }
         SqliteConnection.ClearAllPools();
     }
@@ -400,9 +426,10 @@ public sealed class ClipStoreTests : IDisposable
 
         await Use(paths, null, async s =>
         {
-            // The table was rebuilt: the new column sits before the large values, which are still last.
+            // The table was rebuilt (twice: for Faster, then for Parts): the new columns sit before the large
+            // values, which are still last.
             var columns = Columns(paths);
-            Assert.Equal([.. M20Columns[..16], "Faster", .. M20Columns[16..]], columns);
+            Assert.Equal([.. M20Columns[..16], "Faster", "Parts", .. M20Columns[16..]], columns);
             Assert.Equal(["Still", "StartFrame", "Video"], columns[^3..]);
 
             var page = await Store(s).PageAsync(ClipOwners.Video, 0);
@@ -419,8 +446,9 @@ public sealed class ClipStoreTests : IDisposable
             Assert.Null(two.Still);
             Assert.Null(two.StartFrame);
 
-            // Not faster, and the request each gives is the one M20's build gave: the body sent is the same text.
+            // Not faster, one clip each, and the request each gives is the one M20's build gave: the body sent is the same text.
             Assert.False(one.Faster || two.Faster || one.ToRequest().Faster || two.ToRequest().Faster);
+            Assert.Equal((1, 1), (one.Parts, two.Parts));
             Assert.Equal(asked[0], SdApi.VideoBody(one.ToRequest(), one.Seed).ToJsonString());
             Assert.Equal(asked[1], SdApi.VideoBody(two.ToRequest(), two.Seed).ToJsonString());
             Assert.DoesNotContain("cache_", asked[0] + asked[1]);
@@ -584,16 +612,339 @@ public sealed class ClipStoreTests : IDisposable
         }
     }
 
+
+    // ---- From M21's table to M22's (the ClipsParts migration rebuilds it again) ----
+
+    private const string M21 = "20261117183135_ClipsFaster";
+
+    /// <summary>The table as M21's build made it.</summary>
+    private static readonly string[] M21Columns = [.. M20Columns[..16], "Faster", .. M20Columns[16..]];
+
+    /// <summary>The table as it is now.</summary>
+    private static readonly string[] NowColumns = [.. M20Columns[..16], "Faster", "Parts", .. M20Columns[16..]];
+
+    /// <summary>Writes a clip the way M21's build did: its 26 columns, and nothing about parts.</summary>
+    private static long InsertM21(AppPaths paths, byte[]? key, Clip c) => (long)Run(paths, key,
+        "INSERT INTO Clips (OwnerKind, OwnerId, Prompt, NegativePrompt, Width, Height, Frames, Fps, Seed, Steps, Sampler, Guidance, FlowShift, Decoder, " +
+        "Compression, Faster, Model, Vae, TextEncoder, FastDecoder, VideoBytes, StartFrameBytes, CreatedAt, Still, StartFrame, Video) VALUES " +
+        "($kind, $owner, $prompt, $negative, $width, $height, $frames, $fps, $seed, $steps, $sampler, $guidance, $shift, $decoder, " +
+        "$compression, $faster, $model, $vae, $text, $fast, $videoBytes, $frameBytes, '2026-11-18 09:30:00', $still, $frame, $video); SELECT last_insert_rowid();",
+        ("$kind", c.OwnerKind), ("$owner", c.OwnerId), ("$prompt", c.Prompt), ("$negative", c.NegativePrompt), ("$width", c.Width), ("$height", c.Height),
+        ("$frames", c.Frames), ("$fps", c.Fps), ("$seed", c.Seed), ("$steps", c.Steps), ("$sampler", c.Sampler), ("$guidance", c.Guidance),
+        ("$shift", c.FlowShift), ("$decoder", (int)c.Decoder), ("$compression", c.Compression), ("$faster", c.Faster ? 1 : 0), ("$model", c.Model), ("$vae", c.Vae),
+        ("$text", c.TextEncoder), ("$fast", c.FastDecoder), ("$videoBytes", c.Video!.Length), ("$frameBytes", c.StartFrame?.Length ?? 0),
+        ("$still", c.Still), ("$frame", c.StartFrame), ("$video", c.Video))!;
+
+    [Fact]
+    public async Task Clips_kept_in_m21s_build_come_through_the_rebuild_intact_and_hold_one_clip_each()
+    {
+        var paths = Install("a");
+        await To(paths, null, M21);
+        Run(paths, null,
+            "INSERT INTO Conversations (Mode, Title, SystemPrompt, PresetId, AuthorsNote, AuthorsNoteDepth, Summary, MemoryEnabled, RecallEnabled, TurnOrder, Pinned, CreatedAt, UpdatedAt) " +
+            "VALUES ('general', 'Old chat', '', 'balanced', '', 4, '', 1, 1, 0, 0, '2026-11-18 09:00:00', '2026-11-18 09:00:00')");
+        Run(paths, null, "INSERT INTO Messages (ConversationId, Role, Content, CreatedAt) VALUES (1, 1, 'An old reply', '2026-11-18 09:00:00')");
+        // A clip from a first frame (megabytes, so its pages are spread through the file), one made with Faster at
+        // Better from a sentence, one that belongs to a message, and one kept and removed again.
+        var first = Sample(1, filler: 20_000);
+        var better = VideoRequest.For("A lake at dawn.", VideoQuality.Better, PictureShape.Tall, faster: true);
+        var second = Clip.Of(ClipOwners.Video, 0, VideoFiles.Wan22, better, new VideoResult(TestWebm.Make(832, 1216, 121, 5), 832, 1216, 121, 24, 55));
+        var third = Sample(3, kind: ClipOwners.Message, owner: 1, faster: true);
+        Assert.Equal([1L, 2L, 3L, 4L], new[] { first, second, third, Sample(4) }.Select(c => InsertM21(paths, null, c)));
+        Run(paths, null, "DELETE FROM Clips WHERE Id = 4");
+        Assert.Equal(M21Columns, Columns(paths));
+        // What M21's build asked the engine for, for each: the request as that build made it from the row.
+        var asked = new[] { first, second }.Select(c => SdApi.VideoBody(
+            new VideoRequest(c.Prompt, c.Width, c.Height, c.Seed, c.Decoder, c.StartFrame, c.NegativePrompt, c.Frames, c.Fps, c.Steps, c.Sampler, c.Guidance, c.FlowShift, c.Compression) { Faster = c.Faster },
+            c.Seed).ToJsonString()).ToList();
+
+        await Use(paths, null, async s =>
+        {
+            // The table was rebuilt: the new column sits after Faster, before the large values, which are still last.
+            var columns = Columns(paths);
+            Assert.Equal(NowColumns, columns);
+            Assert.Equal(["Faster", "Parts"], columns[16..18]);
+            Assert.Equal(["Still", "StartFrame", "Video"], columns[^3..]);
+
+            var page = await Store(s).PageAsync(ClipOwners.Video, 0);
+            Assert.Equal([2L, 1L], page.Clips.Select(c => c.Id));
+            // Every clip there was holds one clip, and says five seconds.
+            Assert.All(page.Clips, c => Assert.Equal((1, false, 121), (c.Parts, c.Joined, c.TotalFrames)));
+            Assert.Equal(1L, Run(paths, null, "SELECT COUNT(DISTINCT Parts) FROM Clips"));
+            var one = (await Store(s).GetAsync(1))!;
+            Assert.Equal(first.Video, one.Video);
+            Assert.Equal(first.Still, one.Still);
+            Assert.Equal(first.StartFrame, one.StartFrame);
+            Assert.Equal((first.Prompt, first.Seed, first.Video!.Length, first.StartFrame!.Length, new DateTime(2026, 11, 18, 9, 30, 0), false, 1),
+                (one.Prompt, one.Seed, one.VideoBytes, one.StartFrameBytes, one.CreatedAt, one.Faster, one.Parts));
+            var two = (await Store(s).GetAsync(2))!;
+            Assert.Equal(second.Video, two.Video);
+            Assert.Equal((VideoDecoder.Own, 832, 1216, 55L, true, 1), (two.Decoder, two.Width, two.Height, two.Seed, two.Faster, two.Parts));
+            Assert.True((await Store(s).FactsAsync(3))!.Faster);
+            Assert.StartsWith("960 × 640 · 5 s · Quick · seed ", VideoPanels.KeptMeta(one, DateTime.Now));
+
+            // The request each gives is the one M21's build gave: the body sent is the same text, Faster and all.
+            Assert.Equal(asked[0], SdApi.VideoBody(one.ToRequest(), one.Seed).ToJsonString());
+            Assert.Equal(asked[1], SdApi.VideoBody(two.ToRequest(), two.Seed).ToJsonString());
+            Assert.Contains("cache_mode", asked[1]);
+            Assert.DoesNotContain("cache_", asked[0]);
+            Assert.Empty(one.Problems());
+            Assert.Empty(two.Problems());
+            // Make one like this puts back what makes that request, and says nothing about joined clips.
+            var like = VideoLike.Of(one).Like!;
+            var again = VideoRequest.For(like.Sentence, like.Controls.Quality, like.Controls.Shape, like.Controls.Seed!.Value, like.Frame?.Bytes, like.Controls.Faster);
+            Assert.Equal(asked[0], SdApi.VideoBody(again, one.Seed).ToJsonString());
+            Assert.Equal(1, like.Parts);
+            Assert.Contains("Draw makes the same clip", VideoPanels.PutBack(like, true));
+
+            // The ids go on where the old table stopped: the removed clip's id is not given out again. A joined
+            // clip is kept beside the old ones.
+            var kept = await Store(s).AddAsync(Joined(9));
+            Assert.Equal(5, kept.Id);
+            Assert.Equal((2, 241), ((await Store(s).FactsAsync(5))!.Parts, (await Store(s).FactsAsync(5))!.TotalFrames));
+            Assert.Equal([2, 1, 1], (await Store(s).PageAsync(ClipOwners.Video, 0)).Clips.Select(c => c.Parts));
+
+            // Index and triggers are back: a deleted message still takes its clip along.
+            Assert.Equal(4L, Run(paths, null,
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('IX_Clips_OwnerKind_OwnerId', 'Clips_message_ad', 'Clips_character_ad', 'Clips_persona_ad')"));
+            Assert.Equal(0L, Run(paths, null, "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE '%Clips_new%'"));
+            Assert.NotNull(await Store(s).FactsAsync(3));
+            await s.GetRequiredService<IChatStore>().DeleteAsync(1);
+            Assert.Null(await Store(s).FactsAsync(3));
+        });
+    }
+
+    [Fact]
+    public async Task The_rebuild_from_m21_leaves_one_copy_of_a_clip_and_a_clip_removed_afterwards_is_gone()
+    {
+        var paths = Install("a");
+        await To(paths, null, M21);
+        // About 3 MB, as a real clip is.
+        var id = InsertM21(paths, null, Sample(1, filler: 25_000, faster: true));
+        Assert.Equal(1, Count(paths.Root, TestWebm.Marker));
+
+        await using var services = Open(paths, null);
+        await services.MigrateDogDatabaseAsync();
+        await services.GetRequiredService<DatabaseTidy>().SettledAsync();
+
+        // The old table's pages were given back wiped: the video, the still, the first frame and the sentence are
+        // each in the folder once, in the new table.
+        Assert.Equal(NowColumns, Columns(paths));
+        Assert.Equal(1, Count(paths.Root, TestWebm.Marker));
+        Assert.Equal(1, Count(paths.Root, StillMarker));
+        Assert.Equal(1, Count(paths.Root, FrameMarker));
+        Assert.Equal(1, Count(paths.Root, Encoding.UTF8.GetBytes(Word)));
+
+        await Store(services).DeleteAsync(id);
+        await services.GetRequiredService<DatabaseTidy>().SettledAsync();
+        Assert.False(HoldsClip(paths.Root));
+    }
+
+    [Fact]
+    public async Task Going_back_to_m21s_build_leaves_its_table_with_every_clip_and_working_triggers()
+    {
+        var paths = Install("a");
+        await using var services = Open(paths, null);
+        await services.MigrateDogDatabaseAsync();
+        var chats = services.GetRequiredService<IChatStore>();
+        var chat = await chats.CreateAsync(new Conversation { Title = "A chat" });
+        var message = await chats.AddMessageAsync(new ChatMessage { ConversationId = chat.Id, Role = ChatRole.Assistant, Content = "A reply" });
+        var plain = Sample(1, filler: 8000, faster: true);
+        var video = plain.Video!;
+        await Store(services).AddAsync(plain);
+        var sample = Joined(2);
+        var joinedVideo = sample.Video!;
+        var joined = await Store(services).AddAsync(sample);
+        await Store(services).AddAsync(Sample(3, kind: ClipOwners.Message, owner: message.Id));
+        var factory = services.GetRequiredService<IDbContextFactory<DogDbContext>>();
+
+        await using (var db = await factory.CreateDbContextAsync())
+            await db.GetService<IMigrator>().MigrateAsync(M21);
+
+        // M21's own table, column for column, with every clip in it, Faster still said, the joined one's video whole.
+        Assert.Equal(M21Columns, Columns(paths));
+        Assert.Equal(3L, Run(paths, null, "SELECT COUNT(*) FROM Clips"));
+        Assert.Equal(video, (byte[])Run(paths, null, "SELECT Video FROM Clips WHERE Id = 1")!);
+        Assert.Equal(1L, Run(paths, null, "SELECT Faster FROM Clips WHERE Id = 1"));
+        Assert.Equal(joinedVideo, (byte[])Run(paths, null, "SELECT Video FROM Clips WHERE Id = 2")!);
+        Assert.Equal(4L, Run(paths, null,
+            "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('IX_Clips_OwnerKind_OwnerId', 'Clips_message_ad', 'Clips_character_ad', 'Clips_persona_ad')"));
+        // Its triggers work: a deleted chat takes its message's clip along.
+        await chats.DeleteAsync(chat.Id);
+        Assert.Equal(2L, Run(paths, null, "SELECT COUNT(*) FROM Clips"));
+
+        // And forward again. A joined clip reads as one clip after the round trip (M21's table has no place for the
+        // number), with its whole video; nothing else changed.
+        await using (var db = await factory.CreateDbContextAsync())
+            await db.GetService<IMigrator>().MigrateAsync();
+        Assert.Equal(NowColumns, Columns(paths));
+        Assert.Equal(video, await Store(services).VideoAsync(1));
+        Assert.True((await Store(services).FactsAsync(1))!.Faster);
+        Assert.Equal(1, (await Store(services).FactsAsync(joined.Id))!.Parts);
+        Assert.Equal(joinedVideo, await Store(services).VideoAsync(joined.Id));
+        Assert.Equal(4, (await Store(services).AddAsync(Joined(4, parts: 3))).Id);
+    }
+
+    [Fact]
+    public async Task A_locked_database_from_m21_is_rebuilt_without_a_clip_touching_the_disk_in_the_clear()
+    {
+        var (paths, key) = LockedInstall("a", "pw");
+        await To(paths, key, M21);
+        var sample = Sample(1, filler: 8000, faster: true);
+        var (video, still, frame) = (sample.Video!, sample.Still!, sample.StartFrame!);
+        var id = InsertM21(paths, key, sample);
+        Assert.False(HoldsClip(paths.Root));
+
+        await Use(paths, key, async s =>
+        {
+            Assert.False(HoldsClip(paths.Root));
+            var read = (await Store(s).GetAsync(id))!;
+            Assert.Equal(video, read.Video);
+            Assert.Equal(still, read.Still);
+            Assert.Equal(frame, read.StartFrame);
+            Assert.Equal((true, 1), (read.Faster, read.Parts));
+            await Store(s).AddAsync(Joined(2));
+            Assert.False(HoldsJoined(paths.Root));
+        });
+
+        Assert.False(HoldsClip(paths.Root));
+        Assert.False(HoldsJoined(paths.Root));
+        Assert.Equal(DatabaseFileKind.Encrypted, DatabaseLock.KindOf(paths.DatabaseFile));
+        // Turning the lock off compares every table's rows, the rebuilt one among them.
+        DatabaseLock.Decrypt(paths.DatabaseFile, key);
+        await Use(paths, null, async s =>
+        {
+            Assert.Equal(video, await Store(s).VideoAsync(id));
+            Assert.Equal([2, 1], (await Store(s).PageAsync(ClipOwners.Video, 0)).Clips.Select(c => c.Parts));
+        });
+        Assert.True(HoldsJoined(paths.Root));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_backup_made_by_m21s_build_is_restored_and_its_clips_come_back(bool locked)
+    {
+        var (source, sourceKey) = locked ? LockedInstall("source", "backup password") : (Install("source"), null);
+        await To(source, sourceKey, M21);
+        var sample = Sample(1, filler: 6000, faster: true);
+        var (video, frame) = (sample.Video!, sample.StartFrame!);
+        InsertM21(source, sourceKey, sample);
+        var zip = Path.Combine(_root, "m21-backup.zip");
+        await DatabaseBackup.CreateAsync(source, zip, "1.0.0", key: sourceKey);
+
+        // Restored into today's DOG.ai, which has a joined clip of its own; the restore replaces it.
+        var here = Install("here");
+        await Use(here, null, async s => await Store(s).AddAsync(Joined(7).Also(c => c.Prompt = "Mine")));
+        await DatabaseBackup.StageAsync(here, zip, backupPassword: locked ? "backup password" : null);
+        Assert.NotNull(DatabaseBackup.ApplyPending(here));
+        byte[]? key = null;
+        if (locked)
+        {
+            Assert.Equal(DataLockState.Locked, DataLock.Look(here, out var file));
+            key = file!.OpenWithPassword("backup password")!;
+            DataLock.Settle(here, file, key);
+        }
+        DatabaseBackup.FinishRestore(here, key);
+        // As the backup left it: M21's table, until DOG.ai starts and brings it up to date.
+        Assert.Equal(locked, DatabaseLock.KindOf(here.DatabaseFile) == DatabaseFileKind.Encrypted);
+
+        await Use(here, key, async s =>
+        {
+            var clip = Assert.Single((await Store(s).PageAsync(ClipOwners.Video, 0)).Clips);
+            Assert.Equal((1L, true, 1), (clip.Id, clip.Faster, clip.Parts));
+            Assert.Contains(Word, clip.Prompt);
+            Assert.Equal(video, await Store(s).VideoAsync(1));
+            Assert.Equal(frame, await Store(s).StartFrameAsync(1));
+            Assert.Equal((2L, 3), ((await Store(s).AddAsync(Joined(2, parts: 3))).Id, (await Store(s).FactsAsync(2))!.Parts));
+        });
+        if (locked)
+        {
+            Assert.Equal(DatabaseFileKind.Encrypted, DatabaseLock.KindOf(here.DatabaseFile));
+            Assert.False(HoldsClip(here.DatabaseFile));
+            Assert.False(HoldsJoined(here.DatabaseFile));
+        }
+    }
+
+    // ---- Joined clips in the store (M22) ----
+
+    [Fact]
+    public async Task A_joined_clip_is_kept_with_how_many_clips_it_holds_and_comes_back_byte_for_byte()
+    {
+        var paths = Install("a");
+        await Use(paths, null, async s =>
+        {
+            var sample = Joined(1);
+            var (video, frame) = (sample.Video!, sample.StartFrame!);
+            Assert.Equal(241, WebmInfo.Read(video)!.Value.Frames);
+
+            var kept = await Store(s).AddAsync(sample);
+            var single = await Store(s).AddAsync(Sample(2));
+            var three = await Store(s).AddAsync(Joined(3, parts: 3));
+
+            var read = (await Store(s).GetAsync(kept.Id))!;
+            Assert.Equal(video, read.Video);
+            Assert.Equal(frame, read.StartFrame);
+            Assert.Equal((2, true, 121, 241, video.Length), (read.Parts, read.Joined, read.Frames, read.TotalFrames, read.VideoBytes));
+            Assert.Empty(read.Problems());
+            // What makes it again is its last part: a request of 121 frames with that part's first frame.
+            Assert.Equal(121, read.ToRequest().Frames);
+            Assert.Equal(frame, read.ToRequest().StartFrame);
+            Assert.Empty(read.ToRequest().Problems());
+            // Lists and facts say it without reading any video.
+            var page = await Store(s).PageAsync(ClipOwners.Video, 0);
+            Assert.Equal([3, 1, 2], page.Clips.Select(c => c.Parts));
+            Assert.Equal(["15 s", "5 s", "10 s"], page.Clips.Select(c => VideoPanels.Length(c.Seconds)));
+            Assert.All(page.Clips, c => Assert.Null(c.Video));
+            Assert.Equal((3, 361), ((await Store(s).FactsAsync(three.Id))!.Parts, (await Store(s).FactsAsync(three.Id))!.TotalFrames));
+            Assert.Equal(1, (await Store(s).FactsAsync(single.Id))!.Parts);
+
+            // The number of parts must be the video's: nothing else is kept.
+            async Task<string> Refused(Clip clip) => (await Assert.ThrowsAsync<InvalidOperationException>(() => Store(s).AddAsync(clip))).Message;
+            Assert.Contains("241 frames, not the 121 asked for", await Refused(Joined(5).Also(c => c.Parts = 1)));
+            Assert.Contains("241 frames, not the 361 that 3 joined clips", await Refused(Joined(5).Also(c => c.Parts = 3)));
+            Assert.Contains("121 frames, not the 241 that 2 joined clips", await Refused(Sample(5).Also(c => c.Parts = 2)));
+            Assert.Contains("A video holds between 1 and 3 clips.", await Refused(Joined(5).Also(c => c.Parts = 4)));
+            Assert.Contains("A video holds between 1 and 3 clips.", await Refused(Sample(5).Also(c => c.Parts = 0)));
+            // A joined video whose cue list was changed is not one DOG.ai wrote.
+            Assert.Contains("not written as DOG.ai writes one", await Refused(Joined(5).Also(c => c.Video![^1]++)));
+            Assert.Equal(3, (await Store(s).PageAsync(ClipOwners.Video, 0)).Total);
+        });
+    }
+
+    [Fact]
+    public async Task A_removed_joined_clip_is_gone_from_the_data_folder_every_part_of_it()
+    {
+        var paths = Install("a");
+        await using var services = Open(paths, null);
+        await services.MigrateDogDatabaseAsync();
+        // About 6 MB: two clips' frames.
+        var removed = await Store(services).AddAsync(Joined(1, filler: 25_000));
+        var staying = await Store(services).AddAsync(Sample(2, withFrame: false).Also(c => c.Still = null).Also(c => c.Prompt = "A lake at dawn."));
+        Assert.True(HoldsJoined(paths.Root));
+        Assert.True(Holds(paths.Root, JoinedFirst) && Holds(paths.Root, JoinedSecond));
+
+        await Store(services).DeleteAsync(removed.Id);
+        await services.GetRequiredService<DatabaseTidy>().SettledAsync();
+
+        Assert.False(Holds(paths.Root, JoinedFirst) || Holds(paths.Root, JoinedSecond));
+        Assert.False(Holds(paths.Root, FrameMarker) || Holds(paths.Root, StillMarker) || Holds(paths.Root, Encoding.UTF8.GetBytes(Word)));
+        Assert.NotNull(await Store(services).VideoAsync(staying.Id));
+    }
+
     [Fact]
     public async Task A_moved_portable_folder_needs_nothing_done_for_clips()
     {
         var paths = Install("a");
         var sample = Sample(faster: true);
         var video = sample.Video!;
+        var joined = Joined(2);
+        var joinedVideo = joined.Video!;
         long id = 0;
         await Use(paths, null, async s =>
         {
             id = (await Store(s).AddAsync(sample)).Id;
+            await Store(s).AddAsync(joined);
             await s.GetRequiredService<DogAI.Core.Settings.ISettingsStore>().SaveAsync(new DogAI.Core.Settings.AppSettings { ModelsDirectory = @"E:\old place\models" });
         });
 
@@ -606,6 +957,10 @@ public sealed class ClipStoreTests : IDisposable
             Assert.Equal(video, read.Video);
             Assert.Equal(VideoFiles.Wan22, read.Files);
             Assert.True(read.Faster);
+            // A joined clip too: its number of clips and its video, as they were.
+            var two = (await Store(s).GetAsync(id + 1))!;
+            Assert.Equal((2, VideoFiles.Wan22), (two.Parts, two.Files));
+            Assert.Equal(joinedVideo, two.Video);
             Assert.Equal(@"F:\new place\models\video", (await s.GetRequiredService<DogAI.Core.Settings.ISettingsStore>().LoadAsync()).VideoFolder());
         });
         // The text columns: the owner's kind, the two prompts, the sampler, the four file names and the date. The
@@ -824,7 +1179,7 @@ public sealed class ClipStoreTests : IDisposable
     public async Task A_backup_and_restore_bring_the_kept_clips_back(bool backupLocked, bool hereLocked)
     {
         var (source, sourceKey) = backupLocked ? LockedInstall("source", "backup password") : (Install("source"), null);
-        var samples = new[] { Sample(1, filler: 6000, faster: true), Sample(2, withFrame: false) };
+        var samples = new[] { Sample(1, filler: 6000, faster: true), Sample(2, withFrame: false), Joined(3) };
         var videos = samples.Select(c => c.Video!).ToList();
         var frame = samples[0].StartFrame!;
         await Use(source, sourceKey, async s =>
@@ -866,17 +1221,21 @@ public sealed class ClipStoreTests : IDisposable
         await Use(here, key, async s =>
         {
             var page = await Store(s).PageAsync(ClipOwners.Video, ClipOwners.VideoOwner);
-            Assert.Equal([2L, 1L], page.Clips.Select(c => c.Id));
-            // How each was made comes back with it (the first was made with Faster).
-            Assert.Equal([false, true], page.Clips.Select(c => c.Faster));
+            Assert.Equal([3L, 2L, 1L], page.Clips.Select(c => c.Id));
+            // How each was made comes back with it (the first was made with Faster; the third is two clips joined).
+            Assert.Equal([false, false, true], page.Clips.Select(c => c.Faster));
+            Assert.Equal([2, 1, 1], page.Clips.Select(c => c.Parts));
             Assert.Equal(videos[0], await Store(s).VideoAsync(1));
             Assert.Equal(videos[1], await Store(s).VideoAsync(2));
+            Assert.Equal(videos[2], await Store(s).VideoAsync(3));
+            Assert.Equal(241, WebmInfo.Read(videos[2])!.Value.Frames);
             Assert.Equal(frame, await Store(s).StartFrameAsync(1));
-            Assert.Equal(KeptPictureTests.Webp(384, 256, 2000, 1, StillMarker), page.Clips[1].Still);
-            Assert.Contains(Word, page.Clips[0].Prompt);
+            Assert.Equal(KeptPictureTests.Webp(384, 256, 2000, 1, StillMarker), page.Clips[2].Still);
+            Assert.Contains(Word, page.Clips[1].Prompt);
         });
         if (hereLocked)
         {
+            Assert.False(HoldsJoined(here.Root));
             Assert.False(HoldsClip(here.Root));
             Assert.False(Holds(here.Root, hereBefore));
         }

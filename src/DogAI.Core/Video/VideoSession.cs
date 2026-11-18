@@ -13,6 +13,15 @@ namespace DogAI.Core.Video;
 /// <param name="Expected">What the estimate said before it started, in seconds.</param>
 /// <param name="KeptId">The <see cref="Clip"/> row it was kept as, once kept.</param>
 /// <param name="Still">A small WebP of its first frame, made in the page (<see cref="PicturePreview"/>'s rules); null until made, or when it could not be.</param>
+/// <param name="Continues">
+/// The clip whose last frame this one started from (Continue the clip), when it was made that way in this run of
+/// DOG.ai; null otherwise. It is what "Join with the clip before" joins it with (M22). For a joined try: what its
+/// first part continued, so three clips made one after another join in two presses.
+/// </param>
+/// <param name="Parts">
+/// How many clips <see cref="Result"/> holds: 1 as made, 2 or 3 once joined (<see cref="VideoSession.Join"/>). A
+/// joined try's <see cref="Request"/> is its last part's; its result has all the frames (241 or 361).
+/// </param>
 public sealed record VideoTry(
     int Number,
     VideoRequest Request,
@@ -20,10 +29,18 @@ public sealed record VideoTry(
     TimeSpan Took,
     double Expected,
     long? KeptId = null,
-    byte[]? Still = null)
+    byte[]? Still = null,
+    VideoBefore? Continues = null,
+    int Parts = 1)
 {
-    /// <summary>The row to keep: this clip as it was made, with its still when there is one.</summary>
-    public Clip ToKeep() => Clip.Of(ClipOwners.Video, ClipOwners.VideoOwner, VideoFiles.Wan22, Request, Result, Still);
+    /// <summary>The row to keep: this clip as it was made, with its still when there is one. A joined try keeps its last part's request and says how many clips its video holds.</summary>
+    public Clip ToKeep() => Clip.Of(ClipOwners.Video, ClipOwners.VideoOwner, VideoFiles.Wan22, Request, Result, Still, Parts);
+
+    /// <summary>True for a clip joined from two or three.</summary>
+    public bool Joined => Parts > 1;
+
+    /// <summary>How long it plays, in seconds (all of its parts).</summary>
+    public double Seconds => Result.Fps > 0 ? Result.Frames / (double)Result.Fps : 0;
 
     public bool FromPicture => Request.StartFrame is not null;
 
@@ -35,6 +52,13 @@ public sealed record VideoTry(
 }
 
 /// <summary>
+/// The clip a last frame ended (M22): a try on the Make tab by its number, or a kept clip by its id. A clip made from
+/// that frame continues that clip, and only such a pair is ever joined. Memory only, like the frame that carries it:
+/// a kept row does not remember what it continued.
+/// </summary>
+public sealed record VideoBefore(int? Try = null, long? Kept = null);
+
+/// <summary>
 /// The picture a clip will start from, held in memory only until it is let go: the JPEG the page cut from a file (or,
 /// from step 5, a picture DOG.ai holds), already checked as a first frame for both qualities of its shape.
 /// </summary>
@@ -43,13 +67,14 @@ public sealed record VideoTry(
 /// True for the last frame of a clip (Continue the clip, M21): the next clip goes on where that one ended, and the
 /// page says what that costs (<see cref="VideoPanels.Continuation"/>).
 /// </param>
-public sealed record VideoFrame(byte[] Bytes, int Width, int Height, PictureShape Shape, string From, bool Continues = false)
+/// <param name="Ended">The clip this last frame ended, when DOG.ai knows it (M22); only with <paramref name="Continues"/>.</param>
+public sealed record VideoFrame(byte[] Bytes, int Width, int Height, PictureShape Shape, string From, bool Continues = false, VideoBefore? Ended = null)
 {
     /// <summary>
     /// The frame for these bytes, or why there is none: a WebP DOG.ai drew or a JPEG the page made (its colour profile
     /// taken out first), of one of the three shapes, acceptable to both Quick's and Better's size of that shape.
     /// </summary>
-    public static (VideoFrame? Frame, string? Problem) Of(byte[]? bytes, string from, bool continues = false)
+    public static (VideoFrame? Frame, string? Problem) Of(byte[]? bytes, string from, bool continues = false, VideoBefore? ended = null)
     {
         if (bytes is null || bytes.Length == 0) return (null, "It is not a picture DOG.ai can open (" + ComposerPictures.Kinds + ").");
         var plain = JpegInfo.Read(bytes) is not null ? AttachedPictures.Plain(bytes) : bytes;
@@ -60,7 +85,7 @@ public sealed record VideoFrame(byte[] Bytes, int Width, int Height, PictureShap
             var (w, h) = VideoRequest.SizeOf(quality, shape);
             if (VideoStartFrame.Problem(plain, w, h) is { } problem) return (null, problem);
         }
-        return (new VideoFrame(plain, size.Width, size.Height, shape, from, continues), null);
+        return (new VideoFrame(plain, size.Width, size.Height, shape, from, continues, continues ? ended : null), null);
     }
 
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<byte[], string> Addresses = new();
@@ -355,6 +380,9 @@ public sealed class VideoSession
     public async Task<VideoTry> MakeAsync(IVideoEngine engine, VideoModel model, VideoRequest request, VideoEstimate estimate, CancellationToken ct = default)
     {
         if (request.Problems() is { Count: > 0 } problems) throw new InvalidOperationException(string.Join(" ", problems));
+        // A clip that starts from the last frame held continues the clip that frame ended.
+        var continues = Frame is { Ended: { } ended } held && request.StartFrame is { } start
+            && (ReferenceEquals(start, held.Bytes) || start.AsSpan().SequenceEqual(held.Bytes)) ? ended : null;
         var cts = Take(ct);
         var run = ++_run;
         try
@@ -381,7 +409,8 @@ public sealed class VideoSession
             });
             var clock = System.Diagnostics.Stopwatch.StartNew();
             var result = await engine.MakeAsync(model, request with { Preview = true }, reporter, cts.Token).ConfigureAwait(false);
-            var made = new VideoTry(Interlocked.Increment(ref _number), request with { Seed = result.Seed, Preview = false }, result, clock.Elapsed, estimate.Total);
+            var made = new VideoTry(Interlocked.Increment(ref _number), request with { Seed = result.Seed, Preview = false }, result, clock.Elapsed, estimate.Total,
+                Continues: continues);
             Add(made);
             return made;
         }
@@ -392,6 +421,76 @@ public sealed class VideoSession
             (Progress, Preview, Estimate, Making, _part) = (null, null, null, null, VideoPart.None);
             Changed?.Invoke();
         }
+    }
+
+    // ── "Join with the clip before" (M22): two clips in one file, a new try beside them ──
+
+    /// <summary>
+    /// Why <paramref name="made"/> cannot be joined with the clip it continues, in words, or null when it can: it
+    /// continues nothing DOG.ai knows of, a clip is being made, the clip before is gone (let go from the strip, or
+    /// the kept video removed), the two are not the same size or length, or together they would hold more than
+    /// <see cref="VideoClips.MaxParts"/> clips.
+    /// </summary>
+    /// <param name="kept">
+    /// For a clip that continues a kept video (<see cref="VideoBefore.Kept"/>): that row as the store has it now
+    /// (its facts are enough here), or null when it has been removed. Not needed for one that continues a try.
+    /// </param>
+    public string? JoinProblem(VideoTry made, Clip? kept = null) => Before(made, kept, needVideo: false).Problem;
+
+    /// <summary>
+    /// Joins <paramref name="made"/> with the clip it continues into one file (<see cref="WebmJoin"/>: nothing is
+    /// decoded, nothing is sent anywhere) and puts the result into the strip as <b>a new try beside the two</b>, which
+    /// stay as they are. The new try is shown; its request is <paramref name="made"/>'s (the last part's), it holds
+    /// both clips' parts, and it remembers what the clip before continued. The joined file is checked as a kept one
+    /// is before it gets there.
+    /// </summary>
+    /// <param name="kept">For a clip that continues a kept video: that row, read with its video.</param>
+    /// <exception cref="InvalidOperationException">It cannot be joined; the message says why, in words.</exception>
+    public VideoTry Join(VideoTry made, Clip? kept = null)
+    {
+        var (problem, first, before) = Before(made, kept, needVideo: true);
+        if (problem is not null || first is null) throw new InvalidOperationException(problem ?? VideoPanels.JoinKeptGone);
+        var joined = WebmJoin.Join(first, made.Result.Webm, out var why) ?? throw new InvalidOperationException(why);
+        var parts = before.Parts + made.Parts;
+        // What a kept clip must be, asked before it is shown.
+        if (VideoClips.Problem(joined, made.Result.Width, made.Result.Height, made.Request.Frames, parts) is { } wrong)
+            throw new InvalidOperationException(wrong);
+        var info = WebmInfo.Read(joined)!.Value;
+        // Draw may have been pressed meanwhile: nothing is put into the strip under a clip being made.
+        if (IsMaking) throw new InvalidOperationException(VideoPanels.JoinWhileMaking);
+        var next = new VideoTry(Interlocked.Increment(ref _number), made.Request,
+            new VideoResult(joined, info.Width, info.Height, info.Frames, made.Result.Fps, made.Result.Seed),
+            TimeSpan.Zero, 0, KeptId: null, Still: before.Still, Continues: before.Continues, Parts: parts);
+        Add(next);
+        return next;
+    }
+
+    /// <summary>The clip <paramref name="made"/> continues, as joining needs it, or why there is none to join with.</summary>
+    private (string? Problem, byte[]? Video, (int Parts, byte[]? Still, VideoBefore? Continues) Before) Before(VideoTry made, Clip? kept, bool needVideo)
+    {
+        if (made.Continues is not { } before) return (VideoPanels.JoinNothing, null, default);
+        if (IsMaking) return (VideoPanels.JoinWhileMaking, null, default);
+        byte[]? video;
+        int width, height, frames, fps, parts;
+        byte[]? still;
+        VideoBefore? earlier;
+        if (before.Try is { } number)
+        {
+            if (_shown.FirstOrDefault(t => t.Number == number) is not { } held) return (VideoPanels.JoinBeforeGone, null, default);
+            (video, width, height, frames, fps, parts, still, earlier) =
+                (held.Result.Webm, held.Result.Width, held.Result.Height, held.Request.Frames, held.Result.Fps, held.Parts, held.Still, held.Continues);
+        }
+        else
+        {
+            if (kept is null || kept.Id != before.Kept || (needVideo && kept.Video is null)) return (VideoPanels.JoinKeptGone, null, default);
+            // A kept row does not remember what it continued.
+            (video, width, height, frames, fps, parts, still, earlier) = (kept.Video, kept.Width, kept.Height, kept.Frames, kept.Fps, kept.Parts, kept.Still, null);
+        }
+        if (width != made.Result.Width || height != made.Result.Height)
+            return (VideoPanels.JoinOtherSize(width, height, made.Result.Width, made.Result.Height), null, default);
+        if (frames != made.Request.Frames || fps != made.Result.Fps) return (VideoPanels.JoinOtherLength, null, default);
+        if (parts + made.Parts > VideoClips.MaxParts) return (VideoPanels.JoinTooMany(parts + made.Parts), null, default);
+        return (null, video, (parts, still, earlier));
     }
 
     private CancellationTokenSource Take(CancellationToken ct)
@@ -568,12 +667,14 @@ public static class VideoPanels
         var parts = new List<string>
         {
             $"{c.Width} × {c.Height}",
-            request.Seconds.ToString("0.#", CultureInfo.InvariantCulture) + " s",
+            Length(c.Seconds),
         };
+        if (c.Joined) parts.Add(ClipsJoined(c.Parts));
         if (request.Level is { } level) parts.Add(level.Quality.ToString());
         if (c.Faster) parts.Add(FasterName);
         parts.Add("seed " + c.Seed.ToString(CultureInfo.InvariantCulture));
-        if (c.HasStartFrame) parts.Add("from a picture");
+        // A joined clip's first frame in the row is its last part's: the end of the clip before, not a picture it began with.
+        if (c.HasStartFrame && !c.Joined) parts.Add("from a picture");
         parts.Add((c.VideoBytes / 1_000_000.0).ToString("0.0", CultureInfo.InvariantCulture) + " MB");
         parts.Add("kept " + keptLocal.ToString("d MMM yyyy, HH:mm", CultureInfo.InvariantCulture));
         return string.Join(" · ", parts);
@@ -585,11 +686,67 @@ public static class VideoPanels
         var seed = like.Controls.Seed?.ToString(CultureInfo.InvariantCulture) ?? "?";
         var what = like.Frame is null ? "sentence, quality, shape and seed" : "sentence, first frame, quality, shape and seed";
         var faster = like.Controls.Faster ? ", with Faster" : "";
+        var quick = like.Controls.Quality == VideoQuality.Better && !betterOffered;
+        // A joined clip keeps only its last part's request (the owner's decision, 2026-11-18): that is what comes back.
+        if (like.Parts > 1)
+            return $"The kept video is {ClipsJoined(like.Parts)}, and only its last clip can be made again. That clip’s {what} ({seed}) are back{faster}: " +
+                (quick ? "it was made at Better, which this card cannot make, so Draw makes the last five seconds again at Quick, not the whole video."
+                    : "Draw makes the last five seconds again, not the whole video.") +
+                " Press New seed under Seed for new ones.";
         var line = $"The kept video’s {what} ({seed}) are back{faster}: Draw makes the same clip. Press New seed under Seed for new ones.";
-        return like.Controls.Quality == VideoQuality.Better && !betterOffered
+        return quick
             ? line.Replace("Draw makes the same clip", "it was made at Better, which this card cannot make, so Draw makes it at Quick", StringComparison.Ordinal)
             : line;
     }
+
+    // ── Joined clips (M22) ──
+
+    /// <summary>"10 s": how long a clip plays, as its facts say it.</summary>
+    public static string Length(double seconds) => seconds.ToString("0.#", CultureInfo.InvariantCulture) + " s";
+
+    /// <summary>"2 clips joined", as a joined clip's facts say it.</summary>
+    public static string ClipsJoined(int parts) => $"{parts} clips joined";
+
+    /// <summary>The button on a clip that continues another.</summary>
+    public const string JoinName = "Join with the clip before";
+
+    /// <summary>
+    /// Said where clips are joined. The M21 trial: at the join the picture softens in one step and jumps a little (the
+    /// first frame after a given frame moves about twice as much as the others). Nothing smooths it: that would take
+    /// an encoder, and the frames are the clips' own.
+    /// </summary>
+    public const string JoinLine = "At each join the picture softens in one step and jumps a little; the clips’ own frames are kept as they are.";
+
+    /// <summary>The note on the Make tab after a join.</summary>
+    public static string JoinedNote(VideoTry joined) =>
+        $"Joined with the clip before: {ClipsJoined(joined.Parts)} in one file, {Length(joined.Seconds)}, as a new clip beside them. {JoinLine}";
+
+    /// <summary>In a joined kept clip's large view: what the row's sentence and first frame are.</summary>
+    public static string JoinedAbout(int parts) =>
+        $"This video is {ClipsJoined(parts)}. The sentence, the seed and the first frame shown are its last clip’s; the earlier clips’ are not kept.";
+
+    public const string JoinNothing = "This clip does not continue another, so there is nothing to join it with.";
+
+    public const string JoinWhileMaking = "A clip is being made. Join when it is done.";
+
+    /// <summary>The clip before was a try and the strip let it go (it holds <see cref="VideoSession.Max"/>).</summary>
+    public static readonly string JoinBeforeGone =
+        $"The clip before is not held any more (only the last {VideoSession.Max} clips are), so there is nothing to join this one with.";
+
+    public const string JoinKeptGone = "The kept video this clip continues has been removed, so there is nothing to join it with.";
+
+    public const string JoinOtherLength = "The clip before is not the same length as this one, so the two cannot be joined.";
+
+    public static string JoinOtherSize(int beforeWidth, int beforeHeight, int width, int height) =>
+        $"The clip before is {beforeWidth} × {beforeHeight} and this one {width} × {height}. Only clips of the same size can be joined.";
+
+    /// <summary>A fourth clip is refused: three in one file, 15 seconds, is the most.</summary>
+    public static string JoinTooMany(int parts) =>
+        $"A video holds at most {VideoClips.MaxParts} clips (15 seconds), and these together would be {parts}. The clip can still be kept and continued by itself.";
+
+    /// <summary>Added to the note after Continue the clip on a video that is full: the next clip cannot be joined to it.</summary>
+    public static readonly string ContinuedFull =
+        $" It holds {VideoClips.MaxParts} clips, which is the most one video holds: the next clip will stay a clip of its own.";
 
     /// <summary>The choice's name, as a clip's facts say it ("… · Quick · Faster · seed 123 · …").</summary>
     public const string FasterName = "Faster";
@@ -620,7 +777,7 @@ public static class VideoPanels
     public static string Continued(VideoContinue next, bool betterOffered) =>
         Arrived(next.Frame) + (next.Controls.Quality == VideoQuality.Better && !betterOffered
             ? " It was made at Better, which this card cannot make, so the next clip is made at Quick."
-            : "");
+            : "") + (next.Parts >= VideoClips.MaxParts ? ContinuedFull : "");
 
     public static bool OpensByDefault(string id) => Folds.FirstOrDefault(f => f.Id == id) is { Id: not null } f ? f.Open : true;
 
@@ -665,13 +822,15 @@ public static class VideoPanels
         {
             $"Try {t.Number}",
             $"{t.Result.Width} × {t.Result.Height}",
-            (t.Result.Fps > 0 ? (t.Result.Frames / (double)t.Result.Fps).ToString("0.#", CultureInfo.InvariantCulture) : "0") + " s",
+            Length(t.Seconds),
         };
+        if (t.Joined) parts.Add(ClipsJoined(t.Parts));
         if (t.Request.Level is { } level) parts.Add(level.Quality.ToString());
         if (t.Request.Faster) parts.Add(FasterName);
         parts.Add("seed " + t.Result.Seed.ToString(CultureInfo.InvariantCulture));
-        if (t.FromPicture) parts.Add("from a picture");
-        parts.Add("made in " + Duration(t.Took));
+        // A joined clip was not made in one go, and its first frame is its last part's: neither is said of it.
+        if (t.FromPicture && !t.Joined) parts.Add("from a picture");
+        if (!t.Joined) parts.Add("made in " + Duration(t.Took));
         if (t.KeptId is not null) parts.Add("kept");
         return string.Join(" · ", parts);
     }
@@ -725,7 +884,13 @@ public static class VideoPanels
 /// first frame.
 /// </summary>
 /// <param name="Frame">The first frame to hold, or null for a clip made from the sentence alone (any frame held is let go).</param>
-public sealed record VideoLike(string Sentence, VideoControls Controls, VideoFrame? Frame)
+/// <param name="Parts">
+/// How many clips the kept video holds. For a joined one (2 or 3) what goes back is its <b>last part</b> (all the
+/// row keeps): Draw makes the last five seconds again, not the whole video, and the note says so
+/// (<see cref="VideoPanels.PutBack"/>). The frame put back is an ordinary first frame: the clip made from it is not
+/// known to continue anything.
+/// </param>
+public sealed record VideoLike(string Sentence, VideoControls Controls, VideoFrame? Frame, int Parts = 1)
 {
     /// <summary>
     /// What a kept clip puts back, or why it cannot. The clip must have been read with its first frame
@@ -745,25 +910,29 @@ public sealed record VideoLike(string Sentence, VideoControls Controls, VideoFra
             shape = held.Shape;
         }
         var seed = clip.Seed is >= 0 and <= SeedChoice.Highest ? clip.Seed : (long?)null;
-        return (new VideoLike(clip.Prompt, new VideoControls(quality, shape, seed, clip.Faster), frame), null);
+        return (new VideoLike(clip.Prompt, new VideoControls(quality, shape, seed, clip.Faster), frame, Math.Max(1, clip.Parts)), null);
     }
 }
 
 /// <summary>
 /// "Continue the clip" (M21): what goes onto the Make tab so that the next clip starts where a clip ended: the clip's
 /// last frame as the first frame, its sentence (still in the box, for the owner to change), its quality and shape,
-/// whether it was Faster, and a new seed. The next clip is a clip of its own beside the first; the two are not joined.
+/// whether it was Faster, and a new seed. The next clip is a clip of its own beside the first; the two are joined only
+/// when the owner presses Join on the new one (M22), which is why the frame says which clip it ended
+/// (<see cref="VideoFrame.Ended"/>). A joined clip is continued like any other: its last frame is the file's end and
+/// its sentence and settings are its last part's.
 /// </summary>
 /// <param name="Frame">The clip's last frame, held as the next clip's first (<see cref="VideoFrame.Continues"/>).</param>
-public sealed record VideoContinue(string Sentence, VideoControls Controls, VideoFrame Frame)
+/// <param name="Parts">How many clips the continued video holds (at <see cref="VideoClips.MaxParts"/> the next clip cannot be joined to it).</param>
+public sealed record VideoContinue(string Sentence, VideoControls Controls, VideoFrame Frame, int Parts = 1)
 {
     /// <summary>From a try on the Make tab.</summary>
     public static (VideoContinue? Next, string? Problem) Of(VideoTry made, byte[]? lastFrame) =>
-        Of(made.Request, lastFrame, VideoPanels.FromTryEnd);
+        Of(made.Request, lastFrame, VideoPanels.FromTryEnd, new VideoBefore(Try: made.Number), made.Parts);
 
     /// <summary>From a kept clip (read with or without its video and first frame: neither is needed).</summary>
     public static (VideoContinue? Next, string? Problem) Of(Clip kept, byte[]? lastFrame) =>
-        Of(kept.ToRequest() with { StartFrame = null }, lastFrame, VideoPanels.FromKeptVideoEnd);
+        Of(kept.ToRequest() with { StartFrame = null }, lastFrame, VideoPanels.FromKeptVideoEnd, kept.Id > 0 ? new VideoBefore(Kept: kept.Id) : null, kept.Parts);
 
     /// <summary>
     /// What continues the clip <paramref name="made"/> asked for, or why it cannot be continued.
@@ -771,15 +940,17 @@ public sealed record VideoContinue(string Sentence, VideoControls Controls, Vide
     /// player's time set to the clip's length and drawn; quality 0.9, as chat pictures): it is checked as every first
     /// frame is, and must be the clip's size, since anything else is not that clip's frame.
     /// </summary>
-    public static (VideoContinue? Next, string? Problem) Of(VideoRequest made, byte[]? lastFrame, string from)
+    /// <param name="ended">The clip the frame ended, when it is one DOG.ai can find again (a try, a kept clip).</param>
+    /// <param name="parts">How many clips that video holds.</param>
+    public static (VideoContinue? Next, string? Problem) Of(VideoRequest made, byte[]? lastFrame, string from, VideoBefore? ended = null, int parts = 1)
     {
         if (lastFrame is null || lastFrame.Length == 0) return (null, "The clip’s last frame could not be read.");
-        var (frame, problem) = VideoFrame.Of(lastFrame, from, continues: true);
+        var (frame, problem) = VideoFrame.Of(lastFrame, from, continues: true, ended);
         if (frame is null) return (null, "The clip’s last frame cannot start a clip: " + problem);
         if (frame.Width != made.Width || frame.Height != made.Height)
             return (null, $"The last frame read is {frame.Width} × {frame.Height}, not the clip’s {made.Width} × {made.Height}.");
         var quality = made.Level?.Quality ?? (made.Decoder == VideoDecoder.Own ? VideoQuality.Better : VideoQuality.Quick);
         // A new seed: the clip's own seed would start the same motion over from where it ended.
-        return (new VideoContinue(made.Prompt, new VideoControls(quality, frame.Shape, Seed: null, made.Faster), frame), null);
+        return (new VideoContinue(made.Prompt, new VideoControls(quality, frame.Shape, Seed: null, made.Faster), frame, Math.Max(1, parts)), null);
     }
 }

@@ -160,6 +160,9 @@ public sealed partial class DogDbContext(DbContextOptions<DogDbContext> options)
             e.Property(c => c.FastDecoder).HasMaxLength(400);
             e.Ignore(c => c.HasStartFrame);
             e.Ignore(c => c.Files);
+            e.Ignore(c => c.Joined);
+            e.Ignore(c => c.TotalFrames);
+            e.Ignore(c => c.Seconds);
         });
         model.Entity<ModelRecord>(e =>
         {

@@ -7,7 +7,7 @@ namespace DogAI.Data;
 /// Kept clips (M20), in the Clips table of the one database. Nothing else is written anywhere: no file beside the
 /// database, no still cache. So whatever covers the database (the lock, backups, restore, a moved portable folder)
 /// covers clips too. A clip reaches the disk only through <see cref="AddAsync"/>, and only as a WebM that passes
-/// <see cref="VideoClips.Problem(byte[], int, int, int)"/>.
+/// <see cref="VideoClips.Problem(byte[], int, int, int, int)"/>.
 /// </summary>
 /// <remarks>
 /// The three large values are the last columns, the video last of all: SQLite keeps a large value in a chain of pages
@@ -36,6 +36,7 @@ public sealed class SqliteClipStore(IDbContextFactory<DogDbContext> factory, Dat
         Decoder = c.Decoder,
         Compression = c.Compression,
         Faster = c.Faster,
+        Parts = c.Parts,
         Model = c.Model,
         Vae = c.Vae,
         TextEncoder = c.TextEncoder,

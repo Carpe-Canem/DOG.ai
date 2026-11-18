@@ -63,6 +63,14 @@ public sealed class Clip
     /// </summary>
     public bool Faster { get; set; }
 
+    /// <summary>
+    /// How many clips <see cref="Video"/> holds (M22): 1 for a clip as it was made, 2 or 3 for a clip joined with the
+    /// clips it continues (<see cref="WebmJoin"/>). 1 on every clip kept before M22. Everything else in the row is
+    /// the <b>last</b> part's: its sentence, seed, settings and first frame, and <see cref="Frames"/> is one part's
+    /// frames. The earlier parts' sentences, seeds and first frames are not kept (the owner's decision, 2026-11-18).
+    /// </summary>
+    public int Parts { get; set; } = 1;
+
     /// <summary>The model's four files, each as its path inside its own folder (<see cref="VideoFiles"/>).</summary>
     public string Model { get; set; } = "";
     public string Vae { get; set; } = "";
@@ -91,10 +99,22 @@ public sealed class Clip
 
     public bool HasStartFrame => StartFrameBytes > 0;
 
+    /// <summary>True for a clip joined from two or three.</summary>
+    public bool Joined => Parts > 1;
+
+    /// <summary>How many frames the video holds: <see cref="Frames"/> for a single clip, 241 or 361 for a joined one.</summary>
+    public int TotalFrames => VideoClips.FramesOf(Frames, Parts);
+
+    /// <summary>How long the video plays, in seconds (all of its parts).</summary>
+    public double Seconds => VideoClips.SecondsOf(Frames, Fps, Parts);
+
     public VideoFiles Files => new(Model, Vae, TextEncoder, FastDecoder);
 
-    /// <summary>A finished clip, ready to keep. <paramref name="files"/> names the model it was made with.</summary>
-    public static Clip Of(string ownerKind, long ownerId, VideoFiles files, VideoRequest request, VideoResult result, byte[]? still = null)
+    /// <summary>
+    /// A finished clip, ready to keep. <paramref name="files"/> names the model it was made with. For a joined clip
+    /// <paramref name="request"/> is its last part's and <paramref name="parts"/> says how many clips the video holds.
+    /// </summary>
+    public static Clip Of(string ownerKind, long ownerId, VideoFiles files, VideoRequest request, VideoResult result, byte[]? still = null, int parts = 1)
     {
         var named = files.Normalised();
         return new Clip
@@ -115,6 +135,7 @@ public sealed class Clip
             Decoder = request.Decoder,
             Compression = request.Compression,
             Faster = request.Faster,
+            Parts = parts,
             Model = named.Model,
             Vae = named.Vae,
             TextEncoder = named.TextEncoder,
@@ -127,7 +148,10 @@ public sealed class Clip
         };
     }
 
-    /// <summary>The request that makes this clip again: same seed, settings and first frame. Needs <see cref="StartFrame"/> read when the clip had one.</summary>
+    /// <summary>
+    /// The request that makes this clip again: same seed, settings and first frame. Needs <see cref="StartFrame"/>
+    /// read when the clip had one. For a joined clip it makes the <b>last part</b> again, never the whole video.
+    /// </summary>
     public VideoRequest ToRequest() =>
         new(Prompt, Width, Height, Seed, Decoder, StartFrame, NegativePrompt, Frames, Fps, Steps, Sampler, Guidance, FlowShift, Compression) { Faster = Faster };
 
@@ -140,7 +164,7 @@ public sealed class Clip
         var problems = new List<string>();
         if (string.IsNullOrWhiteSpace(OwnerKind) || OwnerKind.Length > ClipOwners.MaxKindLength)
             problems.Add("The video does not say what it belongs to.");
-        if (VideoClips.Problem(Video, Width, Height, Frames) is { } video) problems.Add(video);
+        if (VideoClips.Problem(Video, Width, Height, Frames, Parts) is { } video) problems.Add(video);
         // The same rules as a kept picture's preview: a small WebP of the clip's shape with nothing in it but the picture.
         if (Still is not null && PicturePreview.Problem(Still, Width, Height) is not null)
             problems.Add("The still is not a small WebP of the video’s first frame.");
