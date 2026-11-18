@@ -984,8 +984,44 @@ Each ends with a runnable app, passing tests, and a git commit.
 | M20 ✅ | Video | A Video section: a short clip from a sentence or from a picture as its first frame, kept clips, and "Animate this picture" wherever a picture lives. Trial first (details below). Planned 2026-11-16; **all six steps done 2026-11-17** |
 | M21 ✅ | Video, second round | Continue the clip from its last frame; Write it for me for video; a choice "Faster" (the trial: about a third faster at Quick, a quarter at Better, the same clip to the eye); the loose ends of M20 (guests take a card turn, smaller cards, the memory rise, small ones). **No end frame and no loops: the trial showed the installed model does not take one.** Trial first (details below). Planned 2026-11-17; finished 2026-11-18 |
 | M22 | Joined clips, and the helper's animals | A continued clip can be joined with the clip before it into one file of 10 or 15 seconds, without an encoder (a new clip beside the others, never in place); the video helper stops calling plain animals "anthropomorphic" (one rule reworded, chosen by a clip trial). Details below. Planned 2026-11-18 |
+| M23 | More memory: measure again, no fixed limits | The PC goes from 32 to 64 GB of RAM (2026-11-19). Everything chosen by measuring on 32 GB is measured again on 64 GB, and on 32 and 16 GB by locking RAM away, so no rule ends up tuned to one PC. After M22. Details below. Proposed 2026-11-18 |
 
 Possible later additions, not planned: local OpenAI-compatible API for other tools. (Image understanding became M17.)
+
+## M23: More memory: measure again, no fixed limits (proposed 2026-11-18; after M22)
+
+**Why.** Every milestone so far was measured on 32 GB of RAM. The PC gets 64 GB on 2026-11-19. The owner wants two things: the choices that 32 GB forced looked at again, and DOG.ai working on any PC that has enough, with no limit built in for one machine.
+
+**What is there today (read 2026-11-18).** No rule is fixed to 32 GB. Every RAM check reads the RAM free at that moment and compares it with what the work needs:
+- the fit badges use free graphics memory plus free RAM, less `FitBudget.RamMargin` (4 GB);
+- a video made by a plan asks `VideoMemory.RamEnough` for `PlannedRamNeed` (12 GB free);
+- `CardMeter` reads free RAM through `HardwareProbe.FreeRam`.
+
+With more RAM these relax by themselves. **But several choices were picked by measuring on 32 GB**, and may be wrong on 64:
+
+1. **The video engine never gets `--offload-to-cpu` or `--mmap`** (`VideoServer.Arguments`). On 32 GB they left 2.7 GB of RAM free and were slower. The start-switch lists are pinned by tests.
+2. **Better on a crowded or smaller card is refused** (`VideoMemory.LeastNeed` is Better's whole need). With a plan of 10 GB, the model's own decoder had not ended after nine minutes and free RAM fell to 1.8 GB (M20 step 6), which looks like RAM starvation. With 64 GB, Better made by a plan, and so Better on 16 GB cards, may become possible.
+3. **The plan caps** `PlanCap` (10 GB, fast decoder) and `PlanCapOwnDecoder` (13 GB). The engine decides where the model goes by the free RAM it finds, less 2 GB: under about 11.3 GB free it put the model on a card that had no room; from 17 GB free it kept the model and the text encoder in RAM (M21 step 5). With 40+ GB free the engine may choose differently at every plan.
+4. **The guests on the processor while a clip is made** (the search model, the speech model; M21 step 5). They were timed beside a clip on 32 GB.
+5. **A chat model set aside for a picture or a clip** loads again from disk. With more RAM, Windows may keep the file in memory and the return is faster. `VideoEstimate.IsWarm` and the estimates were measured on 32 GB.
+6. **Large chat models** (Qwen3.6 35B-A3B, the 40B, Gemma 4 31B) will be judged differently by the fit badges, and partial offload speeds were never measured with that much free RAM. DOG.ai does not use llama.cpp's MoE offload (`--n-cpu-moe`), which keeps the experts in RAM and can make a 35B-A3B fast. **That would be a new feature, for the owner to decide**, not part of the re-measuring.
+7. **`FitBudget.RamGbps` = 60** (dual-channel DDR5) is a fixed guess at RAM speed. It does not depend on how much RAM there is, but it is a built-in assumption about one kind of PC. A measurement at start may replace it.
+
+**Settled already:**
+- Rules stay "measure what is free, compare with what the work needs". **No number is retuned to 64 GB**; a number changes only when a measurement shows the need itself was wrong.
+- Smaller PCs stay covered. After the upgrade this PC can no longer be a 32 GB one, so every check that depends on RAM is also run **with RAM locked away to leave 32 GB and 16 GB**. The small program that `VirtualAlloc`s and `VirtualLock`s memory (M21 step 5, in `CLAUDE.md`) does this. Pages a program merely touches are paged out and prove nothing.
+- A PC with less RAM than a job needs is told so in words, as today (`TooLittleRam`). It is never refused because of a total.
+- Offline as ever. Nothing is downloaded without asking, each file by name and size.
+
+**Steps** (one per session, as always):
+
+| # | Step | Delivers | Model / effort |
+|---|---|---|---|
+| 1 | **Trial** (no app code) | Each of the seven items above measured on 64 GB and again with RAM locked to 32 and 16 GB: video clips with and without `--offload-to-cpu` / `--mmap`, Better and Quick by plans of 6 to 13 GB with another program on the card (the M20/M21 method), the guests beside a clip, a set-aside chat model's return, the large chat models' load and speed with partial offload, RAM speed. Each with time, card, free RAM and the engine's own lines. The results and a list of proposed changes go into this plan for the owner. | Opus 5.5, high |
+| 2 | **Changes the trial calls for** | Only what the trial and the owner's answers ask for. For example: start switches chosen by free RAM, Better by a plan when free RAM allows, the plan caps, the estimates, RAM speed measured. The pinned start-switch tests change with it, and a plain clip on a free card stays byte for byte M20's request. | Fable 5.2, xhigh |
+| 3 | **Finish** | The changed things checked in the app at 64, 32 and 16 GB (RAM locked away), three looks for any changed screen, `CLAUDE.md`, this plan's Status. | Fable 5.2, high |
+
+**For the owner to decide** (at the end of step 1): whether MoE offload for large chat models becomes a step of its own.
 
 ## M22: Joined clips, and the helper's animals (planned with the owner 2026-11-18)
 
