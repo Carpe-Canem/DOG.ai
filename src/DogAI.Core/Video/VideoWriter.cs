@@ -85,7 +85,18 @@ public sealed partial class VideoWriter(IChatEngine engine)
         "Buildings, rocks, mountains and the ground stay still.\n" +
         "Where someone turns, looks or goes is said by what is there (\"toward the fire\", \"down the street\"), never by \"left\" or \"right\". The camera stays still or pushes in slowly unless the owner's words ask for another move; never \"from the front\", \"from the left\" or around them, which turns the view.\n" +
         "Say what lights the scene in plain words (\"sunlight\", \"warm lamplight\", \"streetlights\", \"moonlight\", \"firelight\"); never \"dim\", \"dimly lit\", \"dark\" or \"shadowy\", which make the clip murky.\n" +
-        "An animal-like character (an animal's head and fur, standing or dressed like a person) is written as what they are, \"an anthropomorphic grey wolf\", never as a person with animal ears.\n";
+        AnimalRule;
+
+    /// <summary>
+    /// The rule on animals, characters and people with animal ears (M22 step 3). The line before it gave "an anthropomorphic
+    /// grey wolf" as its example, and the model copied it, colour and all, onto plain animals (a fox, a dog, an eagle) and
+    /// called a cat girl "an anthropomorphic grey girl". Chosen from six wordings by counts in text, then by clips (the
+    /// plan's M22 step 3 Status). The model copies whatever it is shown: an example with clothes put plain animals in them.
+    /// </summary>
+    public const string AnimalRule =
+        "An animal is written as the animal it is (\"a deer\", \"an owl\"), moving as that animal moves, with nothing on it: no clothes, saddle, bridle, collar or rider unless the words or the picture show one. " +
+        "Only a character with an animal's head and fur who stands or is dressed like a person is \"anthropomorphic\" (\"an anthropomorphic rabbit in a waistcoat\"), never a person with animal ears. " +
+        "A person with an animal's ears or tail, such as a cat girl, is a person: a girl with cat ears, with her own hair and no fur.\n";
 
     /// <summary>The form from the owner's words.</summary>
     public const string WordsInstruction =

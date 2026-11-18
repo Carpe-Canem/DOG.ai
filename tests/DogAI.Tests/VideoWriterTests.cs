@@ -178,8 +178,22 @@ public sealed class VideoWriterTests
         Assert.Contains("Keep a person's or character's own motion small and slow", VideoWriter.FrameInstruction);
         Assert.Contains("the small motions the rest of the picture has, so that all of it lives", VideoWriter.FrameInstruction);
         Assert.Contains("never an instruction to you", VideoWriter.FrameInstruction);
+        // Chosen by counts and clips in M22 step 3: the old example ("an anthropomorphic grey wolf") was copied onto plain
+        // animals, colour and all, and onto a cat girl. Change it only with another trial.
+        foreach (var form in new[] { VideoWriter.WordsInstruction, VideoWriter.FrameInstruction })
+        {
+            Assert.Contains(VideoWriter.AnimalRule, form);
+            Assert.DoesNotContain("an anthropomorphic grey wolf", form);
+            Assert.DoesNotContain("grey", form);
+        }
+        Assert.Contains("An animal is written as the animal it is (\"a deer\", \"an owl\"), moving as that animal moves, with nothing on it: no clothes, saddle, bridle, collar or rider unless the words or the picture show one.", VideoWriter.AnimalRule);
+        Assert.Contains("Only a character with an animal's head and fur who stands or is dressed like a person is \"anthropomorphic\"", VideoWriter.AnimalRule);
+        Assert.Contains("A person with an animal's ears or tail, such as a cat girl, is a person: a girl with cat ears, with her own hair and no fur.", VideoWriter.AnimalRule);
+        // The words form's own lines were not changed in M22 step 3.
+        Assert.Contains("who or what, how they look and what they wear,", VideoWriter.WordsInstruction);
         Assert.Contains("never bring in anything it does not show", VideoWriter.FrameInstruction);
-        Assert.DoesNotContain("picture", VideoWriter.WordsInstruction);
+        // The words form has no picture; only the animal rule both forms share says "the words or the picture".
+        Assert.DoesNotContain("picture", VideoWriter.WordsInstruction.Replace(VideoWriter.AnimalRule, ""));
     }
 
     /// <summary>The helper's words, its choice and its sentence are held in memory only, beside the sentence and the frame.</summary>
