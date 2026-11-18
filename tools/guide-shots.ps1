@@ -130,6 +130,9 @@ function Before-Shot($shot) {
   s.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}';
   document.activeElement?.blur?.();
   document.getElementById('guide-marks')?.remove();
+  // Every picture on the page drawn first (avatars, kept pictures): one still loading made a picture differ between runs.
+  for (let i = 0; i < 50 && [...document.images].some(im => !im.complete); i++) await new Promise(r => setTimeout(r, 100));
+  await Promise.all([...document.images].map(im => im.decode?.().catch(() => {})));
   await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
   const out = { missing: [], found: [], volatile: [] };
   const layer = document.createElement('div'); layer.id = 'guide-marks';
@@ -202,6 +205,16 @@ foreach ($group in $groups) {
         $steps.Add(@{ eval = (Before-Shot $shot) })
         $steps.Add(@{ shot = $shot.name })
         $steps.Add(@{ eval = "document.getElementById('guide-marks')?.remove(); 'unmarked'" })
+        # A shot that changes the look puts back the one a new folder starts with (Workbench, Match Windows), or every shot after it in the
+        # same run would show the look it left.
+        if (($shot.steps | ConvertTo-Json -Depth 5 -Compress) -match 'name=(skin|theme)') {
+            $steps.Add(@{ eval = "Blazor.navigateTo('settings/appearance'); 'GUIDE-NAV'" })
+            $steps.Add(@{ wait = 1200 })
+            $steps.Add(@{ eval = "document.querySelector('input[name=skin][value=workbench]').click(); 'ok'" })
+            $steps.Add(@{ wait = 800 })
+            $steps.Add(@{ eval = "document.querySelector('input[name=theme][value=system]').click(); 'ok'" })
+            $steps.Add(@{ wait = 1200 })
+        }
     }
     $log = & (Join-Path $PSScriptRoot 'walkthrough.ps1') -Exe "$GuideHome\app\DOG.ai.exe" -Portable -OutDir $work -Width $w -Height $h -Port $Port -Steps $steps.ToArray() *>&1 | Out-String -Width 100000
     $log -split "`r?`n" | Where-Object { $_ -match 'GUIDE-TIMEOUT|GUIDE-STILL-OPEN|EVAL ERROR|TARGET NOT FOUND|not loaded' } | ForEach-Object { "  $_" }

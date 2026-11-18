@@ -18,11 +18,14 @@ using System.Windows.Media.Imaging;
 using DogAI.Core;
 using DogAI.Core.Characters;
 using DogAI.Core.Chat;
+using DogAI.Core.Documents;
+using DogAI.Core.Stories;
 using DogAI.Core.Images;
 using DogAI.Core.Models;
 using DogAI.Core.Settings;
 using DogAI.Core.Video;
 using DogAI.Data;
+using DogAI.Engine;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -114,14 +117,191 @@ static class Fill
         var clips = services.GetRequiredService<IClipStore>();
         foreach (var c in AllClips(assets)) await clips.AddAsync(c);
 
-        await SettleTimesAsync(services);
+        // Everything below was added for the chat pages (M23 step 2). It gets its times after everything above, so the
+        // pictures made before it keep theirs.
+        var first = await FirstNewAsync(services);
+        await ChatPagesAsync(services, assets, chats, characters, biscuit, mara, pictures);
+
+        await SettleTimesAsync(services, first);
+    }
+
+    private static async Task ChatPagesAsync(IServiceProvider services, string assets, IChatStore chats, ICharacterStore characters,
+        Character biscuit, Character mara, IPictureStore pictures)
+    {
+        // Biscuit's lore.
+        var lore = Lorebook.For(biscuit);
+        foreach (var (name, keys, words) in Content.BiscuitLore)
+            lore.Entries.Add(new LoreEntry { Name = name, Keys = [.. keys], Content = words });
+        lore.SaveTo(biscuit);
+        await characters.SaveAsync(biscuit);
+
+        // A second version of the coastal walk's reply ("2 of 2").
+        var coastal = (await chats.ListAsync("general")).Single(c => c.Title == Content.GeneralChats[1].Title);
+        var question = (await chats.GetMessagesAsync(coastal.Id)).First(m => m.Role == ChatRole.User);
+        var again = await chats.AddMessageAsync(new ChatMessage
+        {
+            ConversationId = coastal.Id, ParentId = question.Id, Role = ChatRole.Assistant, Content = Content.CoastalWalkAgain,
+            ModelName = ModelName,
+        });
+        await chats.SetActiveLeafAsync(coastal.Id, again.Id);
+
+        // A chat with Mara: a summary of its start, a picture on her last reply.
+        var withMara = await chats.CreateAsync(new Conversation { Mode = "characters", Title = "Mara", CharacterId = mara.Id });
+        var maraIds = await AddTurnsAsync(chats, withMara.Id, Content.MaraChat.Select(t => (t.Role, t.Text, (long?)null)));
+        await chats.SetSummaryAsync(withMara.Id, Content.MaraSummary, maraIds[1]);
+        await IllustrateAsync(chats, pictures, assets, "harbour-sunrise", maraIds[^1], new StoryTurn());
+
+        // A question with a picture, and a reply that thought first.
+        var photo = await chats.CreateAsync(new Conversation { Mode = "general", Title = Content.PhotoTitle });
+        var asked = await chats.AddMessageAsync(new ChatMessage { ConversationId = photo.Id, Role = ChatRole.User, Content = Content.PhotoQuestion });
+        await services.GetRequiredService<IAttachedPictureStore>().AddAsync(asked.Id, [ChatJpeg(Path.Combine(assets, "pictures", "harbour-sunrise.webp"))]);
+        var answered = await chats.AddMessageAsync(new ChatMessage
+        {
+            ConversationId = photo.Id, ParentId = asked.Id, Role = ChatRole.Assistant, Content = Content.PhotoReply,
+            Reasoning = Content.PhotoThinking, ModelName = ModelName,
+        });
+        await chats.SetActiveLeafAsync(photo.Id, answered.Id);
+
+        // A document collection with one file, and a chat that searches it and cites it.
+        var collections = services.GetRequiredService<ICollectionStore>();
+        var collection = await collections.CreateAsync(new DocumentCollection { Name = Content.CollectionName, Description = Content.CollectionNotes });
+        var bytes = System.Text.Encoding.UTF8.GetBytes(Content.DocumentText.Replace("\r\n", "\n"));
+        var text = TextExtractor.Read(Content.DocumentName, bytes);
+        var pieces = Chunker.Split(text);
+        var document = await collections.AddDocumentAsync(new SourceDocument
+        {
+            CollectionId = collection.Id, FileName = Content.DocumentName, Kind = text.Kind, SizeBytes = bytes.LongLength,
+            Sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(),
+            Text = text.Text, PageCount = text.PageStarts.Count, Status = DocumentStatus.Waiting, AddedAt = DateTime.UtcNow,
+        }, pieces.Select((c, i) => new DocumentChunk { Ordinal = i, Start = c.Start, Length = c.Length, Page = c.Page, Heading = c.Heading, Text = c.Text }).ToList());
+        // Indexed here with the real document search model (the engine and the model are linked in already), so the app
+        // does not load that model at start to index it: that would change every picture of Models' side panel.
+        using (var embedder = new EmbeddingServer(new LoopbackHttp(), new LlamaServerLocator(services.GetRequiredService<AppPaths>()),
+            services.GetRequiredService<ISettingsStore>(), services.GetRequiredService<IModelRecordStore>()))
+        {
+            var library = new DocumentLibrary(collections, embedder);
+            library.StartIndexing();
+            await library.WaitForIndexingAsync();
+            if ((await collections.DocumentsAsync(collection.Id)).Any(d => d.Status != DocumentStatus.Ready))
+                throw new InvalidOperationException("The made-up document was not indexed: " + library.Problem);
+            await embedder.StopAsync();
+        }
+        var stored = await collections.ChunksToIndexAsync(document.Id, "guide");
+        foreach (var c in stored) Console.WriteLine($"passage {c.Id}: {c.Heading} ({c.Text.Length} characters)");
+        DocumentChunk Passage(string words) => stored.First(c => c.Text.Contains(words, StringComparison.Ordinal));
+
+        var ferry = await chats.CreateAsync(new Conversation { Mode = "general", Title = Content.FerryTitle });
+        await collections.SetAttachedAsync(ferry.Id, [collection.Id]);
+        var ferryQuestion = await chats.AddMessageAsync(new ChatMessage { ConversationId = ferry.Id, Role = ChatRole.User, Content = Content.FerryQuestion });
+        var ferries = Passage("19:00");
+        var tickets = Passage("checked again");
+        var sources = new ReplySources
+        {
+            Passages =
+            [
+                new SourcePassage(1, ferries.Id, document.Id, Content.DocumentName, ferries.Page, ferries.Heading, 0.71f),
+                new SourcePassage(2, tickets.Id, document.Id, Content.DocumentName, tickets.Page, tickets.Heading, 0.58f),
+            ],
+        };
+        var ferryReply = await chats.AddMessageAsync(new ChatMessage
+        {
+            ConversationId = ferry.Id, ParentId = ferryQuestion.Id, Role = ChatRole.Assistant, Content = Content.FerryReply,
+            ModelName = ModelName, SourcesJson = sources.ToJson(),
+        });
+        await chats.SetActiveLeafAsync(ferry.Id, ferryReply.Id);
+
+        // An adventure: three passages, a path not taken at the first choice, choices after the last, a picture.
+        var stories = services.GetRequiredService<IStoryStore>();
+        var adventure = await chats.CreateAsync(new Conversation { Mode = Story.Mode, Title = Content.AdventureTitle });
+        await stories.SaveAsync(new Story
+        {
+            ConversationId = adventure.Id, Kind = StoryKind.Interactive, Bible = Content.AdventureBible, TrackState = true, Dice = true,
+        });
+        var opening = await AddAsync(chats, adventure.Id, null, ChatRole.Assistant, Content.AdventureOpening, new StoryTurn
+        {
+            Choices = [.. Content.AdventureFirstChoices.Select(c => new StoryChoice { Text = c })], State = Content.AdventureState(0),
+        });
+        var keep = await AddAsync(chats, adventure.Id, opening.Id, ChatRole.User, Content.AdventureOtherPath);
+        await AddAsync(chats, adventure.Id, keep.Id, ChatRole.Assistant, Content.AdventureOtherPassage, new StoryTurn { State = Content.AdventureState(1) });
+        var ask = await AddAsync(chats, adventure.Id, opening.Id, ChatRole.User, Content.AdventureAsk);
+        var second = await AddAsync(chats, adventure.Id, ask.Id, ChatRole.Assistant, Content.AdventureSecond, new StoryTurn { State = Content.AdventureState(1) });
+        var walk = await AddAsync(chats, adventure.Id, second.Id, ChatRole.User, Content.AdventureWalk);
+        var third = await AddAsync(chats, adventure.Id, walk.Id, ChatRole.Assistant, Content.AdventureThird);
+        await IllustrateAsync(chats, pictures, assets, "cliff-path", third.Id, new StoryTurn
+        {
+            Choices = [.. Content.AdventureLastChoices.Select(c => new StoryChoice { Text = c.Text, Risky = c.Risky })],
+            State = Content.AdventureState(2),
+        });
+        await chats.SetActiveLeafAsync(adventure.Id, third.Id);
+
+        // A written story along a three-chapter outline, two chapters in.
+        var written = await chats.CreateAsync(new Conversation { Mode = Story.Mode, Title = Content.WrittenTitle });
+        await stories.SaveAsync(new Story
+        {
+            ConversationId = written.Id, Kind = StoryKind.Authored, Bible = Content.WrittenBible,
+            Outline = [.. Content.WrittenOutline.Select(c => new StoryChapter { Title = c.Title, Plan = c.Plan })],
+        });
+        // Each passage of a written story answers a direction (empty when none was given), which carries its chapter.
+        var d1 = await AddAsync(chats, written.Id, null, ChatRole.User, "", new StoryTurn { Chapter = 0 });
+        var p1 = await AddAsync(chats, written.Id, d1.Id, ChatRole.Assistant, Content.WrittenFirst);
+        var d2 = await AddAsync(chats, written.Id, p1.Id, ChatRole.User, Content.WrittenDirection, new StoryTurn { Chapter = 0 });
+        var p2 = await AddAsync(chats, written.Id, d2.Id, ChatRole.Assistant, Content.WrittenSecond);
+        var d3 = await AddAsync(chats, written.Id, p2.Id, ChatRole.User, "", new StoryTurn { Chapter = 1 });
+        var p3 = await AddAsync(chats, written.Id, d3.Id, ChatRole.Assistant, Content.WrittenThird);
+        await chats.SetActiveLeafAsync(written.Id, p3.Id);
+    }
+
+    private static readonly string ModelName = Path.GetFileNameWithoutExtension(Content.ChatModel);
+
+    private static async Task<ChatMessage> AddAsync(IChatStore chats, long conversation, long? parent, ChatRole role, string text, StoryTurn? turn = null) =>
+        await chats.AddMessageAsync(new ChatMessage
+        {
+            ConversationId = conversation, ParentId = parent, Role = role, Content = text, ExtraJson = turn?.ToJson(),
+            ModelName = role == ChatRole.Assistant ? ModelName : null,
+        });
+
+    /// <summary>Keeps one of the assets' pictures as a reply's or passage's picture, with the rest of its story details.</summary>
+    private static async Task IllustrateAsync(IChatStore chats, IPictureStore pictures, string assets, string name, long messageId, StoryTurn turn)
+    {
+        var p = Load(Path.Combine(assets, "pictures", name));
+        p.OwnerKind = PictureOwners.Message;
+        p.OwnerId = messageId;
+        var kept = await pictures.AddAsync(p);
+        turn.Picture = kept.Id;
+        await chats.SetMessageExtraAsync(messageId, turn.ToJson());
+    }
+
+    /// <summary>A picture as the chat box makes it: a plain JPEG at most 1,024 px on its longest side.</summary>
+    private static byte[] ChatJpeg(string webp)
+    {
+        var frame = BitmapDecoder.Create(new MemoryStream(File.ReadAllBytes(webp)), BitmapCreateOptions.None, BitmapCacheOption.OnLoad).Frames[0];
+        var (w, h) = AttachedPictures.SizeFor(frame.PixelWidth, frame.PixelHeight);
+        var scaled = new TransformedBitmap(frame, new System.Windows.Media.ScaleTransform((double)w / frame.PixelWidth, (double)h / frame.PixelHeight));
+        var jpeg = new JpegBitmapEncoder { QualityLevel = AttachedPictures.Quality };
+        jpeg.Frames.Add(BitmapFrame.Create(scaled));
+        using var ms = new MemoryStream();
+        jpeg.Save(ms);
+        var plain = AttachedPictures.Plain(ms.ToArray());
+        if (AttachedPictures.Problem(plain) is { } problem) throw new InvalidOperationException("The chat picture is refused: " + problem);
+        return plain;
+    }
+
+    /// <summary>The highest ids before the chat pages' content was added.</summary>
+    private static async Task<(long Conversation, long Message)> FirstNewAsync(IServiceProvider services)
+    {
+        await using var db = await services.GetRequiredService<IDbContextFactory<DogDbContext>>().CreateDbContextAsync();
+        return (await db.Conversations.MaxAsync(x => (long?)x.Id) ?? 0, await db.Messages.MaxAsync(x => (long?)x.Id) ?? 0);
     }
 
     /// <summary>
     /// Every date today between 09:00 and 09:30, a minute apart in the order things were made: lists then show the same
     /// times on every run on every day, so the pictures do not change from one run to the next.
     /// </summary>
-    private static async Task SettleTimesAsync(IServiceProvider services)
+    /// <remarks>
+    /// Content added later (<paramref name="first"/>: the highest conversation and message ids before it) gets its minutes
+    /// after everything that was there before, so adding to the made-up folder never moves a time already in a picture.
+    /// </remarks>
+    private static async Task SettleTimesAsync(IServiceProvider services, (long Conversation, long Message) first)
     {
         var start = DateTime.Today.AddHours(9).ToUniversalTime();
         await using var db = await services.GetRequiredService<IDbContextFactory<DogDbContext>>().CreateDbContextAsync();
@@ -130,20 +310,37 @@ static class Fill
         foreach (var x in await db.Characters.OrderBy(x => x.Id).ToListAsync()) x.CreatedAt = x.UpdatedAt = Next();
         foreach (var x in await db.Personas.OrderBy(x => x.Id).ToListAsync()) x.CreatedAt = Next();
         foreach (var x in await db.ChatFolders.OrderBy(x => x.Id).ToListAsync()) x.CreatedAt = Next();
-        foreach (var c in await db.Conversations.OrderBy(x => x.Id).ToListAsync())
+        async Task SettleAsync(IEnumerable<Conversation> conversations, Func<ChatMessage, bool> which)
         {
-            c.CreatedAt = Next();
-            foreach (var m in await db.Messages.Where(m => m.ConversationId == c.Id).OrderBy(m => m.Id).ToListAsync()) m.CreatedAt = Next();
-            c.UpdatedAt = start.AddMinutes(minute - 1);
+            foreach (var c in conversations)
+            {
+                c.CreatedAt = Next();
+                foreach (var m in await db.Messages.Where(m => m.ConversationId == c.Id).OrderBy(m => m.Id).ToListAsync())
+                    if (which(m)) m.CreatedAt = Next();
+                c.UpdatedAt = start.AddMinutes(minute - 1);
+            }
         }
+        var conversations = await db.Conversations.OrderBy(x => x.Id).ToListAsync();
+        await SettleAsync(conversations.Where(c => c.Id <= first.Conversation), m => m.Id <= first.Message);
         foreach (var x in await db.ModelRecords.ToListAsync()) x.AddedAt = start;
-        foreach (var x in await db.Pictures.OrderBy(x => x.Id).ToListAsync()) x.CreatedAt = Next();
+        var pictures = await db.Pictures.OrderBy(x => x.Id).ToListAsync();
+        foreach (var x in pictures.Where(p => p.OwnerKind != PictureOwners.Message)) x.CreatedAt = Next();
         foreach (var x in await db.Clips.OrderBy(x => x.Id).ToListAsync()) x.CreatedAt = Next();
+
+        // The chat pages' content (M23 step 2).
+        foreach (var m in await db.Messages.Where(m => m.Id > first.Message && m.ConversationId <= first.Conversation).OrderBy(m => m.Id).ToListAsync())
+            m.CreatedAt = Next();
+        await SettleAsync(conversations.Where(c => c.Id > first.Conversation), _ => true);
+        foreach (var x in pictures.Where(p => p.OwnerKind == PictureOwners.Message)) x.CreatedAt = Next();
+        foreach (var x in await db.AttachedPictures.OrderBy(x => x.Id).ToListAsync()) x.CreatedAt = Next();
+        foreach (var x in await db.Collections.OrderBy(x => x.Id).ToListAsync()) x.CreatedAt = x.UpdatedAt = Next();
+        foreach (var x in await db.Documents.OrderBy(x => x.Id).ToListAsync()) x.AddedAt = Next();
         await db.SaveChangesAsync();
     }
 
-    private static async Task AddTurnsAsync(IChatStore chats, long id, IEnumerable<(ChatRole Role, string Text, long? Speaker)> turns)
+    private static async Task<List<long>> AddTurnsAsync(IChatStore chats, long id, IEnumerable<(ChatRole Role, string Text, long? Speaker)> turns)
     {
+        var ids = new List<long>();
         long? parent = null;
         foreach (var (role, text, speaker) in turns)
         {
@@ -153,8 +350,10 @@ static class Fill
                 ModelName = role == ChatRole.Assistant ? Path.GetFileNameWithoutExtension(Content.ChatModel) : null,
             });
             parent = m.Id;
+            ids.Add(m.Id);
         }
         await chats.SetActiveLeafAsync(id, parent);
+        return ids;
     }
 
     private static Picture? Picture(string assets, string name) =>

@@ -7,10 +7,12 @@ switch that on in the Models section, and then only to Hugging Face and GitHub t
 
 1. [Install and set up](install.md): from the download to your first reply.
 2. [Finding your way](finding-your-way.md): the parts of the window, the three looks, Ctrl+K, Search and Settings.
-3. [General chat](general-chat.md)
-4. [Characters and group chats](characters.md)
-5. [Stories](stories.md)
-6. [Documents](documents.md)
+3. [General chat](general-chat.md): questions, versions of a reply, folders, pictures in a question, assistants and
+   saved prompts.
+4. [Characters and group chats](characters.md): character cards, lore, personas, memory, pictures in a chat, group
+   chats.
+5. [Stories](stories.md): adventures with choices and a branch map, written stories along an outline.
+6. [Documents](documents.md): chats that answer from your own files, and cite them.
 7. [Images](images.md)
 8. [Video](video.md)
 9. [Voice](voice.md)
