@@ -71,8 +71,9 @@ When it is done, **Chat engine** shows where the program is and which build it i
 
    ![Get models › Recommended](img/install/recommended.png)
 
-3. **Downloads** at the top (1) shows how far it has got. You can use the rest of DOG.ai meanwhile. When the last
-   download finishes, DOG.ai goes offline again by itself.
+3. **Downloads** at the top (1) shows how far it has got. You can use the rest of DOG.ai meanwhile. DOG.ai goes
+   offline again by itself: when you leave the Models section, or, if a download is still running then, when the last
+   one finishes.
 
    ![The downloads list](img/install/downloading.png)
 

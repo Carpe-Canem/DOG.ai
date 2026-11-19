@@ -13,10 +13,10 @@ namespace DogAI.Tests;
 public class GuideTests
 {
     /// <summary>
-    /// Pages not written yet carry a <c>&lt;!-- stub --&gt;</c> line. Allowed until M23's last step, which sets this to
-    /// false: from then on every page is written.
+    /// A page not written yet carries a <c>&lt;!-- stub --&gt;</c> line. Since M23's last step every page is written, so
+    /// a stub fails; a new page is written in the step that adds it.
     /// </summary>
-    private const bool StubsAllowed = true;
+    private const bool StubsAllowed = false;
 
     private static readonly string Root = FindRoot();
     private static readonly string Guide = Path.Combine(Root, "docs", "guide");
@@ -107,8 +107,10 @@ public class GuideTests
             ? Directory.GetFiles(Path.Combine(Guide, "img"), "*.png", SearchOption.AllDirectories)
                 .Select(p => Path.GetRelativePath(Path.Combine(Guide, "img"), p).Replace('\\', '/')) : [];
         None(pictures.Where(p => !listed.Contains(p)), "pictures not in tools/guide-shots.json");
-        Assert.All(shots, s => Assert.Contains(s.Kind, new[] { "plain", "online", "live", "kept" }));
+        Assert.All(shots, s => Assert.Contains(s.Kind, new[] { "plain", "online", "live", "window", "kept" }));
         Assert.All(shots, s => Assert.Contains(s.Folder, new[] { "empty", "made-up", "none" }));
+        // The lock screen can only be taken on a folder that is locked.
+        Assert.All(shots.Where(s => s.Kind == "window"), s => Assert.True(s.Locked, $"{s.Name} is a window shot without a lock."));
     }
 
     [Fact]
@@ -171,7 +173,7 @@ public class GuideTests
         .Where(f => Path.GetFileName(f) != "README.md")
         .Select(f => new Page(Path.GetFileName(f), File.ReadAllText(f))).ToList();
 
-    private sealed record Shot(string Name, string Page, string Folder, string Kind, IReadOnlyList<string> Selectors);
+    private sealed record Shot(string Name, string Page, string Folder, string Kind, IReadOnlyList<string> Selectors, bool Locked);
 
     private static IReadOnlyList<Shot> Shots()
     {
@@ -182,12 +184,13 @@ public class GuideTests
             foreach (var key in new[] { "marks", "volatile" })
                 if (s.TryGetProperty(key, out var list)) selectors.AddRange(list.EnumerateArray().Select(e => e.GetString()!));
             if (s.TryGetProperty("waitFor", out var w)) selectors.Add(w.GetString()!);
-            if (s.TryGetProperty("steps", out var steps))
-                foreach (var step in steps.EnumerateArray())
-                    foreach (var key in new[] { "mouse", "osclick" })
-                        if (step.TryGetProperty(key, out var sel)) selectors.Add(sel.GetString()!);
+            foreach (var part in new[] { "steps", "after" })
+                if (s.TryGetProperty(part, out var steps))
+                    foreach (var step in steps.EnumerateArray())
+                        foreach (var key in new[] { "mouse", "osclick" })
+                            if (step.TryGetProperty(key, out var sel)) selectors.Add(sel.GetString()!);
             return new Shot(s.GetProperty("name").GetString()!, s.GetProperty("page").GetString()!,
-                s.GetProperty("folder").GetString()!, s.GetProperty("kind").GetString()!, selectors);
+                s.GetProperty("folder").GetString()!, s.GetProperty("kind").GetString()!, selectors, s.TryGetProperty("lock", out _));
         }).ToList();
     }
 

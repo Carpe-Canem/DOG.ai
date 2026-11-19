@@ -31,8 +31,15 @@
 # A picture is written only when its pixels changed, leaving out the parts the list calls volatile (free memory, free
 # disk space: they differ on every run). So making the pictures twice rewrites nothing.
 #
-# "window" shots (the lock screen, Windows' own dialogs) and the shots of the first start's downloads are taken by hand
-# and kept; the list marks them "kind": "kept" so this script leaves them alone and the test still finds them listed.
+# A shot's "lock" is a made-up password: its run's folder is locked with it before DOG.ai first starts (lock.json written
+# into the filled folder, as Settings > Privacy leaves it before its restart), the lock screen is driven to encrypt and
+# unlock, and the plain shots of that run show a locked DOG.ai. A shot of kind "window" in such a run is the lock screen
+# itself, taken from the screen (PrintWindow) at the next start and trimmed to the window Windows shows.
+# A shot's "after" steps run once its picture is taken (to cancel what the shot started). "{home}" in a step's text is
+# -GuideHome; its "out" folder is emptied for every run (a shot's backup file goes there).
+#
+# Windows' own dialogs and the shots of the first start's downloads are taken by hand and kept; the list marks them
+# "kind": "kept" so this script leaves them alone and the test still finds them listed.
 param(
     [string[]]$Only = @(),
     [string]$Page,
@@ -122,7 +129,8 @@ function Prepare-Home($folder, $links = @()) {
     # Only the program: publish\win-x64 also keeps files of older publishes.
     robocopy "$publish\app" "$GuideHome\app" /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
     Copy-Item "$publish\DOG.ai.exe", "$publish\portable.txt" $GuideHome -Force
-    foreach ($sub in 'data', 'models') { if (Test-Path "$GuideHome\$sub") { Remove-Item "$GuideHome\$sub" -Recurse -Force } }
+    foreach ($sub in 'data', 'models', 'out') { if (Test-Path "$GuideHome\$sub") { Remove-Item "$GuideHome\$sub" -Recurse -Force } }
+    New-Item -ItemType Directory -Force "$GuideHome\out" | Out-Null
     if ($folder -eq 'empty') { return }
     New-Item -ItemType Directory -Force "$GuideHome\data\engine", "$GuideHome\models" | Out-Null
     foreach ($m in $list.models) { Link-Model $m.name $m.from }
@@ -140,6 +148,21 @@ function Prepare-Home($folder, $links = @()) {
     if ($LASTEXITCODE) { throw "GuideData could not fill $GuideHome" }
 }
 
+# Locks the filled folder as Settings > Privacy leaves it before its restart: lock.json beside the still plain database.
+# Written by a pwsh of its own, so this one never holds DogAI.Core.dll open.
+function Lock-Home($password) {
+    $script = "Add-Type -Path '$publish\app\DogAI.Core.dll'; `$f = [DogAI.Core.Privacy.LockFile]::Create('$password').File; `$f.Skin = 'workbench'; `$f.Theme = 'dark'; [IO.File]::WriteAllText('$GuideHome\data\lock.json', `$f.ToJson())"
+    pwsh -NoProfile -Command $script
+    if ($LASTEXITCODE -or -not (Test-Path "$GuideHome\data\lock.json")) { throw "The guide folder could not be locked." }
+}
+
+# A step from the list as the walkthrough takes it, with {home} filled in.
+function Step-Of($s) {
+    $step = @{}
+    foreach ($p in $s.PSObject.Properties) { $step[$p.Name] = if ($p.Value -is [string]) { $p.Value.Replace('{home}', $GuideHome) } else { $p.Value } }
+    $step
+}
+
 if ($Prepare) { Prepare-Home $Prepare $Links; "Ready: $GuideHome ($Prepare). Run it with: pwsh tools/walkthrough.ps1 -Exe $GuideHome\app\DOG.ai.exe -Portable"; return }
 
 # --- The page script run before every picture -------------------------------------------------------------------------
@@ -147,6 +170,7 @@ if ($Prepare) { Prepare-Home $Prepare $Links; "Ready: $GuideHome ($Prepare). Run
 function Before-Shot($shot) {
     $name = ConvertTo-Json "$($shot.name)" -Compress
     $marks = ConvertTo-Json @($shot.marks | Where-Object { $_ }) -Compress
+    $beside = if ($shot.marksBeside) { 'true' } else { 'false' }
     $volatile = ConvertTo-Json @(@($list.volatile) + @($shot.volatile) | Where-Object { $_ }) -Compress
     @"
 (async () => {
@@ -171,7 +195,9 @@ function Before-Shot($shot) {
       'left:' + (r.left - 3) + 'px;top:' + (r.top - 3) + 'px;width:' + (r.width + 6) + 'px;height:' + (r.height + 6) + 'px';
     const n = document.createElement('div');
     n.textContent = String(i + 1);
-    const x = Math.max(2, Math.min(innerWidth - 24, r.left - 12)), y = Math.max(2, Math.min(innerHeight - 24, r.top - 12));
+    // The number sits on the ring's corner; "marksBeside" puts it left of the ring, for a control whose first
+    // letter or tick box is in that corner.
+    const x = Math.max(2, Math.min(innerWidth - 24, r.left - ($beside ? 30 : 12))), y = Math.max(2, Math.min(innerHeight - 24, $beside ? r.top + Math.min(r.height, 30) / 2 - 11 : r.top - 12));
     n.style.cssText = 'position:fixed;left:' + x + 'px;top:' + y + 'px;width:22px;height:22px;border-radius:11px;' +
       'background:#ff3d7f;color:#fff;font:700 13px/22px Segoe UI,sans-serif;text-align:center;box-shadow:0 0 0 2px #fff';
     layer.append(ring, n);
@@ -193,21 +219,30 @@ $work = Join-Path ([IO.Path]::GetTempPath()) ('dogai-guide-' + [Guid]::NewGuid()
 New-Item -ItemType Directory $work | Out-Null
 foreach ($v in 'DOGAI_MODELS_DIR', 'DOGAI_LLAMA_SERVER', 'DOGAI_SD_SERVER', 'DOGAI_DATA_DIR', 'DOGAI_TEST_CARD_MIB') { Remove-Item "Env:$v" -ErrorAction SilentlyContinue }
 $results = @{}
-$groups = $shots | Group-Object { "$($_.folder)|$($_.width)x$($_.height)|$(@($_.links) -join '+')|$(($_.env | ConvertTo-Json -Compress) ?? '')" }
+$groups = $shots | Group-Object { "$($_.folder)|$($_.width)x$($_.height)|$(@($_.links) -join '+')|$($_.lock)|$(($_.env | ConvertTo-Json -Compress) ?? '')" }
 $lastFolder = $null
 foreach ($group in $groups) {
-    $folder, $size, $linkNames = $group.Name -split '\|'
+    $folder, $size, $linkNames, $lockWith = ($group.Name -split '\|')[0..3]
     $w, $h = $size -split 'x'
     $runEnv = $group.Group[0].env
+    $pageShots = @($group.Group | Where-Object kind -ne 'window')
+    $windowShots = @($group.Group | Where-Object kind -eq 'window')
     if ($folder -ne 'none') { Prepare-Home $folder @($linkNames -split '\+' | Where-Object { $_ }); $lastFolder = $folder }
     if ($runEnv) { foreach ($p in $runEnv.PSObject.Properties) { Set-Item "Env:$($p.Name)" "$($p.Value)" } }
+    # A locked run: the lock screen asks for the new password, encrypts, and (on a PC with Windows Hello) offers Hello.
+    $lockSteps = @()
+    if ($lockWith) {
+        if ($folder -eq 'none') { throw "A locked shot needs a folder of its own." }
+        Lock-Home $lockWith
+        $lockSteps = @(@{ set = @{ Password = $lockWith } }, @{ click = 'Unlock' }, @{ wait = 3000 }, @{ click = 'NotNow' }, @{ gone = 120 })
+    }
     $steps = [Collections.Generic.List[object]]::new()
     $steps.Add(@{ wait = 3000 })
     # Opening DOG.ai loads the General default by itself: wait until the status bar says it is in.
     if ($folder -eq 'made-up') {
         $steps.Add(@{ eval = "(async () => { for (let i = 0; i < 120; i++) { const t = document.querySelector('.status')?.innerText ?? ''; if (t && !/Loading|No model/.test(t)) return t; await new Promise(r => setTimeout(r, 500)); } return 'not loaded'; })()" })
     }
-    foreach ($shot in $group.Group) {
+    foreach ($shot in $pageShots) {
         # Whatever the shot before left open (Ctrl+K, a dialog, a menu) closes first.
         $steps.Add(@{ eval = "(document.querySelector('#jump-input') ?? document.querySelector('.modal-back input, .modal-back button'))?.focus(); 'ok'" })
         $steps.Add(@{ press = 'esc' })
@@ -223,11 +258,7 @@ foreach ($group in $groups) {
             $sel = $shot.waitFor | ConvertTo-Json
             $steps.Add(@{ eval = "(async () => { for (let i = 0; i < 120; i++) { if (document.querySelector($sel)) return 'ready'; await new Promise(r => setTimeout(r, 250)); } return 'GUIDE-TIMEOUT ' + $sel; })()" })
         }
-        foreach ($s in $shot.steps) {
-            $step = @{}
-            foreach ($p in $s.PSObject.Properties) { $step[$p.Name] = $p.Value }
-            $steps.Add($step)
-        }
+        foreach ($s in $shot.steps) { $steps.Add((Step-Of $s)) }
         $steps.Add(@{ wait = [int]($shot.settle ?? 500) })
         # Nothing hovered: the real cursor, if it is over the window, highlighted whatever it was on (a picture's frame, a
         # tab), and a picture came out different from one run to the next.
@@ -238,6 +269,7 @@ foreach ($group in $groups) {
         $steps.Add(@{ eval = (Before-Shot $shot) })
         $steps.Add(@{ shot = $shot.name })
         $steps.Add(@{ eval = "document.getElementById('guide-marks')?.remove(); document.getElementById('guide-nohover')?.remove(); 'unmarked'" })
+        foreach ($s in $shot.after) { $steps.Add((Step-Of $s)) }
         # A shot that changes the look puts back the one a new folder starts with (Workbench, Match Windows), or every shot after it in the
         # same run would show the look it left.
         if (($shot.steps | ConvertTo-Json -Depth 5 -Compress) -match 'name=(skin|theme)') {
@@ -249,9 +281,14 @@ foreach ($group in $groups) {
             $steps.Add(@{ wait = 1200 })
         }
     }
-    $log = & (Join-Path $PSScriptRoot 'walkthrough.ps1') -Exe "$GuideHome\app\DOG.ai.exe" -Portable -OutDir $work -Width $w -Height $h -Port $Port -Steps $steps.ToArray() *>&1 | Out-String -Width 100000
+    $log = & (Join-Path $PSScriptRoot 'walkthrough.ps1') -Exe "$GuideHome\app\DOG.ai.exe" -Portable -OutDir $work -Width $w -Height $h -Port $Port -LockSteps $lockSteps -Steps $steps.ToArray() *>&1 | Out-String -Width 100000
+    # The lock screen itself: DOG.ai started again on the now encrypted folder and left at its lock screen.
+    if ($windowShots) {
+        $atLock = @(@{ wait = 1500 }) + @($windowShots | ForEach-Object { @{ shot = $_.name } })
+        $log += & (Join-Path $PSScriptRoot 'walkthrough.ps1') -Exe "$GuideHome\app\DOG.ai.exe" -Portable -OutDir $work -Port $Port -LockSteps $atLock -LockOnly *>&1 | Out-String -Width 100000
+    }
     if ($runEnv) { foreach ($p in $runEnv.PSObject.Properties) { Remove-Item "Env:$($p.Name)" -ErrorAction SilentlyContinue } }
-    $log -split "`r?`n" | Where-Object { $_ -match 'GUIDE-TIMEOUT|GUIDE-STILL-OPEN|EVAL ERROR|TARGET NOT FOUND|not loaded' } | ForEach-Object { "  $_" }
+    $log -split "`r?`n" | Where-Object { $_ -match 'GUIDE-TIMEOUT|GUIDE-STILL-OPEN|EVAL ERROR|TARGET NOT FOUND|not loaded|DIALOG NOT FOUND|LOCK SCREEN|LOCK BUTTON' } | ForEach-Object { "  $_" }
     # The page script prints one line per shot, naming it: a shot whose script failed gets no result, never another's.
     foreach ($line in $log -split "`r?`n") {
         if ($line.Trim() -match '^=> GUIDE (\S+) (\{.*\})$') { $results[$Matches[1]] = $Matches[2] | ConvertFrom-Json }
@@ -283,12 +320,40 @@ function Same-Pixels($a, $b, $skip) {
     } finally { $x.Dispose(); $y.Dispose() }
 }
 
+# A window as PrintWindow gives it has Windows' unseen resize border round it (black): cut to what is not black.
+function Trim-Window($file) {
+    $b = [Drawing.Bitmap]::new($file)
+    $rect = [Drawing.Rectangle]::new(0, 0, $b.Width, $b.Height)
+    $d = $b.LockBits($rect, 'ReadOnly', 'Format32bppArgb')
+    $px = [byte[]]::new($d.Stride * $b.Height)
+    [Runtime.InteropServices.Marshal]::Copy($d.Scan0, $px, 0, $px.Length)
+    $b.UnlockBits($d)
+    # A column or row belongs to the border when nearly all of it is pure black (the title bar runs across the side
+    # borders, so "all of it" would keep them).
+    $cols = [int[]]::new($b.Width); $rows = [int[]]::new($b.Height)
+    for ($y = 0; $y -lt $b.Height; $y++) {
+        for ($x = 0; $x -lt $b.Width; $x++) {
+            $i = $y * $d.Stride + $x * 4
+            if ($px[$i + 3] -eq 0 -or ($px[$i] + $px[$i + 1] + $px[$i + 2]) -eq 0) { $cols[$x]++; $rows[$y]++ }
+        }
+    }
+    $l = 0; while ($l -lt $b.Width -and $cols[$l] -ge 0.8 * $b.Height) { $l++ }
+    $r = $b.Width - 1; while ($r -gt $l -and $cols[$r] -ge 0.8 * $b.Height) { $r-- }
+    $t = 0; while ($t -lt $b.Height -and $rows[$t] -ge 0.8 * $b.Width) { $t++ }
+    $bottom = $b.Height - 1; while ($bottom -gt $t -and $rows[$bottom] -ge 0.8 * $b.Width) { $bottom-- }
+    if ($r -le $l -or $bottom -le $t) { $b.Dispose(); return }
+    $cut = $b.Clone([Drawing.Rectangle]::new($l, $t, $r - $l + 1, $bottom - $t + 1), 'Format32bppArgb'); $b.Dispose()
+    $cut.Save($file, [Drawing.Imaging.ImageFormat]::Png); $cut.Dispose()
+}
+
 $failed = 0
 foreach ($shot in $shots) {
     $made = Join-Path $work "$($shot.name).png"
     $target = Join-Path $repo "docs\guide\img\$($shot.page)\$($shot.name).png"
     $r = $results[$shot.name]
     if (-not (Test-Path $made)) { "NOT MADE    $($shot.name)"; $failed++; continue }
+    # The lock screen has no page to ask: it shows no data, only its own words.
+    if ($shot.kind -eq 'window') { Trim-Window $made; $r = [pscustomobject]@{ found = @(); missing = @(); volatile = @() } }
     if (-not $r) { "NO CHECK    $($shot.name) (its page script did not answer)"; $failed++; continue }
     if ($r.found.Count) { "REFUSED     $($shot.name): the page shows $($r.found -join ', ')"; $failed++; continue }
     if ($r.missing.Count) { "NO MARK     $($shot.name): $($r.missing -join ', ') not on the page"; $failed++; continue }

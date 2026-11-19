@@ -66,8 +66,8 @@ On a smaller card a large model's versions say so (here a 70B model, again judge
 
 **Downloads** at the top of Models lists every download. Downloads carry on while you use the rest of DOG.ai, and
 each file is checked against its published checksum before it is used. **Pause** stops one for now, and
-**Cancel** stops it and deletes the part already downloaded; **Clear finished** tidies the list. The connection closes
-when the last download finishes.
+**Cancel** stops it and deletes the part already downloaded; **Clear finished** tidies the list. After you have left
+Models, the connection closes when the last download finishes.
 
 ## Chat models on this PC
 

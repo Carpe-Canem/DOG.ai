@@ -29,6 +29,9 @@ over the page, with the button at the top right, and closes with its × (1), Esc
 
 ![The side panel as a drawer in a narrow window](img/finding-your-way/narrow-drawer.png)
 
+Where the list holds the parts of a place, as in Models and Settings, a narrow window shows them as a row of tabs
+above the page. Chats, characters and stories are then opened with Ctrl+K.
+
 ## Jump anywhere: Ctrl+K
 
 Press **Ctrl+K** anywhere and type a few letters. DOG.ai lists the screens, characters, chats, stories, document
@@ -64,5 +67,10 @@ your Windows setting. Nothing else changes between them: the same places, button
 - **Workbench** (the one DOG.ai starts with): compact, with everything in view.
 - **Fireside:** warmer colours and a book-like typeface for reading chats and stories.
 - **Playhouse:** a home screen with a big button for each place, and a colour for each.
+
+The pictures in this guide are Workbench, and so are its "left" and "right". In Fireside and Playhouse the places are
+a bar across the top, with **Offline**, **Search** and **Settings** at its right end. In Fireside the model button, and
+the Models section's **Downloads** and **Go online**, sit under the screen's title. Neither look has a status bar: the
+model button names the model in memory.
 
 [Back to the contents](README.md)

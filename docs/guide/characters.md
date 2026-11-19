@@ -29,7 +29,7 @@ JSON** writes the card alone. **Delete** asks first, and says how many chats go 
 The card is in five parts (1):
 
 - **Basics:** the name, tags, and the picture. **Generate picture** (2) draws a portrait with the picture model (see
-  [Images](images.md)); **Change** takes a picture file, **Crop** chooses the part shown in lists and chats, **Animate…**
+  [Images](images.md)); **Change** (**Add picture** on a new card) takes a picture file, **Crop** chooses the part shown in lists and chats, **Animate…**
   makes a short clip of it (see [Video](video.md)).
 - **Personality and scenario:** **Description** (who the character is: the most important part), **Personality**
   and **Scenario** (where and when the chat takes place).

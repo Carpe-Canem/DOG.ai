@@ -34,9 +34,9 @@ empty, every clip is new; the same seed, sentence and settings make the same cli
 ![A clip being made](img/video/video-making.png)
 
 The bar (1) and the line beside the buttons (2) say how far it has come, and **Cancel** (3) stops it. Leaving the Video
-page stops it too. At Quick on a free graphics card the clip shows as it forms. When part of the card is in use by
-other programs, as here, DOG.ai keeps more of the video model in the PC's own memory instead, and nothing of the clip
-shows until it is done; the line says so.
+page stops it too. At Quick on a free graphics card the clip shows as it forms. When a good part of the card is
+in use by other programs, DOG.ai keeps more of the video model in the PC's own memory instead, and nothing of the clip
+shows until it is done; the line beside the buttons says so.
 
 While a clip is made the graphics card is used for nothing else: document search and speech recognition carry on on
 the processor, more slowly, and the line under the box says so.

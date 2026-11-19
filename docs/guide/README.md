@@ -20,8 +20,10 @@ switch that on in the Models section, and then only to Hugging Face and GitHub t
 9. [Voice](voice.md): talking instead of typing, hands-free chats, replies read aloud, and a voice for each character.
 10. [Models](models.md): getting chat, picture, video and voice models, how DOG.ai judges what fits this PC, the
     defaults, and the engines.
-11. [Privacy and backups](privacy-and-backups.md)
-12. [Settings, keys and when something goes wrong](settings-and-help.md)
+11. [Privacy and backups](privacy-and-backups.md): what stays on this PC, locking your data with a password, the
+    recovery key, Windows Hello, backing up, restoring and moving to another PC.
+12. [Settings, keys and when something goes wrong](settings-and-help.md): every setting, the keyboard keys, and what
+    to do about the common problems.
 
 The guide describes DOG.ai as it is in the same commit. Every picture in it was taken from the real app, with made-up
 characters and chats.
@@ -32,7 +34,7 @@ This part is for whoever changes DOG.ai.
 
 - **Every page starts with hidden lines.** `<!-- covers: … -->` names the app's addresses the page explains, and
   `<!-- sources: … -->` names the source files it describes (globs: `**` any folders, `*` part of a name, `{a,b}`
-  either). A page still to be written also has `<!-- stub -->`.
+  either). Every page is written: a page marked `<!-- stub -->` fails the test.
 - **Which pages to update:** `pwsh tools/guide-stale.ps1` lists every page whose source files changed since the page
   was last committed, and every picture that shows a screen whose page's sources changed since the picture was last
   committed (a picture's `address`, and its `shows` in the shot list, say which pages' screens it shows), with the
@@ -41,8 +43,11 @@ This part is for whoever changes DOG.ai.
   marks the page current.
 - **The pictures:** `pwsh tools/guide-shots.ps1 -Page <page>` (or `-Only <name>,<name>`) makes them from the list in
   `tools/guide-shots.json`, on a folder filled by `tools/GuideData` with made-up content. A picture is written only
-  when its pixels changed (`-Force` writes it anyway); `pwsh tools/guide-sheets.ps1` makes contact sheets to look at. Publish first (`dotnet publish src/DogAI.App -p:PublishProfile=win-x64`): the pictures are
-  taken from the published portable build.
+  when its pixels changed (`-Force` writes it anyway); `pwsh tools/guide-sheets.ps1` makes contact sheets to look at.
+  Publish first (`dotnet publish src/DogAI.App -p:PublishProfile=win-x64`): the pictures are taken from the published
+  portable build. `pwsh tools/guide-shots.ps1 -Online -Live` makes every picture again from an empty folder, the ones
+  that go online and the ones that need a model at work included. Only Windows' own windows and the first start's
+  downloads are taken by hand and kept.
 - **The test:** `GuideTests` fails when a screen or Settings category has no page, a screen file belongs to no page, a
   picture or link is missing, a picture is not in the shot list, an id in the shot list is in no `.razor` file, or the
   guide names a place in Models that does not exist.
