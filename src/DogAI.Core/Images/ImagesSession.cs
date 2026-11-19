@@ -394,6 +394,14 @@ public static class ImagesPanels
     /// <summary>The short note in the side panel of the Kept pictures tab (in place of the controls).</summary>
     public const string KeptAbout = "Kept inside DOG.ai, and locked with the rest when the lock is on. A picture leaves only through Save as a file.";
 
+    /// <summary>
+    /// The line under the boxes while a ticked LoRA's file is not found (Draw waits): the engine would refuse the whole
+    /// picture for it.
+    /// </summary>
+    public static string LorasGone(IReadOnlyList<string> names) => names.Count == 1
+        ? $"The ticked LoRA \"{names[0]}\" was not found in the LoRA folder. Untick it to draw."
+        : $"{names.Count} ticked LoRAs were not found in the LoRA folder ({string.Join(", ", names)}). Untick them to draw.";
+
     /// <summary>How a checkpoint is named in the filter and the facts: its file name without the folder or ".safetensors".</summary>
     public static string CheckpointName(string? path) =>
         string.IsNullOrWhiteSpace(path) ? "Unknown checkpoint" : System.IO.Path.GetFileNameWithoutExtension(path.Replace('\\', '/').Split('/')[^1]);

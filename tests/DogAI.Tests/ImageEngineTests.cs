@@ -731,3 +731,42 @@ public class ImageEngineUpdaterTests
         Assert.True(pictures.IsInstalled);
     }
 }
+
+public class LoraProblemTests
+{
+    [Fact]
+    public void A_LoRA_the_engine_would_refuse_is_named_before_anything_is_sent()
+    {
+        var folder = Directory.CreateTempSubdirectory("dogai-loras-").FullName;
+        try
+        {
+            File.WriteAllBytes(Path.Combine(folder, "MixedCase.safetensors"), [1]);
+            Directory.CreateDirectory(Path.Combine(folder, "styles"));
+            File.WriteAllBytes(Path.Combine(folder, "styles", "Ink.safetensors"), [1]);
+
+            Assert.Null(ImageServer.LoraProblem(folder, null));
+            Assert.Null(ImageServer.LoraProblem(folder, [new LoraUse("MixedCase.safetensors"), new LoraUse("styles/Ink.safetensors")]));
+
+            // Remembered under an old folder (a link inside the folder replaced by the folder itself).
+            var gone = ImageServer.LoraProblem(folder, [new LoraUse("shared/MixedCase.safetensors")]);
+            Assert.NotNull(gone);
+            Assert.Contains("\"MixedCase\"", gone);
+            Assert.Contains("shared/MixedCase.safetensors", gone);
+
+            // Windows would find it; the engine matches the name exactly.
+            Assert.NotNull(ImageServer.LoraProblem(folder, [new LoraUse("mixedcase.safetensors")]));
+            Assert.NotNull(ImageServer.LoraProblem(null, [new LoraUse("MixedCase.safetensors")]));
+        }
+        finally
+        {
+            Directory.Delete(folder, true);
+        }
+    }
+
+    [Fact]
+    public void The_Images_line_names_the_ticked_LoRAs_that_are_gone()
+    {
+        Assert.Equal("The ticked LoRA \"Ink\" was not found in the LoRA folder. Untick it to draw.", ImagesPanels.LorasGone(["Ink"]));
+        Assert.StartsWith("2 ticked LoRAs were not found in the LoRA folder (Ink, Pen).", ImagesPanels.LorasGone(["Ink", "Pen"]));
+    }
+}

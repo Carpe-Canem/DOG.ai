@@ -469,7 +469,15 @@ else
     /// <summary>Everything that stops a Draw, the empty prompt included.</summary>
     private IReadOnlyList<string> Problems =>
         _controls is null ? ["Nothing to draw with."]
-        : [.. (_seed.Problem is { } seed ? [seed] : Array.Empty<string>()).Concat(ImagesDraw.Problems(Session.Prompt, Session.Negative, _controls)).Distinct()];
+        : [.. (_seed.Problem is { } seed ? [seed] : Array.Empty<string>()).Concat(ImagesDraw.Problems(Session.Prompt, Session.Negative, _controls)).Concat(GoneLoras()).Distinct()];
+
+    /// <summary>A ticked LoRA whose file is not found stops a Draw: the engine would refuse the whole picture for it.</summary>
+    private IEnumerable<string> GoneLoras()
+    {
+        if (_controls is null) return [];
+        var gone = LoraRows(_controls).Where(r => r.On && r.Missing).Select(r => r.Name).ToList();
+        return gone.Count == 0 ? [] : [ImagesPanels.LorasGone(gone)];
+    }
 
     /// <summary>The problems worth saying under the boxes: not the empty prompt, which the empty box says by itself.</summary>
     private IReadOnlyList<string> FieldProblems => [.. Problems.Where(p => p != "The prompt is empty.")];
@@ -544,18 +552,21 @@ else
 
     private sealed record LoraRow(string Path, string Name, bool On, double Strength, bool Missing, ImageFile? File = null);
 
-    /// <summary>Every installed LoRA (ticked or not), then ticked ones whose file is gone.</summary>
+    /// <summary>
+    /// Ticked LoRAs whose file is gone first (they stop a Draw, and at the end of a long list they were missed), then
+    /// every installed LoRA, ticked or not.
+    /// </summary>
     private IEnumerable<LoraRow> LoraRows(ImagesControls controls)
     {
         var installed = Files(ImageFileKind.Lora).ToList();
+        foreach (var gone in controls.Loras.Where(l => !installed.Any(f => string.Equals(ImageModelCatalog.Normalise(f.RelativePath), l.Path, StringComparison.OrdinalIgnoreCase))))
+            yield return new LoraRow(gone.Path, System.IO.Path.GetFileNameWithoutExtension(gone.Path), true, gone.Strength, true);
         foreach (var file in installed)
         {
             var path = ImageModelCatalog.Normalise(file.RelativePath);
             var use = controls.Loras.FirstOrDefault(l => string.Equals(l.Path, path, StringComparison.OrdinalIgnoreCase));
             yield return new LoraRow(path, file.Name, use is not null, use?.Strength ?? 1.0, false, file);
         }
-        foreach (var gone in controls.Loras.Where(l => !installed.Any(f => string.Equals(ImageModelCatalog.Normalise(f.RelativePath), l.Path, StringComparison.OrdinalIgnoreCase))))
-            yield return new LoraRow(gone.Path, System.IO.Path.GetFileNameWithoutExtension(gone.Path), true, gone.Strength, true);
     }
 
     /// <summary>

@@ -164,6 +164,7 @@ public sealed class ImageServer : IImageEngine, IDisposable
             try
             {
                 var model = Model ?? throw new ImageEngineException("No picture model is loaded. Choose a checkpoint first.");
+                if (LoraProblem(model.LoraFolder, request.Loras) is { } lora) throw new ImageEngineException(lora);
                 api = await EnsureStartedLockedAsync(model, cancel.Token).ConfigureAwait(false);
             }
             finally
@@ -250,6 +251,30 @@ public sealed class ImageServer : IImageEngine, IDisposable
             throw new ImageEngineException("Only .safetensors VAE files can be used.");
         if (model.LoraFolder is { } folder && !Directory.Exists(folder))
             throw new ImageEngineException($"The LoRA folder was not found: {folder}");
+    }
+
+    /// <summary>
+    /// Why the engine would refuse these LoRAs, in words, or null. The engine takes a LoRA only by its path inside the
+    /// LoRA folder, written exactly as the file is named (letter case included); any other name makes it refuse the whole
+    /// picture with "invalid generation parameters". A LoRA ticked before its file moved (renamed, or a folder link
+    /// replaced) is still remembered under its old path, so it is named here instead. Public for tests.
+    /// </summary>
+    public static string? LoraProblem(string? folder, IReadOnlyList<LoraUse>? loras)
+    {
+        foreach (var lora in loras ?? [])
+        {
+            var name = Path.GetFileNameWithoutExtension(lora.Path.Replace('\\', '/').Split('/')[^1]);
+            var missing = $"The LoRA \"{name}\" was not found in the LoRA folder (DOG.ai remembers it as \"{lora.Path.Replace('\\', '/')}\"). " +
+                "Untick it (the list shows it as \"(not found)\"), or tick it again from the list if it moved.";
+            if (folder is null) return missing;
+            var full = Path.Combine(folder, lora.Path.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(full)) return missing;
+            // Windows finds the file whatever the letter case; the engine does not.
+            var file = Path.GetFileName(full);
+            var actual = new DirectoryInfo(Path.GetDirectoryName(full)!).EnumerateFiles(file).FirstOrDefault()?.Name;
+            if (!string.Equals(actual, file, StringComparison.Ordinal)) return missing;
+        }
+        return null;
     }
 
     /// <summary>The program's start arguments for <paramref name="model"/>. Public for tests.</summary>

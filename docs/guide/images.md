@@ -26,7 +26,8 @@ Every setting is in the side panel, each part folding open and shut:
   numbers start from the checkpoint's settings card in **Models › On this PC › Pictures**; what you change here is
   kept for this checkpoint, and **Back to the card's numbers** undoes it.
 - **LoRAs:** tick one to use it, at the strength beside it. Its trigger words show as buttons under it; click one to
-  put it into the prompt. They are never added by themselves.
+  put it into the prompt. They are never added by themselves. A ticked LoRA whose file has gone (renamed, moved or
+  deleted) shows at the top as **(not found)**, and Draw waits until you untick it.
 - **Size:** **Small** (faster) or **Normal**, then **Tall**, **Square** or **Wide**; or type a width and height
   (multiples of 8).
 - **Sampling:** sampler, scheduler, steps, guidance and clip skip.
