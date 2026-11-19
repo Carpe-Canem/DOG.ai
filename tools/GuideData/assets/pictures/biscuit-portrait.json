@@ -1,20 +1,20 @@
 {
-  "Id": 1,
+  "Id": 7,
   "OwnerKind": "images",
   "OwnerId": 0,
   "Image": null,
   "ImageWidth": 640,
   "ImageHeight": 960,
-  "ImageBytes": 101308,
+  "ImageBytes": 83288,
   "Preview": null,
   "Checkpoint": "illustrious_novaCartoonXL_v60.safetensors",
   "Vae": null,
   "Prediction": 0,
-  "Prompt": "anthro, golden retriever, male, smiling, open mouth, blue apron, flour, bakery, bread, shelves, warm lighting, upper body, looking at viewer, masterpiece, best quality, amazing quality, very aesthetic, absurdres",
-  "NegativePrompt": "worst quality, low quality, bad quality, lowres, bad anatomy, bad hands, jpeg artifacts, signature, watermark, text",
+  "Prompt": "anthro, golden retriever, male, mature male, broad shoulders, calm, neutral expression, closed mouth, white shirt, sleeves rolled up, blue apron, holding bread, bakery counter, shelves, warm lighting, cowboy shot, looking at viewer, masterpiece, best quality, amazing quality, very aesthetic, absurdres",
+  "NegativePrompt": "worst quality, low quality, bad quality, lowres, bad anatomy, bad hands, jpeg artifacts, signature, watermark, text, logo, emblem, female, open mouth, eyelashes, frown, angry",
   "Width": 640,
   "Height": 960,
-  "Seed": 1840555915,
+  "Seed": 3303,
   "Steps": 28,
   "Sampler": "euler",
   "Scheduler": null,
@@ -22,5 +22,5 @@
   "ClipSkip": 2,
   "Loras": [],
   "Hires": null,
-  "CreatedAt": "2026-11-18T18:09:30.1415813"
+  "CreatedAt": "2026-11-19T10:12:59.9845817"
 }

@@ -104,7 +104,7 @@ static class Content
 
     /// <summary>Biscuit's lore: facts the model is given only when a chat mentions them.</summary>
     /// <summary>Biscuit's Looks: the words of his portrait's prompt (assets\pictures\biscuit-portrait.json).</summary>
-    public const string BiscuitLooks = "anthro, golden retriever, male, blue apron";
+    public const string BiscuitLooks = "anthro, golden retriever, male, mature male, broad shoulders, white shirt, sleeves rolled up, blue apron";
 
     public static readonly (string Name, string[] Keys, string Text)[] BiscuitLore =
     [
